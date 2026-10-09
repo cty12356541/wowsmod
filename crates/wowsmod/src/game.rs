@@ -395,10 +395,36 @@ pub fn find_blender() -> Vec<BlenderInfo> {
             }
         }
     }
+    let exe_name = if cfg!(windows) { "blender.exe" } else { "blender" };
+    // 显式指定
+    if let Some(p) = std::env::var_os("WOWSMOD_BLENDER") {
+        let p = PathBuf::from(p);
+        let exe = if p.is_dir() { p.join(exe_name) } else { p };
+        push(exe, String::new(), "环境变量 WOWSMOD_BLENDER".into());
+    }
     if let Some(path) = std::env::var_os("PATH") {
         for d in std::env::split_paths(&path) {
-            let exe = d.join(if cfg!(windows) { "blender.exe" } else { "blender" });
-            push(exe, String::new(), "PATH".into());
+            push(d.join(exe_name), String::new(), "PATH".into());
+        }
+    }
+    // 便携版: wowsmod.exe 所在目录及其上 4 级祖先目录下的 blender*/ 与 tools/blender*/
+    // (例如 D:\WoWSModding\tools\blender-5.2.2-windows-x64\blender.exe)
+    let mut bases: Vec<PathBuf> = Vec::new();
+    if let Ok(me) = std::env::current_exe() {
+        bases.extend(me.ancestors().skip(1).take(5).map(Path::to_path_buf));
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        bases.extend(cwd.ancestors().take(5).map(Path::to_path_buf));
+    }
+    for base in bases {
+        for sub in [base.clone(), base.join("tools")] {
+            if let Ok(rd) = std::fs::read_dir(&sub) {
+                for e in rd.flatten() {
+                    if e.file_name().to_string_lossy().to_ascii_lowercase().starts_with("blender") && e.path().is_dir() {
+                        push(e.path().join(exe_name), String::new(), format!("便携版 (在 {} 下找到)", sub.display()));
+                    }
+                }
+            }
         }
     }
     // 版本号补全: 从同目录下形如 "4.2" 的子目录推断
@@ -415,6 +441,11 @@ pub fn find_blender() -> Vec<BlenderInfo> {
                     vs.sort();
                     if let Some(v) = vs.pop() {
                         b.version = v;
+                    } else if let Some(n) = dir.file_name().map(|n| n.to_string_lossy().to_string()) {
+                        // blender-5.2.2-windows-x64 → 5.2.2
+                        if let Some(v) = n.split('-').find(|x| x.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false)) {
+                            b.version = format!("{v} (按目录名推断)");
+                        }
                     }
                 }
             }

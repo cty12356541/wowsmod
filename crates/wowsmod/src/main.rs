@@ -57,8 +57,14 @@ enum Cmd {
     /// 解包: 纯 Rust 读取 pkg(含莱服 Oodle) / extract files
     Extract {
         /// 一个或多个 glob / 关键字
-        #[arg(required = true)]
+        #[arg(required_unless_present_any = ["ship", "list"])]
         patterns: Vec<String>,
+        /// 从文本文件读取精确的游戏内路径(每行一个; 空行与 # 开头的行忽略)
+        #[arg(long)]
+        list: Option<PathBuf>,
+        /// 解包整条船(船体 + 炮塔等全部模型目录 + 对应贴图); 值为 find --ship 给出的键, 如 PFSB510
+        #[arg(long)]
+        ship: Option<String>,
         /// 输出目录(保持游戏内相对路径)
         #[arg(short, long)]
         out: PathBuf,
@@ -153,7 +159,9 @@ fn run(cli: Cli) -> Result<i32> {
     match &cli.cmd {
         Cmd::Doctor => cmd_doctor(&cli),
         Cmd::Find { pattern, ship, limit } => cmd_find(&cli, pattern, *ship, *limit),
-        Cmd::Extract { patterns, out, no_verify, dry_run, threads } => cmd_extract(&cli, patterns, out, *no_verify, *dry_run, *threads),
+        Cmd::Extract { patterns, list, ship, out, no_verify, dry_run, threads } => {
+            cmd_extract(&cli, patterns, list.as_deref(), ship.as_deref(), out, *no_verify, *dry_run, *threads)
+        }
         Cmd::Export { input, out, pairing, visual, assets_bin, lod, strict, keep_winding } => {
             cmd_export(&cli, input, out, *pairing, visual.as_deref(), assets_bin.as_deref(), lod, *strict, *keep_winding)
         }
@@ -365,56 +373,149 @@ fn ship_index(g: &game::GameInstall, ix: &GameIndex) -> (HashMap<String, String>
     (names, mo_path)
 }
 
+
+/// 一条船只检索结果: GameParams 舰船(若有) + 其全部模型目录 + 文件集合
+struct ShipHit {
+    /// 用于 `extract --ship` 的唯一键: 参数代号(PFSB510)或模型目录代号(FSB026)
+    key: String,
+    param: Option<wowsmod_formats::gameparams::ShipParam>,
+    localized: Option<String>,
+    model_dirs: Vec<String>,
+    files: Vec<String>,
+    bytes: u64,
+}
+
+impl ShipHit {
+    fn to_json(&self) -> Value {
+        json!({
+            "key": self.key, "param": self.param, "localized_name": self.localized,
+            "model_dirs": self.model_dirs, "file_count": self.files.len(), "bytes": self.bytes,
+            "geometry_files": self.files.iter().filter(|e| e.ends_with(".geometry")).count(),
+            "extract": format!("wowsmod extract --ship {} -o <目录>", self.key),
+        })
+    }
+}
+
+/// 一组模型目录对应的文件: 目录下全部文件 + 同级 textures/ 下以该模型代号开头的贴图
+/// (例如 FSB025_Bourgogne_1945 → battleship/textures/FSB025_*)。
+fn ship_file_set(ix: &GameIndex, dirs: &[String]) -> (Vec<String>, u64) {
+    let mut prefixes: Vec<String> = Vec::new();
+    for d in dirs {
+        prefixes.push(format!("{}/", d.to_lowercase()));
+        if let Some((parent, stem)) = d.rsplit_once('/') {
+            let code = stem.split('_').next().unwrap_or(stem);
+            prefixes.push(format!("{}/textures/{}_", parent.to_lowercase(), code.to_lowercase()));
+        }
+    }
+    let mut files = Vec::new();
+    let mut bytes = 0u64;
+    for e in &ix.entries {
+        let l = e.path.to_lowercase();
+        if prefixes.iter().any(|p| l.starts_with(p)) {
+            files.push(e.path.clone());
+            bytes += e.info.unpacked_size as u64;
+        }
+    }
+    files.sort();
+    (files, bytes)
+}
+
+/// 船只检索: GameParams(参数代号/参数名/本地化名/模型目录名) + 无参数的模型目录兜底。
+fn search_ships(g: &game::GameInstall, ix: &GameIndex, reader: &PkgReader, query: &str) -> Result<(Vec<ShipHit>, Option<String>, Option<String>)> {
+    let (names, mo) = ship_index(g, ix);
+    let q = query.trim().to_lowercase();
+    let mut hits: Vec<ShipHit> = Vec::new();
+    let mut covered_dirs: std::collections::HashSet<String> = Default::default();
+    let mut gp_err = None;
+    let ships = match ix.get("content/GameParams_py3.data") {
+        Some(e) => reader
+            .read(e)
+            .map_err(|x| anyhow!("{x}"))
+            .and_then(|raw| wowsmod_formats::gameparams::ships_from_raw(&raw).map_err(|x| anyhow!("{x}"))),
+        None => Err(anyhow!("索引中没有 content/GameParams_py3.data")),
+    };
+    let ships = match ships {
+        Ok(s) => s,
+        Err(e) => {
+            gp_err = Some(e.to_string());
+            Vec::new()
+        }
+    };
+    let exact = ships.iter().any(|s| s.index.to_lowercase() == q || s.name.to_lowercase() == q);
+    for s in &ships {
+        for d in s.model_dirs() {
+            if s.hull_models.iter().any(|m| m.starts_with(&format!("{d}/"))) {
+                covered_dirs.insert(d.to_lowercase());
+            }
+        }
+        let local = names.get(s.index.trim_start_matches('P')).cloned();
+        let hull_dirs: Vec<String> = s.hull_models.iter().filter_map(|m| m.rsplit_once('/').map(|x| x.0.to_string())).collect();
+        let matched = if exact {
+            s.index.to_lowercase() == q || s.name.to_lowercase() == q
+        } else {
+            s.index.to_lowercase().contains(&q)
+                || s.name.to_lowercase().contains(&q)
+                || local.as_deref().map(|n| n.to_lowercase().contains(&q)).unwrap_or(false)
+                || hull_dirs.iter().any(|d| d.rsplit('/').next().unwrap_or("").to_lowercase().contains(&q))
+        };
+        if matched {
+            let dirs = s.model_dirs();
+            let (files, bytes) = ship_file_set(ix, &dirs);
+            hits.push(ShipHit { key: s.index.clone(), param: Some(s.clone()), localized: local, model_dirs: dirs, files, bytes });
+        }
+    }
+    if !exact {
+        // 兜底: 没有对应 GameParams 船体的船只模型目录 content/gameplay/<nation>/ship/<class>/<CODE>_<Name>
+        let mut dirs: std::collections::BTreeMap<String, String> = Default::default();
+        for e in &ix.entries {
+            let parts: Vec<&str> = e.path.split('/').collect();
+            if parts.len() > 6 && parts[0] == "content" && parts[1] == "gameplay" && parts[3] == "ship" && parts[5] != "textures" {
+                let d = parts[..6].join("/");
+                if !covered_dirs.contains(&d.to_lowercase()) {
+                    let code = parts[5].split('_').next().unwrap_or(parts[5]).to_string();
+                    dirs.entry(d).or_insert(code);
+                }
+            }
+        }
+        for (d, code) in dirs {
+            let stem = d.rsplit('/').next().unwrap_or("").to_lowercase();
+            if stem.contains(&q) || code.to_lowercase() == q {
+                let (files, bytes) = ship_file_set(ix, std::slice::from_ref(&d));
+                hits.push(ShipHit { key: code, param: None, localized: None, model_dirs: vec![d], files, bytes });
+            }
+        }
+    }
+    Ok((hits, mo, gp_err))
+}
+
 fn cmd_find(cli: &Cli, pattern: &str, ship: bool, limit: usize) -> Result<i32> {
     let g = require_game(cli)?;
     let ix = load_index(&g)?;
     if ship {
-        let (names, mo) = ship_index(&g, &ix);
-        let q = pattern.to_lowercase();
-        // 船只目录: content/gameplay/<nation>/ship/<class>/<CODE>_<Name>/
-        let mut dirs: HashMap<String, std::collections::BTreeSet<String>> = HashMap::new();
-        for e in &ix.entries {
-            let parts: Vec<&str> = e.path.split('/').collect();
-            if parts.len() > 5 && parts[0] == "content" && parts[1] == "gameplay" && parts[3] == "ship" {
-                let d = parts[5];
-                if let Some((code, _)) = d.split_once('_') {
-                    if code.len() >= 6 && code.chars().take(3).all(|c| c.is_ascii_uppercase()) {
-                        dirs.entry(code.to_string()).or_default().insert(parts[..6].join("/"));
-                    }
-                }
-            }
-        }
-        let mut codes: Vec<String> = dirs.keys().cloned().collect();
-        codes.sort();
-        let mut hits = Vec::new();
-        for code in codes {
-            let local = names.get(&code).cloned();
-            let ds = &dirs[&code];
-            let matched = code.to_lowercase() == q
-                || code.to_lowercase().contains(&q)
-                || local.as_deref().map(|n| n.to_lowercase().contains(&q)).unwrap_or(false)
-                || ds.iter().any(|d| d.rsplit('/').next().unwrap_or("").to_lowercase().contains(&q));
-            if matched {
-                let files: Vec<&Entry> = ix.entries.iter().filter(|e| e.path.contains(&code)).collect();
-                let bytes: u64 = files.iter().map(|e| e.info.unpacked_size as u64).sum();
-                let geoms = files.iter().filter(|e| e.path.ends_with(".geometry")).count();
-                hits.push(json!({"code": code, "localized_name": local, "dirs": ds, "files": files.len(), "geometry_files": geoms, "bytes": bytes,
-                    "extract_glob": format!("*{code}*")}));
-            }
-        }
-        let report = json!({"ok": true, "query": pattern, "mo": mo, "ships": hits});
+        let reader = PkgReader::new(&g.res_packages);
+        let (hits, mo, gp_err) = search_ships(&g, &ix, &reader, pattern)?;
+        let list: Vec<Value> = hits.iter().map(|h| h.to_json()).collect();
+        let report = json!({"ok": true, "query": pattern, "mo": mo, "gameparams_error": gp_err, "ships": list});
         if cli.json {
             emit(cli, &report);
         } else {
+            if let Some(e) = &gp_err {
+                eprintln!("⚠ GameParams 解析失败, 只按模型目录名检索: {e}");
+            }
             if hits.is_empty() {
-                println!("没有匹配 \"{pattern}\" 的船只。可以试试代号(如 FSB510)、英文名(Bourgogne)或俄文名。");
+                println!("没有匹配 \"{pattern}\" 的船只。可以试试参数代号(PFSB510)、模型代号(FSB025)、英文名(Bourgogne)或俄文名(Бургундия)。");
             }
             for h in &hits {
-                println!("{}  {}  ({} 个文件, 其中 geometry {}, 共 {})", h["code"].as_str().unwrap(), h["localized_name"].as_str().unwrap_or("(无本地化名)"), h["files"], h["geometry_files"], human_size(h["bytes"].as_u64().unwrap_or(0)));
-                for d in h["dirs"].as_array().unwrap() {
-                    println!("    {}", d.as_str().unwrap());
+                println!(
+                    "{}  {}  {}",
+                    h.param.as_ref().map(|p| format!("{} ({}, {} 级 {} {})", p.name, p.index, p.level, p.nation, p.species)).unwrap_or_else(|| format!("模型目录 {}", h.key)),
+                    h.localized.as_deref().unwrap_or("(无本地化名)"),
+                    format!("[{} 个文件, geometry {}, 共 {}]", h.files.len(), h.files.iter().filter(|e| e.ends_with(".geometry")).count(), human_size(h.bytes)),
+                );
+                for d in &h.model_dirs {
+                    println!("    {d}");
                 }
-                println!("    解包: wowsmod extract \"{}\" -o <目录>", h["extract_glob"].as_str().unwrap());
+                println!("    解包整船: wowsmod extract --ship {} -o <目录>", h.key);
             }
         }
         return Ok(if hits.is_empty() { 3 } else { 0 });
@@ -454,11 +555,57 @@ fn safe_join(base: &Path, vpath: &str) -> Result<PathBuf> {
     Ok(p)
 }
 
-fn cmd_extract(cli: &Cli, patterns: &[String], out: &Path, no_verify: bool, dry_run: bool, threads: Option<usize>) -> Result<i32> {
+fn cmd_extract(cli: &Cli, patterns: &[String], list: Option<&Path>, ship: Option<&str>, out: &Path, no_verify: bool, dry_run: bool, threads: Option<usize>) -> Result<i32> {
     let g = require_game(cli)?;
     let ix = load_index(&g)?;
     let mut sel: Vec<&Entry> = Vec::new();
     let mut seen = std::collections::HashSet::new();
+    if let Some(lp) = list {
+        let text = std::fs::read_to_string(lp).with_context(|| format!("读取列表 {}", lp.display()))?;
+        let mut missing = Vec::new();
+        for line in text.lines().map(|l| l.trim().trim_start_matches('\u{feff}')).filter(|l| !l.is_empty() && !l.starts_with('#')) {
+            let vp = line.replace('\\', "/");
+            match ix.get(&vp) {
+                Some(e) => {
+                    if seen.insert(e.path.as_str()) {
+                        sel.push(e);
+                    }
+                }
+                None => missing.push(vp),
+            }
+        }
+        if !missing.is_empty() {
+            bail!("列表中有 {} 个路径不在游戏索引中, 例如: {}", missing.len(), missing.iter().take(5).cloned().collect::<Vec<_>>().join(", "));
+        }
+    }
+    if let Some(q) = ship {
+        let reader = PkgReader::new(&g.res_packages);
+        let (hits, _, gp_err) = search_ships(&g, &ix, &reader, q)?;
+        let exact: Vec<&ShipHit> = hits.iter().filter(|h| h.key.eq_ignore_ascii_case(q)).collect();
+        let chosen = if exact.len() == 1 {
+            exact[0]
+        } else if hits.len() == 1 {
+            &hits[0]
+        } else if hits.is_empty() {
+            bail!("--ship {q}: 没有匹配的船只{}", gp_err.map(|e| format!(" (GameParams: {e})")).unwrap_or_default());
+        } else {
+            bail!(
+                "--ship {q} 匹配到 {} 条船, 请用唯一的键: {}",
+                hits.len(),
+                hits.iter().map(|h| format!("{} ({})", h.key, h.param.as_ref().map(|p| p.name.as_str()).unwrap_or("模型目录"))).collect::<Vec<_>>().join(", ")
+            );
+        };
+        if !cli.json {
+            eprintln!("整船: {} → {} 个模型目录, {} 个文件", chosen.key, chosen.model_dirs.len(), chosen.files.len());
+        }
+        for f in &chosen.files {
+            if let Some(e) = ix.get(f) {
+                if seen.insert(e.path.as_str()) {
+                    sel.push(e);
+                }
+            }
+        }
+    }
     for p in patterns {
         let hits = ix.search(p).map_err(|e| anyhow!("{e}"))?;
         if hits.is_empty() && !cli.json {

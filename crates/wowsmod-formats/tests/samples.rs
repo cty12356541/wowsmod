@@ -137,3 +137,19 @@ fn pkg_all_entries_crc() {
     eprintln!("{n} 个条目 crc 全部一致, 其中多块 Oodle {multi} 个");
     assert!(n > 0);
 }
+
+/// GameParams: 解析全部舰船, 勃艮第/黎塞留的参数与船体模型
+#[test]
+fn gameparams_ships() {
+    let Some(p) = sample_path("WOWSMOD_GAMEPARAMS", "testdata/GameParams_py3.data") else { return };
+    let ships = gameparams::ships_from_raw(&std::fs::read(p).unwrap()).unwrap();
+    assert!(ships.len() > 1000, "舰船数 {}", ships.len());
+    let b = ships.iter().find(|s| s.index == "PFSB510").expect("PFSB510");
+    assert_eq!(b.name, "PFSB510_Bourgogne");
+    assert_eq!(b.level, 10);
+    assert_eq!(b.hull_models, vec!["content/gameplay/france/ship/battleship/FSB025_Bourgogne_1945/FSB025_Bourgogne_1945.model".to_string()]);
+    assert!(b.other_models.iter().any(|m| m.contains("FGM049_380mm_45_Mle_1935")));
+    let r = ships.iter().find(|s| s.index == "PFSB108").expect("PFSB108");
+    assert!(r.hull_models[0].contains("FSB003_Richelieu_1944"));
+    eprintln!("{} 条舰船", ships.len());
+}
