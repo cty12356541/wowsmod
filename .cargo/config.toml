@@ -1,0 +1,6 @@
+# 静态链接 MSVC CRT: 生成的 wowsmod.exe 不依赖 vcruntime140.dll, 可在"只有一个 exe"的新电脑上运行
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.x86_64-pc-windows-gnu]
+rustflags = ["-C", "target-feature=+crt-static"]

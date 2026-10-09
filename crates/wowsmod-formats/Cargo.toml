@@ -1,0 +1,29 @@
+[package]
+name = "wowsmod-formats"
+description = "莱服《战舰世界》(Мир кораблей) 资源格式库: idx/pkg/Oodle/geometry/assets.bin/GLB"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = ["oozextract"]
+# Oodle 解压后端。oozextract 的许可证状态待定(见 docs/DESIGN.md 与 README 的"许可证"节),
+# 因此做成可关闭的 feature: `--no-default-features` 构建时 Oodle 条目会报"未编译 Oodle 后端"。
+# 替换点: src/compression/mod.rs 中的 trait OodleBackend。
+oozextract = ["dep:oozextract"]
+
+[dependencies]
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+oozextract = { version = "=0.5.5", optional = true }
+meshopt-rs = { version = "=0.1.2", features = ["experimental"] }
+half = "2"
+crc32fast = "1"
+miniz_oxide = "0.8"
+globset = "0.4"
+
+[dev-dependencies]
+
+sha2 = "0.10"
+crc32fast = "1"
