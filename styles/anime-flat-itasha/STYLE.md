@@ -1,5 +1,7 @@
-# 风格包: 二次元平涂痛涂(anime-flat-itasha)
-
+# styles.anime-flat-itasha: 风格包 二次元平涂痛涂
+上级: styles
+下级: 无
+---
 ## 适用
 角色主题涂装(theme 模式), 或复刻流萤类"痛船"。不适合写实/军武风。
 

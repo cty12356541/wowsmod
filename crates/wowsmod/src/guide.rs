@@ -3,78 +3,208 @@ use std::sync::Mutex;
 
 use serde_json::{json, Value};
 
-pub const TOPICS: &[(&str, &str, &str)] = &[
-    ("start", "从零开始 / 任务路由", include_str!("../../../docs/topics/start.md")),
-    ("project", "mod 项目与 SDK 导入", include_str!("../../../docs/topics/project.md")),
-    ("recolor", "换色 / 涂装 / 去迷彩", include_str!("../../../docs/topics/recolor.md")),
-    ("glow", "发光", include_str!("../../../docs/topics/glow.md")),
-    ("model", "几何编辑: 缩放/移动/删除/替换/新增", include_str!("../../../docs/topics/model.md")),
-    ("blender", "Blender 往返", include_str!("../../../docs/topics/blender.md")),
-    ("render", "出图看效果", include_str!("../../../docs/topics/render.md")),
-    ("design", "做外观 mod 的分层骨架(先判断模式)", include_str!("../../../docs/topics/design.md")),
-    ("design-ref", "层1-2 参考与拆解清单", include_str!("../../../docs/topics/design-ref.md")),
-    ("design-shape", "层3 大形/额外建模", include_str!("../../../docs/topics/design-shape.md")),
-    ("design-paint", "层4 图案贴图", include_str!("../../../docs/topics/design-paint.md")),
-    ("design-glow", "层5 发光与材质", include_str!("../../../docs/topics/design-glow.md")),
-    ("design-fx", "层6 特效(全局贴图)", include_str!("../../../docs/topics/design-fx.md")),
-    ("design-verify", "层7 验收", include_str!("../../../docs/topics/design-verify.md")),
-    ("design-changelog", "分层 skill 修订记录", include_str!("../../../docs/topics/design-changelog.md")),
-    ("replicate", "定制复刻(有参考图)", include_str!("../../../docs/topics/replicate.md")),
-    ("theme", "主题设计(角色/作品)", include_str!("../../../docs/topics/theme.md")),
-    ("original", "原创(只有风格描述)", include_str!("../../../docs/topics/original.md")),
-    ("install", "安装 / 卸载 / 冲突", include_str!("../../../docs/topics/install.md")),
-    ("pack", "打包分发", include_str!("../../../docs/topics/pack.md")),
-    ("migrate", "游戏更新后迁移", include_str!("../../../docs/topics/migrate.md")),
-    ("troubleshoot", "常见问题", include_str!("../../../docs/topics/troubleshoot.md")),
-    ("formats", "格式与原理(深入)", include_str!("../../../docs/topics/formats.md")),
-    ("mcp", "AI 工具接入(MCP / 规则文件)", include_str!("../../../docs/topics/mcp.md")),
-];
+include!(concat!(env!("OUT_DIR"), "/skill_nodes.rs"));
 
-/// 主题别名(命令名 → 主题)
+/// 技能树节点: 文件开头 `# <id>: <标题>` / `上级: <id|->` / `下级: 无` 或 `下级:` + `- <id>: <何时加载>` / `---`
+#[derive(Debug, Clone)]
+pub struct Node {
+    pub id: &'static str,
+    pub title: &'static str,
+    pub parent: Option<&'static str>,
+    pub children: Vec<(&'static str, &'static str)>,
+    pub body: &'static str,
+    pub file: &'static str,
+}
+
+fn parse_node(file: &'static str, text: &'static str) -> Result<Node, String> {
+    let mut lines = text.lines();
+    let h = lines.next().unwrap_or("");
+    let h = h.strip_prefix("# ").ok_or(format!("{file}: 第一行应为 `# <id>: <标题>`"))?;
+    let (id, title) = h.split_once(": ").ok_or(format!("{file}: 标题行缺 `: `"))?;
+    let p = lines.next().unwrap_or("").strip_prefix("上级: ").ok_or(format!("{file}: 第二行应为 `上级: <id>`"))?.trim();
+    let parent = if p == "-" { None } else { Some(p) };
+    let mut children = Vec::new();
+    let mut seen_sep = false;
+    for l in lines.by_ref() {
+        if l.trim() == "---" {
+            seen_sep = true;
+            break;
+        }
+        if let Some(c) = l.strip_prefix("- ") {
+            let (cid, when) = c.split_once(": ").ok_or(format!("{file}: 下级行应为 `- <id>: <何时加载>`"))?;
+            children.push((cid.trim(), when.trim()));
+        }
+    }
+    if !seen_sep {
+        return Err(format!("{file}: 头部缺 `---`"));
+    }
+    Ok(Node { id: id.trim(), title: title.trim(), parent, children, body: text, file })
+}
+
+pub fn nodes() -> &'static [Node] {
+    static N: std::sync::OnceLock<Vec<Node>> = std::sync::OnceLock::new();
+    N.get_or_init(|| NODE_FILES.iter().filter_map(|(f, t)| parse_node(f, t).ok()).collect())
+}
+
+/// 校验: 头部格式、无孤儿、无死链(下级与正文里的 `help <id>` / 反引号节点 id)、长度上限
+pub const NODE_MAX_CHARS: usize = 2000;
+pub const ROOT_MAX_CHARS: usize = 1200;
+pub fn check_tree() -> Vec<String> {
+    let mut errs = Vec::new();
+    let mut ns = Vec::new();
+    for (f, t) in NODE_FILES {
+        match parse_node(f, t) {
+            Ok(n) => ns.push(n),
+            Err(e) => errs.push(e),
+        }
+    }
+    let ids: std::collections::HashSet<&str> = ns.iter().map(|n| n.id).collect();
+    if ids.len() != ns.len() {
+        errs.push("有重复的节点 id".into());
+    }
+    let id_re = regex::Regex::new(r"(?:help |`)((?:root|workflow|ref|styles)(?:\.[a-z0-9-]+)*)\b").unwrap();
+    let help_re = regex::Regex::new(r"wowsmod help ([a-z][a-z0-9.-]*)").unwrap();
+    for n in &ns {
+        let lim = if n.id == "root" { ROOT_MAX_CHARS } else { NODE_MAX_CHARS };
+        let c = n.body.chars().count();
+        if c > lim {
+            errs.push(format!("{}: {c} 字, 超过上限 {lim}(拆成子节点)", n.id));
+        }
+        match n.parent {
+            None if n.id != "root" => errs.push(format!("{}: 只有 root 可以没有上级", n.id)),
+            Some(p) => match ns.iter().find(|x| x.id == p) {
+                None => errs.push(format!("{}: 上级 {p} 不存在", n.id)),
+                Some(pn) => {
+                    if !pn.children.iter().any(|c| c.0 == n.id) {
+                        errs.push(format!("{}: 上级 {p} 的下级列表里没有它(孤儿)", n.id));
+                    }
+                    if !n.id.starts_with(&format!("{p}.")) && p != "root" {
+                        errs.push(format!("{}: id 应以上级路径 {p}. 开头", n.id));
+                    }
+                }
+            },
+            _ => {}
+        }
+        for (c, w) in &n.children {
+            if !ids.contains(c) {
+                errs.push(format!("{}: 下级 {c} 不存在(死链)", n.id));
+            }
+            if w.is_empty() {
+                errs.push(format!("{}: 下级 {c} 缺'何时加载'", n.id));
+            }
+        }
+        for cap in id_re.captures_iter(n.body).chain(help_re.captures_iter(n.body)) {
+            let t = cap[1].trim_end_matches('.');
+            if !ids.contains(t) && topic(t).is_none() {
+                errs.push(format!("{}: 引用了不存在的节点 {t}", n.id));
+            }
+        }
+    }
+    errs
+}
+
+/// 旧主题名 / 命令名 → 节点 id
 fn alias(t: &str) -> &str {
     match t {
-        "tex" | "texture" | "color" | "colour" | "camo" | "port-albedo" | "换色" => "recolor",
-        "mod" | "init" | "import-sdk" | "sdk" | "new" => "project",
-        "emissive" | "发光" => "glow",
-        "uninstall" | "installed" | "conflicts" | "conflict" => "install",
-        "assemble" | "scale" | "move" | "rotate" | "remove" | "replace" | "add" => "model",
-        "error" | "errors" | "问题" => "troubleshoot",
-        "设计" | "skin" | "涂装设计" | "mode" | "模式" | "design-template" | "template" | "design-book" | "设计书" | "拆解书" | "book" => "design",
-        "lineart" | "bake-ref" | "图案" | "paint" => "design-paint",
-        "fx" | "特效" | "smoke" | "烟" => "design-fx",
-        "参考" | "拆解" | "ref" => "design-ref",
-        "验收" | "verify" => "design-verify",
-        "修订记录" | "changelog" => "design-changelog",
-        "复刻" | "定制复刻" | "replica" | "copy" => "replicate",
-        "主题" | "主题设计" => "theme",
-        "原创" => "original",
-        "ai" | "agents" => "mcp",
-        "export" | "extract" | "find" | "geom" | "check" => "formats",
+        "start" | "help" | "入口" => "root",
+        "project" | "mod" | "init" | "import-sdk" | "sdk" | "new" => "ref.project",
+        "recolor" | "tex" | "texture" | "color" | "colour" | "camo" | "port-albedo" | "换色" => "ref.recolor",
+        "glow" | "emissive" | "发光" => "ref.glow",
+        "install" | "uninstall" | "installed" | "conflicts" | "conflict" => "ref.install",
+        "model" | "assemble" | "scale" | "move" | "rotate" | "remove" | "replace" | "add" => "ref.model",
+        "import" | "pmx" | "pmx2glb" => "ref.model.import",
+        "animate" | "anim" | "动画" => "ref.model.animate",
+        "blender" => "ref.blender",
+        "render" | "preview" | "出图" => "ref.render",
+        "warm" => "ref.render.warm",
+        "pack" => "ref.pack",
+        "migrate" => "ref.migrate",
+        "troubleshoot" | "error" | "errors" | "问题" => "ref.troubleshoot",
+        "formats" | "export" | "extract" | "find" | "geom" | "check" => "ref.formats",
+        "mcp" | "ai" | "agents" => "ref.mcp",
+        "design" | "设计" | "skin" | "涂装设计" | "mode" | "模式" => "workflow",
+        "design-book" | "设计书" | "拆解书" | "book" | "design-template" | "template" => "workflow.book",
+        "layers" | "层" => "workflow.layers",
+        "design-ref" | "参考" | "ref-layer" => "workflow.layers.ref",
+        "拆解" | "breakdown" | "design-map" => "workflow.layers.map",
+        "design-shape" | "shape" | "大形" => "workflow.layers.shape",
+        "design-paint" | "lineart" | "bake-ref" | "图案" | "paint" => "workflow.layers.paint",
+        "design-glow" => "workflow.layers.glow",
+        "design-fx" | "fx" | "特效" | "smoke" | "烟" => "workflow.layers.fx",
+        "design-verify" | "验收" | "verify" => "workflow.layers.verify",
+        "design-changelog" | "修订记录" | "changelog" => "workflow.changelog",
+        "review" | "复盘" => "workflow.review",
+        "replicate" | "复刻" | "定制复刻" | "replica" | "copy" => "workflow.replicate",
+        "theme" | "主题" | "主题设计" => "workflow.theme",
+        "original" | "原创" => "workflow.original",
+        "style" | "风格包" => "styles",
         x => x,
     }
 }
 
+/// (id, 标题, 全文)
 pub fn topic(name: &str) -> Option<(&'static str, &'static str, &'static str)> {
-    let n = alias(name.trim().to_lowercase().as_str()).to_string();
-    TOPICS.iter().find(|t| t.0 == n).copied()
+    let low = name.trim().to_lowercase();
+    let n = alias(low.as_str());
+    nodes().iter().find(|x| x.id == n).map(|x| (x.id, x.title, x.body))
+}
+
+pub fn node(name: &str) -> Option<&'static Node> {
+    let (id, _, _) = topic(name)?;
+    nodes().iter().find(|x| x.id == id)
+}
+
+/// 树形文本(从 id 起, 缩进显示 id、标题与何时加载)
+pub fn tree_text(from: &str, max_depth: usize) -> String {
+    fn walk(id: &str, when: &str, depth: usize, max: usize, out: &mut String) {
+        let Some(n) = nodes().iter().find(|x| x.id == id) else { return };
+        let w = if when.is_empty() { String::new() } else { format!(" — {when}") };
+        *out += &format!("{}{}  {}{}\n", "  ".repeat(depth), n.id, n.title, w);
+        if depth < max {
+            for (c, w) in &n.children {
+                walk(c, w, depth + 1, max, out);
+            }
+        }
+    }
+    let mut s = String::new();
+    let id = topic(from).map(|t| t.0).unwrap_or("root");
+    walk(id, "", 0, max_depth, &mut s);
+    s
+}
+
+pub fn tree_json(from: &str) -> Value {
+    fn walk(id: &str, when: &str) -> Value {
+        let Some(n) = nodes().iter().find(|x| x.id == id) else { return Value::Null };
+        json!({"id": n.id, "title": n.title, "when": when, "chars": n.body.chars().count(), "children": n.children.iter().map(|(c, w)| walk(c, w)).collect::<Vec<_>>()})
+    }
+    walk(topic(from).map(|t| t.0).unwrap_or("root"), "")
+}
+
+pub fn children_text(n: &Node) -> String {
+    let mut s = format!("{}  {}\n上级: {}\n", n.id, n.title, n.parent.unwrap_or("-"));
+    if n.children.is_empty() {
+        s += "下级: 无\n";
+    }
+    for (c, w) in &n.children {
+        s += &format!("  {c} — {w}\n");
+    }
+    s
 }
 
 pub fn list_text() -> String {
-    let mut s = String::from("wowsmod 主题说明(按需阅读: wowsmod help <主题>; 搜索: wowsmod help --search <词>)\n");
-    for (n, t, _) in TOPICS {
-        s += &format!("  {n:<13}{t}\n");
-    }
-    s += "命令参数: wowsmod <命令> --help。新手从 `wowsmod help start` 开始。";
+    let mut s = String::from("wowsmod 技能树(渐进阅读: wowsmod help <id>; 只看下级: --children; 全树: --tree; 搜索: --search <词>)\n");
+    s += &tree_text("root", 2);
+    s += "命令参数: wowsmod <命令> --help。从 `wowsmod help root` 开始。";
     s
 }
 
 pub fn search(q: &str) -> Vec<Value> {
     let q = q.to_lowercase();
     let mut out = Vec::new();
-    for (n, _, body) in TOPICS {
-        let lines: Vec<&str> = body.lines().filter(|l| l.to_lowercase().contains(&q)).take(4).collect();
+    for n in nodes() {
+        let lines: Vec<&str> = n.body.lines().filter(|l| l.to_lowercase().contains(&q)).take(4).collect();
         if !lines.is_empty() {
-            out.push(json!({"topic": n, "lines": lines}));
+            out.push(json!({"topic": n.id, "lines": lines}));
         }
     }
     out
@@ -356,12 +486,12 @@ mod tests {
         assert_eq!(cmd_key_from(&a("wowsmod --json tex recolor X --project p")), "tex recolor");
         assert_eq!(cmd_key_from(&a("wowsmod --game D:/K install p")), "install");
         assert_eq!(cmd_key_from(&a("wowsmod --json")), "");
-        for (n, _, body) in TOPICS {
-            assert!(body.starts_with(&format!("# {n}")), "主题 {n} 标题");
-            assert!(body.chars().count() < 2500, "主题 {n} 太长");
-        }
-        assert_eq!(topic("tex").unwrap().0, "recolor");
+        let errs = check_tree();
+        assert!(errs.is_empty(), "技能树校验: {errs:#?}");
+        assert_eq!(topic("tex").unwrap().0, "ref.recolor");
+        assert_eq!(topic("start").unwrap().0, "root");
         assert!(topic("nope").is_none());
+        assert!(tree_text("root", 9).contains("workflow.layers.paint"));
         assert!(!next("port-albedo", &json!({"to_color": "#123456"})).is_empty());
     }
 }

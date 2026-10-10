@@ -43,7 +43,7 @@ pub fn status_value(cli: &Cli, project: Option<&Path>) -> Value {
     let running = game::running();
     json!({"ok": true, "wowsmod_version": env!("CARGO_PKG_VERSION"), "game": game_v, "game_running": running, "installed_mods": installed, "res_mods_pristine": pristine,
         "sdk_sources": m4cmd::sdk_sources(), "wowsmod_home": m4cmd::home_dir().display().to_string(), "project": proj.unwrap_or(Value::Null),
-        "topics": guide::TOPICS.iter().map(|t| t.0).collect::<Vec<_>>()})
+        "skill_tree": guide::tree_json("root")["children"].as_array().map(|a| a.iter().map(|c| c["id"].clone()).collect::<Vec<_>>()).unwrap_or_default(), "next_help": "wowsmod help root"})
 }
 
 pub fn cmd_status(cli: &Cli, a: &StatusArgs) -> Result<i32> {
@@ -85,13 +85,32 @@ pub fn cmd_status(cli: &Cli, a: &StatusArgs) -> Result<i32> {
     Ok(0)
 }
 
-pub fn cmd_help(cli: &Cli, topic: Option<&str>, search: Option<&str>) -> Result<i32> {
+pub fn cmd_help(cli: &Cli, topic: Option<&str>, search: Option<&str>, tree: bool, children: bool, check: bool) -> Result<i32> {
+    if check {
+        let errs = guide::check_tree();
+        let sizes: Vec<Value> = guide::nodes().iter().map(|n| json!({"id": n.id, "chars": n.body.chars().count(), "lines": n.body.lines().count()})).collect();
+        if cli.json {
+            emit(cli, &json!({"ok": errs.is_empty(), "errors": errs, "nodes": sizes, "max_chars": guide::NODE_MAX_CHARS}));
+        } else {
+            for n in guide::nodes() {
+                println!("{:<40} {:>5} 字 {:>3} 行", n.id, n.body.chars().count(), n.body.lines().count());
+            }
+            if errs.is_empty() {
+                println!("技能树校验通过: {} 个节点", guide::nodes().len());
+            } else {
+                for e in &errs {
+                    println!("错误: {e}");
+                }
+            }
+        }
+        return Ok(if errs.is_empty() { 0 } else { 1 });
+    }
     if let Some(q) = search {
         let r = guide::search(q);
         if cli.json {
             emit(cli, &json!({"ok": true, "search": q, "hits": r}));
         } else if r.is_empty() {
-            println!("没有找到 {q:?}。主题列表: wowsmod help");
+            println!("没有找到 {q:?}。技能树: wowsmod help --tree");
         } else {
             for h in &r {
                 println!("[{}]", h["topic"].as_str().unwrap_or(""));
@@ -99,34 +118,45 @@ pub fn cmd_help(cli: &Cli, topic: Option<&str>, search: Option<&str>) -> Result<
                     println!("  {}", l.as_str().unwrap_or(""));
                 }
             }
-            println!("\n读整篇: wowsmod help <主题>");
+            println!("\n读节点: wowsmod help <id>");
+        }
+        return Ok(0);
+    }
+    if tree {
+        let from = topic.unwrap_or("root");
+        if cli.json {
+            emit(cli, &json!({"ok": true, "tree": guide::tree_json(from)}));
+        } else {
+            print!("{}", guide::tree_text(from, 99));
         }
         return Ok(0);
     }
     match topic {
         None => {
             if cli.json {
-                emit(cli, &json!({"ok": true, "topics": guide::TOPICS.iter().map(|t| json!({"name": t.0, "title": t.1, "chars": t.2.chars().count()})).collect::<Vec<_>>(), "next": ["wowsmod help start"]}));
+                emit(cli, &json!({"ok": true, "tree": guide::tree_json("root"), "next": ["wowsmod help root"]}));
             } else {
                 println!("{}", guide::list_text());
             }
             Ok(0)
         }
-        Some(t) => match guide::topic(t) {
-            Some((n, title, body)) => {
+        Some(t) => match guide::node(t) {
+            Some(n) => {
                 if cli.json {
-                    emit(cli, &json!({"ok": true, "topic": n, "title": title, "text": body, "chars": body.chars().count()}));
+                    emit(cli, &json!({"ok": true, "id": n.id, "topic": n.id, "title": n.title, "parent": n.parent, "children": n.children.iter().map(|(c, w)| json!({"id": c, "when": w})).collect::<Vec<_>>(), "text": if children { "" } else { n.body }, "chars": n.body.chars().count()}));
+                } else if children {
+                    print!("{}", guide::children_text(n));
                 } else {
-                    println!("{body}");
+                    println!("{}", n.body);
                 }
                 Ok(0)
             }
             None => {
-                let v = json!({"ok": false, "error": format!("没有主题 {t:?}"), "topics": guide::TOPICS.iter().map(|t| t.0).collect::<Vec<_>>(), "next": [format!("命令参数请用 wowsmod {t} --help"), "wowsmod help".to_string()]});
+                let v = json!({"ok": false, "error": format!("没有节点 {t:?}"), "next": [format!("命令参数请用 wowsmod {t} --help"), "wowsmod help --tree".to_string()]});
                 if cli.json {
                     emit(cli, &v);
                 } else {
-                    println!("没有主题 {t:?}。{}\n(命令参数: wowsmod {t} --help)", guide::list_text());
+                    println!("没有节点 {t:?}。\n{}\n(命令参数: wowsmod {t} --help)", guide::list_text());
                 }
                 Ok(2)
             }
@@ -155,28 +185,14 @@ pub fn agents_md(exe: &str) -> String {
 本目录用 `wowsmod` 改 Lesta《战舰世界》的船模与贴图。可执行文件:`{exe}`(下文简称 wowsmod)。
 
 ## 规则
-- 只用 wowsmod 改,不要手动改游戏目录。所有修改写在项目目录里;只有 `install` 会写游戏,`uninstall` 可以完全还原。
-- 说明按需读取:`wowsmod help <主题>`。不要一次读完所有主题。
-- Oodle:默认构建不含 oozextract(GPL 移植风险,见 LICENSE_REPORT.md)。开发需要解压 pkg 时用 `cargo build --release --features oozextract`;发布优先本机 Oodle/用户 DLL,勿分发游戏 DLL。
-- 命令都加 `--json`,结果里的 `next` 是建议的下一步;出错信息也会给出下一步。
-- 不确定的事情要说“不确定”,不要猜路径或参数。用 `--dry-run` 或 `render` 先验证。
-- 游戏运行时不能 install。验证只在港口进行,不进战斗。
+- 只用 wowsmod 改项目目录; 只有 `install` 写游戏, `uninstall` 完全还原。游戏运行时不能 install; 验证只在港口, 不进战斗。
+- 命令加 `--json`, 结果里的 `next` 是建议下一步。不确定就说不确定, 用 `--dry-run` / `render` 先验证。
+- Oodle: 默认构建不含 oozextract(见 LICENSE_REPORT.md), 勿分发游戏 DLL。
 
-## 流程
-1. `wowsmod status [项目]`:查看游戏、已装 mod、本机 SDK 素材。
-2. 按任务读对应主题:
-   - 新建项目:project
-   - 换色 / 涂装:recolor
-   - 设计一套外观(复刻参考图 / 主题 / 原创):先判断模式,读 design
-   - 发光:glow
-   - 改模型:model,或用 Blender 改:blender
-   - 出图:render
-   - 安装 / 卸载:install
-   - 打包:pack
-   - 游戏更新后迁移:migrate
-   - 报错:troubleshoot
-3. 改完后执行 `wowsmod render <项目> --compare` 看图,再执行 `wowsmod install <项目>`,然后请用户重启游戏进港确认。
-   要出图先预热:`wowsmod render --warm <项目>` 启动常驻出图实例(之后每张约 1 秒,`wowsmod render status` 查看,空闲 15 分钟自动退出)。
+## 技能树(渐进阅读, 不要一次读完)
+1. `wowsmod status [项目]`。
+2. `wowsmod help root`: 判断任务 → 整套外观走 `workflow`(先判断模式: 复刻/主题/原创), 单个操作查 `ref`。
+3. 每个节点开头列出上级/下级与"何时加载"; 只读当前需要的节点(`wowsmod help <id>`, `--children` 只看索引, `--tree` 看全树)。
 
 ## MCP
 如果已连接 `wowsmod mcp`,用它的 5 个入口工具(status / help / run / render / expand),流程同上。
@@ -213,8 +229,8 @@ pub fn cmd_ai(cli: &Cli, c: &AiCmd) -> Result<i32> {
             // 各工具的入口只指向正本, 避免多份内容不同步
             write_if(&dir.join("CLAUDE.md"), "@AGENTS.md\n", *force, &mut done)?;
             write_if(&dir.join("GEMINI.md"), "@AGENTS.md\n", *force, &mut done)?;
-            write_if(&dir.join(".cursor/rules/wowsmod.mdc"), "---\ndescription: wowsmod 改模工作区规则\nalwaysApply: true\n---\n本工作区规则见根目录 AGENTS.md(必读, 很短)。细节用 `wowsmod help <主题>` 按需读取。\n", *force, &mut done)?;
-            write_if(&dir.join(".github/copilot-instructions.md"), "本工作区规则见根目录 AGENTS.md(必读, 很短)。细节用 `wowsmod help <主题>` 按需读取。\n", *force, &mut done)?;
+            write_if(&dir.join(".cursor/rules/wowsmod.mdc"), "---\ndescription: wowsmod 改模工作区规则\nalwaysApply: true\n---\n本工作区规则见根目录 AGENTS.md(必读, 很短)。细节用 `wowsmod help <节点id>` 沿技能树按需读取(从 root 开始)。\n", *force, &mut done)?;
+            write_if(&dir.join(".github/copilot-instructions.md"), "本工作区规则见根目录 AGENTS.md(必读, 很短)。细节用 `wowsmod help <节点id>` 沿技能树按需读取(从 root 开始)。\n", *force, &mut done)?;
             let mut args = vec![json!("mcp")];
             if let Some(g) = &cli.game {
                 args = vec![json!("--game"), json!(g.display().to_string()), json!("mcp")];

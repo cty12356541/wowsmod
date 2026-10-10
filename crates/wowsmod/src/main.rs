@@ -201,13 +201,22 @@ enum Cmd {
     Preview(preview::PreviewArgs),
     /// 总览: 游戏、已装 mod、本机 SDK 素材、项目状态(AI 的第一步) / overview
     Status(ai::StatusArgs),
-    /// 分主题说明(按需阅读): wowsmod help [主题] [--search 词] / topic help
+    /// 技能树(渐进阅读): wowsmod help [节点id] [--children] [--tree] [--search 词] [--check] / skill tree help
     Help {
-        /// 主题名(省略则列出全部); 也可写命令名
+        /// 节点 id(点分路径, 如 workflow.layers.paint; 省略则显示树的前两层); 也可写旧主题名或命令名
         topic: Option<String>,
-        /// 在全部主题里搜索
+        /// 在全部节点里搜索
         #[arg(long)]
         search: Option<String>,
+        /// 显示(子)树
+        #[arg(long)]
+        tree: bool,
+        /// 只显示上级与下级索引
+        #[arg(long)]
+        children: bool,
+        /// 校验技能树(格式/孤儿/死链/长度)并列出各节点字数
+        #[arg(long)]
+        check: bool,
     },
     /// MCP 服务器(stdio): 给 Cursor / Claude Code 等 AI 工具调用 / MCP server
     Mcp,
@@ -302,7 +311,7 @@ fn run(cli: Cli) -> Result<i32> {
         Cmd::DesignBook(c) => design::cmd_book(&cli, c),
         Cmd::Preview(a) => preview::cmd_preview(&cli, a),
         Cmd::Status(a) => ai::cmd_status(&cli, a),
-        Cmd::Help { topic, search } => ai::cmd_help(&cli, topic.as_deref(), search.as_deref()),
+        Cmd::Help { topic, search, tree, children, check } => ai::cmd_help(&cli, topic.as_deref(), search.as_deref(), *tree, *children, *check),
         Cmd::Mcp => mcp::serve(&cli),
         Cmd::Ai(c) => ai::cmd_ai(&cli, c),
         Cmd::Assemble(a) => m3cmd::cmd_assemble(&cli, a),

@@ -1,5 +1,7 @@
-# 风格包: 赛博霓虹(cyber-neon)
-
+# styles.cyber-neon: 风格包 赛博霓虹
+上级: styles
+下级: 无
+---
 ## 适用
 暗色科幻/霓虹风(如 Krillishna 类视频涂装)。不适合浅色角色痛涂。
 

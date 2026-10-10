@@ -75,7 +75,7 @@ fn entry_tools() -> Vec<Value> {
     let groups: Vec<String> = GROUPS.iter().map(|(g, d)| format!("{g}({d})")).collect();
     vec![
         json!({"name": "wowsmod_status", "description": "第一步: 游戏位置/版本、已装 mod、本机 SDK 素材、项目状态。", "inputSchema": {"type": "object", "properties": {"project": {"type": "string", "description": "mod 项目目录(可选)"}}}}),
-        json!({"name": "wowsmod_help", "description": "按需读取说明主题(不传 topic 列出主题; start 是任务路由)。", "inputSchema": {"type": "object", "properties": {"topic": {"type": "string"}, "search": {"type": "string", "description": "全文搜索"}}}}),
+        json!({"name": "wowsmod_help", "description": "按需读取技能树节点(点分 id, 如 workflow.layers.paint; 不传 topic 显示树的前两层; root 是入口)。每个节点开头列出上级/下级, 只在需要时往下读。", "inputSchema": {"type": "object", "properties": {"topic": {"type": "string", "description": "节点 id 或旧主题名"}, "children": {"type": "boolean", "description": "只返回上级/下级索引"}, "tree": {"type": "boolean", "description": "返回以 topic 为根的子树"}, "search": {"type": "string", "description": "全文搜索"}}}}),
         json!({"name": "wowsmod_run", "description": "执行任意 wowsmod 命令(自动 --json), 如 [\"tex\",\"recolor\",\"X_a.dds\",\"--project\",\"p\",\"--to-color\",\"#123456\"]。结果含 next(建议下一步)。参数见 <命令> --help。", "inputSchema": {"type": "object", "properties": {"args": {"type": "array", "items": {"type": "string"}}}, "required": ["args"]}}),
         json!({"name": "wowsmod_render", "description": "出图并直接返回 PNG: 整船 WebGL(compare=分屏 原版|当前; query 可给完整参数, 见 help render)或单张贴图(texture, 左原版右当前)。走常驻出图实例: 首次调用会先预热(约 20~60 秒), 之后每张约 1 秒; wowsmod_status 带 project 时会在后台提前预热。", "inputSchema": {"type": "object", "properties": {
             "project": {"type": "string"}, "view": {"type": "string", "enum": ["side", "top", "quarter", "all"]}, "compare": {"type": "boolean"}, "texture": {"type": "string"},
@@ -204,10 +204,14 @@ fn call(cli: &Cli, name: &str, a: &Value, expanded: &mut BTreeSet<String>, chang
             if let Some(q) = a["search"].as_str() {
                 return text(serde_json::to_string_pretty(&guide::search(q)).unwrap_or_default(), false);
             }
+            if a["tree"] == true {
+                return text(guide::tree_text(a["topic"].as_str().unwrap_or("root"), 99), false);
+            }
             match a["topic"].as_str() {
                 None => text(guide::list_text(), false),
-                Some(t) => match guide::topic(t) {
-                    Some((_, _, body)) => text(body, false),
+                Some(t) => match guide::node(t) {
+                    Some(n) if a["children"] == true => text(guide::children_text(n), false),
+                    Some(n) => text(n.body, false),
                     None => text(format!("没有主题 {t:?}。\n{}", guide::list_text()), true),
                 },
             }
@@ -330,7 +334,7 @@ pub fn serve(cli: &Cli) -> Result<i32> {
                 let want = params["protocolVersion"].as_str().unwrap_or(PROTOCOLS[0]);
                 let pv = if PROTOCOLS.contains(&want) { want } else { PROTOCOLS[0] };
                 Some(Ok(json!({"protocolVersion": pv, "capabilities": {"tools": {"listChanged": true}}, "serverInfo": {"name": "wowsmod", "version": env!("CARGO_PKG_VERSION")},
-                    "instructions": "wowsmod: 莱服《战舰世界》改模。先 wowsmod_status, 再 wowsmod_help(topic=start) 按任务读主题; 命令结果的 next 是建议下一步; 改完 wowsmod_render 看图再 install。"})))
+                    "instructions": "wowsmod: 莱服《战舰世界》改模。先 wowsmod_status, 再 wowsmod_help(topic=root) 按技能树逐层读节点; 命令结果的 next 是建议下一步; 改完 wowsmod_render 看图再 install。"})))
             }
             "ping" => Some(Ok(json!({}))),
             "tools/list" => Some(Ok(json!({"tools": tools_list(&expanded)}))),
