@@ -27,3 +27,6 @@ wowsmod 是 Lesta《战舰世界》(Мир кораблей)客户端的改模�
 - 游戏运行时不要执行 install / uninstall / migrate,命令会拒绝。
 - 改完先 `wowsmod render <项目> --compare` 看图,再 install;实际观感以进港截图为准。
 - 不确定时用 `--dry-run`(install / uninstall / migrate / extract 都支持)。
+
+## 要出图先预热
+会反复看图时, 先 `wowsmod render --warm <项目>`, 之后 `wowsmod render <项目> --compare` 每张约 1 秒(见 `wowsmod help render`)。

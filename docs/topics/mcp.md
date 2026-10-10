@@ -18,3 +18,8 @@
 - 规则文件:
   - `AGENTS.md` 是正本;
   - `CLAUDE.md`、`.cursor/rules/wowsmod.mdc`、`GEMINI.md`、`.github/copilot-instructions.md` 都只是指向正本的入口。
+
+## 预热出图
+- `wowsmod_render` 连到项目的常驻出图实例(见 `wowsmod help render` 的"预热"一节), 不在 MCP 进程里开浏览器; 第一次调用会先启动实例(冷启动十几秒到几十秒), 之后每张约 1 秒。
+- `wowsmod_status` 带项目参数时会在后台预热; MCP 启动时若当前目录是 mod 项目(或设了 `WOWSMOD_PROJECT`)也会自动预热。
+- 出错时返回 `[错误码]` 和下一步提示(如 `render_timeout` → 先 `wowsmod render stop <项目>` 再预热)。

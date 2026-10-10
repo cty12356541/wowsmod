@@ -29,3 +29,6 @@
 
 ## 通用约束
 只用 wowsmod 改项目; install 前先 render; 验证只在港口(开火类特效需训练房且需用户授权); 结束 uninstall 复原。
+
+## 预热出图(要出图先预热)
+进入出图对比/自检(design-verify)之前, 先 `wowsmod render --warm <项目>` 启动常驻出图实例: 之后每张 `wowsmod render <项目> --compare` 约 1 秒, 改完贴图/mfm 直接再 render(按哈希增量重载, 不用重启)。`wowsmod render status <项目>` 确认就绪; 空闲 15 分钟自动退出, 用完可 `wowsmod render stop <项目>`。详见 `wowsmod help render`。
