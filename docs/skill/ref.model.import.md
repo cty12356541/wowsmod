@@ -2,6 +2,8 @@
 上级: ref.model
 下级: 无
 ---
+人物站姿: PMX 默认常为 A/T 字。转换时加 `model pmx2glb … --pose arms-down[:度]`(或 `骨^度` / `骨=rx,ry,rz`), 再 `model import`。
+
 `wowsmod model import --project <项目> --mesh <glb|obj> --like <模板渲染集> [--hp HP_x | --part <部件> | --section <分段>] --at x,y,z --rot 度 [--scale s | --height 米制高度]`
 - 随炮塔转: `--part <炮塔>` + `--like Turret`(按最近模板顶点绑骨); 船体固定: `--like <分段>_DeckHouse` 或 `--hp`。
 - 材质: 新建 .mfm 与 `_a/_mg/_n/_ao`, 不与原船共用。单材质 `--texture`/`--color`; 多材质 GLB 自动每材质一个 .mfm(`--materials single` 关掉)。

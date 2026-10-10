@@ -20,3 +20,8 @@
 - `doctor` 显示 Oodle 后端为「未编译」:默认未启用 `oozextract`(见 LICENSE_REPORT.md)。开发:`cargo build --release --features oozextract`。
 - 发布给用户的 exe 不要默认静态链接 oozextract;优先本机游戏已有的 Oodle 或用户自备 `oo2core*.dll`。
 - 不要把从游戏目录复制的 DLL 打进 .wsmod 包。
+
+## Windows PowerShell 与 --json
+PowerShell 管道会按 OEM 代码页弄坏 UTF-8 JSON。不要 `wowsmod --json ... | Out-File`。
+改用 `python e2e/scripts/wm.py <out.json|-> <参数...>`(设好 `WOWSMOD_HOME`, 按 UTF-8 收 stdout)。
+`wm.py` 的 cwd 跟随调用者, 相对路径的 `-o`/`--mesh` 才落在预期目录。
