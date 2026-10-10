@@ -5,7 +5,7 @@
 # -KeepCamoMask   保留 _mg.B 迷彩遮罩(船体显示游戏迷彩配色, 只有遮罩外的部分显示新颜色)
 # -ScreenColor    想在港口里看到的颜色(如 #1E3F66): 用 wowsmod port-albedo 换算出贴图该用的 -Color(勃艮第港口标定, 近似)
 # -RedControlPng  对照实验: 把船体 skinned 材质(烟囱顶盖等)的漫反射指向一张新的纯色贴图, 证明 .mfm 的属性被游戏读取
-param([string]$Color = '#1E3F66', [string]$GlowColor = '#2E9BFF', [double]$Power = 4.0, [string]$DsName = 'deepsea2', [switch]$KeepCamoMask, [string]$MfmSet = '', [string]$RedControlPng = '', [string]$ScreenColor = '', [switch]$Force)
+param([string]$Color = '#1E3F66', [string]$GlowColor = '#2E9BFF', [double]$Power = 0.25, [string]$DsName = 'deepsea2', [switch]$KeepCamoMask, [string]$MfmSet = '', [string]$RedControlPng = '', [string]$ScreenColor = '', [switch]$Force)
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 Set-Location (Split-Path $PSScriptRoot -Parent)

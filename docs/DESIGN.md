@@ -164,7 +164,13 @@ kernel32/ntdll/advapi32/bcryptprimitives/api-ms-win-core-synch, 无 vcruntime/uc
 - R = 光泽度, G = 金属度, **B = 迷彩/涂装遮罩**: B 高的区域显示 camouflages.xml 配色而不是 `_a`。
   只改 `_a` 时船体侧面不变色就是这个原因; `tex channel --channel b --set 0` 清零后 `_a` 才显示。是否兼作贴花遮罩: 不确定。
 - 在 `PBS_ship_emissive*.fx` 中, 发光 = B² × 漫反射色 × g_emissionTint(按实例由引擎给) × emissivePower(+ 动画项)。
-  勃艮第港口实测: 换 fx 并把 power 提到 30 也看不到发光, 推测 g_emissionTint 在普通外观下为 0(不确定)。所以"发光区"与"迷彩区"共用 B, 互相冲突。
+  g_emissionTint 着色器默认 1.0, 普通船也不是 0(M2 补完时实测)。
+- **着色器族由 .visual 的材质标识选择**(如 `SHIPMAT_PBS_DeckHouse_skinned` → `SHIPMAT_EMISSIVE_PBS_DeckHouse_skinned`; assets.bin 有 1287 个 SHIPMAT_* 标识), 只改 .mfm 的 fx 不生效。
+  `glow` 默认同时改标识(`--keep-identifier` 关闭)。EMISSIVE 族不做迷彩混合, 所以发光区与迷彩区的 B 冲突随之消失。
+- .mfm 属性确实被读取(diffuseMap 指向纯红贴图的对照实验)。
+
+### 9.3b 港口观感补偿
+- 港口光照+色调映射对暗色按通道非线性(低 R 压成 0、B 放大)。`port-albedo` 用两点标定的线性模型 截图 = a·(贴图 − t) 反推贴图色; 只对白天光照标定, 港口光照每次启动可能不同。
 
 ### 9.4 mod 项目格式(format_version 1)
 ```

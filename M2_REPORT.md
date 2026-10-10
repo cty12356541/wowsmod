@@ -1,4 +1,4 @@
-# M2 报告: 贴图与发光(定稿 2026-10-10)
+# M2 报告: 贴图与发光(定稿 2026-10-10, 14:50 补完两个遗留: 发光、颜色偏亮)
 
 客户端 26.10.0.0.8867689(D:\Korabli), 测试船: 勃艮第 FSB510(船体模型 FSB025_Bourgogne_1945)。
 游戏截图: `out\m2_ingame\shots\`(全分辨率 2560×1440 + `_small`), 副本在 box `/workspace/m2/ingame/`。
@@ -13,7 +13,8 @@
 | 1c | 是否需要写回 BC7Prep | **不需要**: 游戏接受普通 DDS/普通 BC7(见第 4 节) | 往返实验 + 三次深海蓝安装 |
 | 2 | tex export/import/info/rewrite/recolor/channel, mask, glow, mod init/import-sdk/status, install --dev, uninstall(均 --json) | 完成 | 命令实现节 |
 | 3a | 勃艮第整船深海蓝(保留细节)进港可见 | **通过**(第二版起整船变蓝, 含船体与炮塔) | 截图见第 5 节 |
-| 3b | 烟囱/上层建筑发蓝光 | **未生效**(原因定位到一半, 见第 6 节) | funnel_p4_vs_p30.png |
+| 3b | 烟囱/上层建筑发蓝光 | **通过**(根因: .visual 材质标识决定着色器; glow 现在同时改标识。最终 emissivePower 0.25, 白天/黄昏都是青蓝发光, 不过曝) | cmp_glow_final.png, 第 6 节 |
+| 3e | 港口观感颜色接近目标 #1E3F66 | **通过**(实测 (22,61,104) vs 目标 (30,63,102), ΔE76≈3; 原 v2 为 17.5) | cmp_color_final.png, 第 5b 节 |
 | 3c | DDS 读→写往返游戏内无差异 | **通过** | 02 vs 06 |
 | 3d | uninstall 完全复原 | **通过**(4 次安装/卸载, 每次 res_mods 只剩 readme.txt, SHA-256 与备份一致) | uninstall_*.json |
 
@@ -35,20 +36,38 @@
   - 港口里勃艮第当前是否"装备"了这个永久迷彩, 或无迷彩时也套 color0: 不确定; 但清零 B 后效果确定。
 - **修复**: 新命令 `wowsmod tex channel <贴图> --channel b --set 0 [遮罩参数]`; 构建脚本对每张换色的 `_a` 同名 `_mg` 清零 B(DeckHouse_mg 由 glow 处理)。
   第二版 deepsea2: 整船(船体、炮塔、副炮、指挥仪)均为深海蓝, 铆钉/锈迹/水线/木甲板保留(`12_deepsea2_port.png`, `16b_stern_close.png`)。
-- 代价: 清零 B 后这艘船不再显示任何迷彩配色(本 mod 的意图就是替换涂装, 可接受); 若要保留迷彩, 应改 camouflages.xml 配色——属于游戏数据, 本阶段未做。
+- 代价: 清零 B 后这艘船不再显示任何迷彩配色。现在构建脚本可选: 默认"替换迷彩色"(清零 B), `-KeepCamoMask` 为"保留迷彩"(B 不动, 迷彩区仍显示 camouflages.xml 配色, 只有非迷彩区变蓝)。
+  第三种"改迷彩配色本身"(在 res_mods 覆盖 camouflages.xml 的 colorSchemeFRABourgogne): **未测试, 不确定**是否会被客户端从 res_mods 读取, 也会影响所有用该配色的船。
 - 安装: 541 个文件(项目 450 + 游戏补齐 90 + 生成 PnFModsLoader.py 1), 21 个目录; python.log: `registerShipMod DeepSeaBourgogne`, 28 个模型被替换, 无错误。
 
-## 第 6 节 发光(未生效)
+## 第 5b 节 颜色偏亮(v2 港口里偏宝蓝)的原因与补偿
+- 色彩空间: `_a` 是 BC1/DXT1, DDS 头里没有 _SRGB 格式(DXT1 本身无此区分)。recolor 在 sRGB 编码值上工作, 与原贴图同一编码, 所以写进去的 #1E3F66 就是原贴图意义上的 #1E3F66。
+  引擎采样时是否做 sRGB→线性: 不确定(没有在着色器里单独确认)。细节贴图/额外叠加层: 不确定(没有逐项排查)。
+  但下面的实测说明: 偏亮/偏宝蓝的主因是港口光照与色调映射对暗蓝色的按通道非线性, 而不是写错色彩空间。
+- 实测(港口默认机位, 船体侧板阴影块, 截图 8 位均值): 原版 (98,113,126); v2 贴图 #1E3F66 → (0,62,128): R 被压到 0、B 偏高 → "宝蓝"; v4 贴图 #313F4E → (26,60,91)。
+  → 港口的光照 + 色调映射对这种暗蓝是**按通道非线性**的: 低 R 被压成 0, B 被放大(天空环境光偏蓝)。
+- 模型(线性空间, 按通道): 截图 = a·(贴图 − t), a=(0.445, 0.975, 1.323), t=(0.020, 0.024, 0.029); 由 v2/v4 两点标定(G 斜率由 R/B 起点平均估计)。
+- 新命令 `wowsmod port-albedo <想看到的颜色>`: 给出贴图表面色和 recolor 的 `--to-color`(选区平均色; 船体侧板比选区平均亮约 10.7)。#1E3F66 → `--to-color #34435A`。
+  构建脚本新参数 `-ScreenColor #1E3F66` 自动换算。
+- 验证(deepsea5/deepsea6 = `-ScreenColor #1E3F66`): 白天光照会话两次实测 (21.5,61.0,104.1)、(21.9,61.1,104.1), 目标 (30,63,102), **CIE76 ΔE ≈ 3**(v2 17.5, v4 5.1, 原版 27.4)。R 仍略低(港口把暗红压成 0 的趋势)。
+- **注意: 港口光照每次进游戏不一样**。本次 5 次启动里有 2 次是"黄昏"光照(远景亮度约一半、偏暖), 同一 mod 船体实测 (33,46,67)(`cmp_port_lighting.png`)。标定只对白天光照有效; 黄昏/夜间/战斗地图下观感会不同, 这是引擎光照, 贴图无法同时满足所有光照。
+  光照预设如何选取(随机/按时间): 不确定。
+
+## 第 6 节 发光(已生效)
 - 遮罩: MidBack GLB 中材质 DeckHouse_skinned 的部件 = 烟囱主体(752 三角形, DeckHouse 贴图 3.1%, 与其他部件共用 UV 0.09%), 遮罩叠图 box `/workspace/m2/t1/funnel_overlay.png`。
-- 改动: `glow` 写 DeckHouse_mg.B = 255·sqrt(强度)(烟囱内)、0(烟囱外); 烟囱区域 _a 染成 #2E9BFF; `FSB025_Bourgogne_1945_DeckHouse_skinned.mfm` 的 fx 换成 `PBS_ship_emissive_skinned.fx`, emissivePower=4。
-- 结果: 港口白天, 烟囱呈中性浅灰(像迷彩 color0), 不发蓝光(`17_crop.png`)。第三版 deepsea3 把 emissivePower 提到 30 并加 `emissionAnimationMode=1`(正弦脉冲)、`animEmissionPower=30`,
-  (注: 通过 `powershell -File` 传数组参数 -MfmSet 时两项被拼成一个字符串, deepsea3 的 .mfm 里 emissionAnimationMode/animEmissionPower 两条属性是手工修正的, 文件见 out\m2_projects\deepsea3; 脚本该参数需改为分号分隔或直接调用 glow --mfm-set, 待修)
-  同一机位 4 张连拍(0.7 s 间隔)烟囱亮度 172–174, 与 power 4 时(190)和原版(158)相比没有随 power 增大的变化 → **发光没有生效**。(`funnel_p4_vs_p30.png`, `cmp_side_before_after.png`)
-- 已知/推断原因(均不确定):
-  1. 着色器静态发光项乘了 `g_emissionTint`(引擎按实例给的常量)。若普通外观下引擎给 0, 改 .mfm 的 power 无论多大都是 0——与观察一致。官方发光皮肤可能通过外观/皮肤配置让引擎给出非零 tint, 来源未找到(camouflages.xml 中没有 emission/glow 字段)。
-  2. 烟囱区 B=1 同时触发迷彩遮罩, 所以烟囱显示迷彩灰而非 _a 的蓝色; 即使发光生效, 底色也会被迷彩替换(发光颜色仍取 _a, 理论上是蓝色)。
-  3. 没有验证 SDK 路线下 .mfm 的 fx 修改是否真的被加载(python.log 没有相关日志, 截图无法区分)。
-- 下一步建议(M2 未完成项, 留给后续): ① 反查 g_emissionTint 的来源(着色器常量缓冲区 + 官方发光皮肤 FSB020_France_Space 的 .visual/外观配置); ② 做正向对照: 把 fx 换成明显不同的着色器确认 .mfm 改动生效; ③ 夜间港口/战斗回放环境下观察(规则不允许进战斗, 未做)。
+- 改动: `glow` 写 DeckHouse_mg.B = 255·sqrt(强度)(烟囱内)、0(烟囱外); 烟囱区域 _a 染成 #2E9BFF; `FSB025_Bourgogne_1945_DeckHouse_skinned.mfm` 的 fx 换成 `PBS_ship_emissive_skinned.fx` 并写 emissivePower;
+  **新增: 同时把项目内所有引用该 .mfm 的 .visual 材质标识 `SHIPMAT_PBS_DeckHouse_skinned` 改成 `SHIPMAT_EMISSIVE_PBS_DeckHouse_skinned`**(勃艮第 4 个 material 块; 记录在 edits/NNN_glow.json 的 `visual_identifiers`; `--keep-identifier` 可关闭)。
+- 1) 对照实验 —— .mfm 确实被加载: deepsea4 把 Hull_skinned.mfm 的 diffuseMap 指向新文件 `ctrl_red_a.dds`(纯红 220,20,20, 不在 compile.info 里)。港口里烟囱顶部格栅(用 Hull_skinned 材质的部件)变成纯红(`33c_zoom.png`)。→ SDK 路线下 .mfm 的属性(至少贴图路径)被读取。
+- 2) 根因 —— 着色器由 .visual 的材质标识选择, 不由 .mfm 的 fx 选择: assets.bin 里有 1287 个 SHIPMAT_* 标识, 包括 SHIPMAT_EMISSIVE_PBS_DeckHouse_skinned、SHIPMAT_ANIM_EMISSIVE_PBS_*、SHIPMAT_PBS_MiscNoCamo 等。
+  只改 .mfm fx(deepsea2/3, power 4/30)烟囱完全不变; 改标识后(deepsea4, power 4)烟囱立即发光(过曝成白色, `33c.png`)。改 fx 是否还有必要: 不确定(两者都改, 与官方发光皮肤一致)。
+- 3) g_emissionTint 来源调查:
+  - 着色器: `float4 g_emissionTint[32]`(\$Globals 偏移 432, 按 InstanceID 索引), 着色器默认值 1.0。发光 = pow(tint.rgb, cb1[19].x) × 漫反射 × tint.w × B² × emissivePower + 动画项。
+  - GameParams: 只有 20 个外观条目带 `VehicleVisualStateModule`, 其 state 条目里有 `emissiveColor`(1,1,1,1)(如 PBES301_Anson_Cosmos, 击沉/可见性状态用)。官方发光皮肤 PFES350_REPUBLIQUE_COSMO 没有该模块, 而是用 `customMaterials`(把 mfm 换成 *_emissive.mfm)+ `peculiarityModels`。
+  - camouflages.xml: 没有任何 emission/emissive/glow/tint 字段。
+  - 结论: 普通船的 tint 不是 0(实测改标识后即发光), **不是阻塞点**; 不需要挂官方皮肤、不需要改服务器数据或 GameParams。
+- 4) "烟囱落在迷彩遮罩内显示迷彩灰": EMISSIVE 材质族不做迷彩混合, 改标识后烟囱显示 _a 的蓝色并发光, 问题随之消失。普通(非发光)部件的迷彩灰仍由第 5 节的 B 清零处理。
+- 5) 强度: power 4 白天过曝成白; power 1 白天 40% 像素接近纯白; **最终 power 0.25**: 白天烟囱均值 (172,230,237)、黄昏 (113,197,220), 都是青蓝色且没有纯白像素(`cmp_glow_final.png`)。官方皮肤用 0.5(它们的 B 和底色不同, 不可直接类比)。
+- 未验证: 夜间港口与战斗中的效果(规则不允许进战斗)。
 
 ## 第 7 节 项目格式与 install/uninstall
 - 项目 = `mod.toml`([mod] name/version/description/game_build/ship/format_version, [install] mode = loose|sdk) + `edits/NNN_命令.json`(每条命令的参数、时间、输入 sha256、输出) + `assets/res_mods/...` + `.install/`(清单与备份, 已 gitignore)。
@@ -64,16 +83,28 @@
 - 只在港口, 未进战斗、未花费、未领取奖励(首启的每日奖励界面用 Esc 关闭)。点击前核对: 屏幕 2560×1440, DPI-aware, 启动器矩形 257,110,2049,1230, "ИГРАТЬ"(570,1145), 退出确认"是"(1185,712) 每次先截图确认对话框再点。
 - 港口视角旋转用左键按住 + 相对位移(SetCursorPos 绝对移动无效); 只改了相机, 不改任何设置。
 - 共启动 6 次: 原版(01–02)、往返 rt_loose(06)、深海蓝 v1(08)、v2(11–17)、v3(20–21)、卸载后原版(24–26, 同机位改前对照)。每次 Alt+F4 退出后先 uninstall 并核对 res_mods, 再装下一个。
+- 遗留补完(14:15–14:50)又启动 5 次: deepsea4(30–33, 红色对照 + 改标识 power 4)、deepsea5 ×2(36–39 黄昏, 42–44 白天, power 1)、deepsea6 ×2(46–48 黄昏, 51–53 白天, power 0.25)。
+  最后卸载 deepsea6: 删除 541 个文件、21 个目录, res_mods 只剩 readme.txt, SHA-256 0157BF75…2F3F 与备份清单一致。
 
 ## 关键截图(box)
+- `/workspace/m2/ingame/cmp_glow_final.png` 发光: 原版 / 只改标识 power 4(过曝)/ 最终 power 0.25 白天 / 黄昏
+- `/workspace/m2/ingame/cmp_color_final.png` 颜色: 原版 / v2 偏宝蓝 / v4 / 最终 v6, 带目标与实测色块
+- `/workspace/m2/ingame/33c_zoom.png` .mfm 加载对照(烟囱顶格栅变红)
+- `/workspace/m2/ingame/cmp_port_lighting.png` 同一 mod 在两种港口光照下
+- `/workspace/m2/ingame/51_deepsea6_port_small.png`、`52_deepsea6_stern_small.png` 最终版默认机位/船尾(全分辨率在 raw/)
 - `/workspace/m2/ingame/cmp_front_before_after.png` 默认机位 改前/改后
 - `/workspace/m2/ingame/cmp_stern_detail.png` 船尾特写 改前/改后(细节保留)
 - `/workspace/m2/ingame/cmp_camo_fix_v1_v2.png` v1(船体仍灰) vs v2(清零迷彩遮罩)
-- `/workspace/m2/ingame/cmp_side_before_after.png`、`funnel_p4_vs_p30.png` 侧面/烟囱(发光未生效)
+- `/workspace/m2/ingame/cmp_side_before_after.png`、`funnel_p4_vs_p30.png` 侧面/烟囱(修复前: 只改 fx 不发光)
 - `/workspace/m2/ingame/raw/02_base_port.png` vs `06_rt_port.png` 往返无差异
 - `/workspace/m2/ingame/raw/24_restored_port.png` 卸载后复原
 
 ## 进度记录(最新在上)
+- [x] 遗留补完(14:15–14:50, 提交 ca39c75 / 07ffece / 本次):
+  - 发光: 红色对照证明 .mfm 被加载 → 根因是 .visual 材质标识 → glow 默认同时改标识 → power 0.25 定稿。g_emissionTint 默认 1, 不是阻塞点。
+  - 颜色: 两点标定 + `port-albedo` + 构建脚本 `-ScreenColor`; 实测 ΔE≈3。发现港口光照每次启动不同。
+  - 构建脚本 `-MfmSet` 改为分号分隔(修复 powershell -File 下数组被拼成一个字符串); 新增 `-KeepCamoMask`(保留迷彩)、`-RedControlPng`(对照实验)、`-ScreenColor`。
+  - 最终项目 out\m2_projects\deepsea6(`-DsName deepsea6 -ScreenColor #1E3F66 -Power 0.25`)。
 - [x] 港口验收(14:00–14:35): deepsea2 修复迷彩遮罩后整船变蓝; deepsea3 验证发光未生效; 卸载后原版对照; res_mods 复原。
 
 - [x] 命令实现(提交 24c5c44, 盒子与 Windows 构建 + 42 个单元测试通过):
