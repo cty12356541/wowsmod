@@ -642,9 +642,25 @@ pub fn render(cli: &Cli, a: &RenderArgs) -> Result<(Vec<u8>, Value)> {
     }
     let img = stack(&rows, 6);
     let png = texture::write_png(&img, false).map_err(|e| anyhow!("{e}"))?;
+    // 世界→像素映射(第一视角、不含 --compare 的上下堆叠偏移), 供设计图按世界坐标作画后 bake-ref
+    let frame = {
+        let mut sc: Vec<&Scene> = vec![&head];
+        if let Some(b) = &base {
+            sc.push(b);
+        }
+        let v0 = views[0];
+        let bounds = frame_bounds(&sc, v0);
+        let pj = Proj::new(v0, bounds, width);
+        let o = pj.px([0.0, 0.0, 0.0]);
+        let ex = pj.px([1.0, 0.0, 0.0]);
+        let ey = pj.px([0.0, 1.0, 0.0]);
+        let ez = pj.px([0.0, 0.0, 1.0]);
+        json!({"size": [pj.w, pj.h], "origin_px": [o[0], o[1]], "x_axis_px": [ex[0] - o[0], ex[1] - o[1]], "y_axis_px": [ey[0] - o[0], ey[1] - o[1]], "z_axis_px": [ez[0] - o[0], ez[1] - o[1]],
+            "note": "像素 = origin_px + X*x_axis_px + Y*y_axis_px + Z*z_axis_px (GLB 世界坐标; y 向上, 船艏在 -z)。--compare 时每行原版在上, 此映射对应单张(不加 --compare)"})
+    };
     let layout = if a.compare { "每个视角两行: 上=原版, 下=项目当前" } else { "项目当前" };
     Ok((png, json!({"kind": "model", "views": views.iter().map(|v| format!("{v:?}").to_lowercase()).collect::<Vec<_>>(), "layout": layout, "size": [img.width, img.height],
-        "triangles": head.tris_world.len(), "materials": head.mats.len(), "emissive_materials": head.mats.iter().filter(|m| m.emissive).count(), "seconds": t0.elapsed().as_secs_f32(), "notes": notes})))
+        "triangles": head.tris_world.len(), "materials": head.mats.len(), "emissive_materials": head.mats.iter().filter(|m| m.emissive).count(), "seconds": t0.elapsed().as_secs_f32(), "notes": notes, "frame": frame})))
 }
 
 fn parse_size(s: &str) -> (u32, u32) {

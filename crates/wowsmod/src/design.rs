@@ -225,6 +225,10 @@ pub struct LineartArgs {
     /// 只保留法线朝向满足条件的面: AXIS>v 或 AXIS<v, 如 "|x|>0.5"(舷侧) 或 "y>0.7"(甲板/顶面)
     #[arg(long)]
     pub facing: Option<String>,
+    /// 整面填充: 把选中的三角形(材质 + --box + --facing, 世界坐标, 已含炮塔等实例的摆放)整块画进遮罩,
+    /// 用于"按世界位置选部件"(如主炮炮管、某层上层建筑)。可与线稿叠加
+    #[arg(long)]
+    pub fill: bool,
     /// 把遮罩以青色叠到 --like 贴图上, 写预览 PNG
     #[arg(long)]
     pub overlay: Option<PathBuf>,
@@ -430,6 +434,23 @@ pub fn cmd_lineart(cli: &Cli, a: &LineartArgs) -> Result<i32> {
     }
     if !fields.is_empty() {
         stats.insert("field_pixels".into(), json!(field_px));
+    }
+    // 0) 整面填充
+    if a.fill {
+        let mut cnt = 0usize;
+        for t in &sel {
+            raster_uv(w, h, t.uv, |i, _| {
+                if m[i] < 1.0 {
+                    m[i] = 1.0;
+                    cnt += 1;
+                }
+            });
+            // 细三角形可能落不到像素中心: 补画三条边
+            for e in 0..3 {
+                draw_seg(&mut m, w, h, t.uv[e], t.uv[(e + 1) % 3], 2.0);
+            }
+        }
+        stats.insert("fill_pixels".into(), json!(cnt));
     }
     // 3) 法线贴图板缝(只保留选中部件 UV 覆盖范围内)
     if let Some(nt) = &a.normal_edges {
