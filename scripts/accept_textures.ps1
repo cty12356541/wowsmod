@@ -1,4 +1,4 @@
-<#
+﻿<#
 补充验收(BC7Prep): 大批量贴图与 pfsunpack 逐字节一致。
   固定种子从全部 .dds/.dd0/.dd1/.dd2 中随机抽 -Count 个(默认 2000), 两边各自解包后比较 SHA-256;
   wowsmod 默认把 BC7Prep 贴图还原为标准 BC7, 报告其中有多少个是 BC7Prep。
