@@ -1,4 +1,4 @@
-# M6 报告: AI 接入(渐进式披露) + 预览/出图
+﻿# M6 报告: AI 接入(渐进式披露) + 预览/出图
 
 状态:**已完成核心验收**(2026-10-10 Asia/Shanghai)。M4 见 M4_REPORT.md。本里程碑把 M5 前端嵌入 `wowsmod.exe`,并落地渐进式披露 / MCP / 出图。
 
@@ -78,7 +78,7 @@
 - 代码:`crates/wowsmod/src/{guide,ai,mcp,render}.rs`,`preview/{mod,http,state,cdp}.rs`,`preview_web/`,`docs/topics/*`
 - 报告:`M4_REPORT.md`,`M6_REPORT.md`
 - Windows 出图:`D:\WoWSModding\wowsmod\out\m6\{soft_compare,cdp_py,render_fq_split}.png`
-- 提交号:见本节末尾(commit 后回填)
+- 提交号:783a9ca
 
 ## 5. 已知限制
 
@@ -98,3 +98,7 @@
 - [x] MCP render 返回 PNG
 - [x] Windows 实机 preview + render 跑通并写入本报告
 - [ ] 第三方 AI 客户端实跑深海+夜光(待用户本机,提示词见上)
+
+
+提交: 783a9ca (本仓库 main)
+
