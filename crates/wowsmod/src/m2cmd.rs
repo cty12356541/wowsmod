@@ -207,6 +207,25 @@ pub enum ModCmd {
     },
     /// 项目状态: 文件、占位、编辑记录、是否已安装
     Status { dir: PathBuf },
+    /// 改项目元数据: 真实舰长(用于米/单位换算)等
+    Set {
+        dir: PathBuf,
+        /// 真实舰长(米), 例如从百科查到的全长
+        #[arg(long)]
+        ship_length: Option<f64>,
+        #[arg(long)]
+        description: Option<String>,
+    },
+    /// 素材许可标记: 网页/口头声明的「禁止二次分发」等手动写进 mod.toml [license](pack 默认拒绝)
+    License {
+        dir: PathBuf,
+        /// 许可说明(来源 + 原文要点), 可重复
+        #[arg(long = "note")]
+        notes: Vec<String>,
+        /// 清除标记(只在受限素材已全部移除后)
+        #[arg(long)]
+        clear: bool,
+    },
 }
 
 fn open_proj(p: &Option<PathBuf>) -> Result<Option<Project>> {
@@ -619,6 +638,14 @@ pub fn cmd_glow(cli: &Cli, a: &GlowArgs) -> Result<i32> {
     Ok(0)
 }
 
+fn emit_or_print(cli: &Cli, j: &Value) {
+    if cli.json {
+        emit(cli, j);
+    } else {
+        println!("{}", serde_json::to_string_pretty(j).unwrap_or_default());
+    }
+}
+
 pub fn cmd_mod(cli: &Cli, c: &ModCmd) -> Result<i32> {
     match c {
         ModCmd::Init { dir, name, ship, mode } => {
@@ -657,6 +684,39 @@ pub fn cmd_mod(cli: &Cli, c: &ModCmd) -> Result<i32> {
             } else {
                 println!("已导入 SDK 源: {r}");
             }
+            Ok(0)
+        }
+        ModCmd::Set { dir, ship_length, description } => {
+            let mut p = Project::open(dir)?;
+            if let Some(l) = ship_length {
+                if *l <= 0.0 {
+                    bail!("--ship-length 要 > 0(米)");
+                }
+                p.cfg.meta.ship_length_m = *l;
+            }
+            if let Some(d) = description {
+                p.cfg.meta.description = d.clone();
+            }
+            p.save_cfg()?;
+            let j = json!({"ok": true, "ship_length_m": p.cfg.meta.ship_length_m, "description": p.cfg.meta.description, "next": [format!("wowsmod model list --project {} --json  # units.m_per_unit", dir.display())]});
+            emit_or_print(cli, &j);
+            Ok(0)
+        }
+        ModCmd::License { dir, notes, clear } => {
+            let mut p = Project::open(dir)?;
+            if *clear {
+                p.cfg.license = Default::default();
+                p.save_cfg()?;
+            }
+            let mut added = 0;
+            for n in notes.iter().filter(|n| !n.trim().is_empty()) {
+                if p.mark_restricted(&format!("手动标记: {n}"))? {
+                    added += 1;
+                }
+            }
+            let j = json!({"ok": true, "no_redistribute": p.cfg.license.no_redistribute, "reasons": p.cfg.license.reasons, "added": added,
+                "note": if p.cfg.license.no_redistribute { "pack 默认拒绝; 本地 install 不受影响" } else { "未标记受限" }});
+            emit_or_print(cli, &j);
             Ok(0)
         }
         ModCmd::Status { dir } => {

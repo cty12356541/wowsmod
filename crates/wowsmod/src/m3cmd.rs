@@ -513,6 +513,10 @@ pub struct Target {
     #[arg(long = "geom-dir")]
     #[serde(default)]
     pub geom_dir: Vec<PathBuf>,
+    /// 手动标记许可(网页/口头声明的「禁止二次分发」等): 写进 mod.toml [license], pack 默认拒绝
+    #[arg(long = "license-note")]
+    #[serde(default)]
+    pub license_note: Option<String>,
 }
 
 #[derive(Subcommand, Debug, Clone, Serialize, Deserialize)]
@@ -950,7 +954,11 @@ fn run_model(cli: &Cli, c: &ModelCmd) -> Result<Value> {
         bail!("需要且只能给一个目标: --hp / --part / --renderset");
     }
     let mut rec = match &c {
-        ModelCmd::List { .. } => return list(&root),
+        ModelCmd::List { .. } => {
+            let mut v = list(&root)?;
+            v["units"] = scale_info(&root, &p);
+            return Ok(v);
+        }
         ModelCmd::ExportBlender { out, hullsets, .. } => return export_blender(&root, &src, &t, out, hullsets),
         ModelCmd::Scale { factor, pivot, .. } => {
             let s = parse_vec3(factor)?;
@@ -1037,6 +1045,11 @@ fn run_model(cli: &Cli, c: &ModelCmd) -> Result<Value> {
     let name = c.name();
     let path = tx.commit(name, &c, rec.clone())?;
     rec["edit_record"] = json!(path.display().to_string());
+    if let Some(note) = t.license_note.as_deref().filter(|n| !n.trim().is_empty()) {
+        let mut p2 = Project::open(&t.project)?;
+        let added = p2.mark_restricted(&format!("手动标记: {note}"))?;
+        rec["license_manual"] = json!({"no_redistribute": true, "note": note, "newly_marked": added});
+    }
     if let ModelCmd::Import { mesh, .. } | ModelCmd::Animate { mesh, .. } = &c {
         rec["units"] = units_hint(&root, &p, &rec);
         if let Some(v) = crate::license::lookup(mesh) {
@@ -1062,6 +1075,21 @@ fn hull_length_units(root: &Path) -> Option<f64> {
         hi = hi.max(mx[2] + dz);
     }
     (hi > lo).then_some(hi - lo)
+}
+
+/// 船体长度(visual 单位)与米/单位(mod.toml 写了 ship_length_m 时)
+pub fn scale_info(root: &Path, p: &Project) -> Value {
+    let Some(len) = hull_length_units(root) else { return json!({"note": "算不出船体长度"}) };
+    let real = p.cfg.meta.ship_length_m;
+    let mut v = json!({"hull_length_units": (len * 1000.0).round() / 1000.0});
+    if real > 0.0 {
+        v["ship_length_m"] = json!(real);
+        v["m_per_unit"] = json!(((real / len) * 100.0).round() / 100.0);
+        v["examples_m"] = json!({"1.0": ((real / len) * 10.0).round() / 10.0, "1.4": ((1.4 * real / len) * 10.0).round() / 10.0, "2.0": ((2.0 * real / len) * 10.0).round() / 10.0});
+    } else {
+        v["how"] = json!("在 mod.toml [mod] 写 ship_length_m = <真实舰长(米)> 即可给出米/单位(或 wowsmod mod set <项目> --ship-length <米>)");
+    }
+    v
 }
 
 fn units_hint(root: &Path, p: &Project, rec: &Value) -> Value {

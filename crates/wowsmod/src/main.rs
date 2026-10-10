@@ -5,6 +5,7 @@
 mod ai;
 mod design;
 mod design_preview;
+mod shipcolor;
 mod game;
 mod guide;
 mod license;
@@ -172,6 +173,8 @@ enum Cmd {
     DesignBook(design::BookCmd),
     /// 方向粗样一键出图: 按 spec(TOML) 为每个方向复制基础项目、跑一串 wowsmod 命令、同机位出图并拼总表 / one-shot direction previews
     DesignPreview(design_preview::PreviewArgs),
+    /// 整船同色: 船体/上层建筑/炮塔/指挥仪/雷达按组一次换色(内部逐张 tex recolor + 清 _mg B) / recolor whole ship by part groups
+    ShipColor(shipcolor::ShipColorArgs),
     /// 发光: 写 _mg 的 B 通道(发光遮罩/强度)、把发光区漫反射染色、切换 .mfm 到 emissive 着色器 / emissive edit
     Glow(m2cmd::GlowArgs),
     /// 颜色换算: 想在港口里"看到"某颜色时贴图该用什么颜色(按勃艮第港口实测标定, 近似) / port colour compensation
@@ -336,6 +339,7 @@ fn run(cli: Cli) -> Result<i32> {
         Cmd::DesignTemplate(a) => design::cmd_template(&cli, a),
         Cmd::DesignBook(c) => design::cmd_book(&cli, c),
         Cmd::DesignPreview(a) => design_preview::cmd(&cli, a),
+        Cmd::ShipColor(a) => shipcolor::cmd(&cli, a),
         Cmd::Preview(a) => preview::cmd_preview(&cli, a),
         Cmd::Status(a) => ai::cmd_status(&cli, a),
         Cmd::Help { topic, search, tree, children, check } => ai::cmd_help(&cli, topic.as_deref(), search.as_deref(), *tree, *children, *check),

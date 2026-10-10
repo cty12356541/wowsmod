@@ -9,14 +9,9 @@
 import argparse, sys
 from PIL import Image, ImageDraw, ImageFont
 
-def font(sz):
-    for f in ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
-              "C:/Windows/Fonts/msyh.ttc", "C:/Windows/Fonts/simhei.ttf"):
-        try:
-            return ImageFont.truetype(f, sz)
-        except Exception:
-            pass
-    return ImageFont.load_default()
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from cjkfont import font  # 系统中文字体(WOWSMOD_CJK_FONT 可覆盖)
 
 ap = argparse.ArgumentParser()
 ap.add_argument("items", nargs="+", help="图片路径:标签")

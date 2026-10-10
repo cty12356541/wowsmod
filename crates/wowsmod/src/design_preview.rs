@@ -189,7 +189,7 @@ fn copy_dir(src: &Path, dst: &Path) -> Result<u64> {
     Ok(n)
 }
 
-fn run_self(cli: &Cli, args: &[String]) -> Value {
+pub(crate) fn run_self(cli: &Cli, args: &[String]) -> Value {
     let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("wowsmod"));
     let mut cmd = Command::new(exe);
     if let Some(g) = &cli.game {
