@@ -44,6 +44,8 @@ kernel32/ntdll/advapi32/bcryptprimitives/api-ms-win-core-synch, 无 vcruntime/uc
 - 替换点: `compression::OodleBackend` trait + `set_oodle_backend()`。默认后端是 crate `oozextract 0.5.5`
   (Cargo.toml 声明 MIT, 但仓库无 LICENSE 文件、且其算法来源于 ooz 的逆向实现, **许可证状态不确定**),
   因此做成可关闭的 cargo feature `oozextract`; 若将来需要替换为官方 Oodle SDK 或其他实现, 只需实现该 trait。
+- **已知限制**: oozextract 0.5.5 对 Hydra 压缩下"最后一块压缩后仅数十字节、解压目标 < 256 字节"的条目会报 `OozError`
+  (全客户端约 19 个贴图, 见 M1_REPORT); pfsunpack 内嵌的 OodleLZ 可解。属后端缺陷而非容器解析错误。
 
 ### 2.2 贴图 BC7Prep(M1 验收中发现)
 

@@ -12,10 +12,12 @@ $base = New-CleanDir (Join-Path $Root 'out\accept_roundtrip')
 if (-not (Test-Path (Join-Path $Root 'testdata\geometry18'))) { & "$PSScriptRoot\fetch_samples.ps1" -Game $Game -Exe $Exe }
 Push-Location $Root
 $env:WOWSMOD_REQUIRE_SAMPLES = '1'
-cargo test --release 2>&1 | Tee-Object -FilePath (Join-Path $base 'cargo_test.txt') | Out-Null
+# PowerShell 5 会把 cargo 写到 stderr 的 "Compiling..." 当成 NativeCommandError; 用 cmd 重定向只看退出码
+$cargoLog = Join-Path $base 'cargo_test.txt'
+cmd /c "cargo test --release > `"$cargoLog`" 2>&1"
 $testCode = $LASTEXITCODE
 Pop-Location
-Select-String -Path (Join-Path $base 'cargo_test.txt') -Pattern 'test result|panicked|FAILED' | ForEach-Object { $_.Line } | Write-Host
+Select-String -Path $cargoLog -Pattern 'test result|panicked|FAILED' | ForEach-Object { $_.Line } | Write-Host
 $r = Invoke-WowsmodJson $wm @('geom', (Join-Path $Root 'testdata\geometry18'), '--roundtrip')
 $r.Raw | Set-Content -Encoding UTF8 (Join-Path $base 'geom18.json')
 $s = $r.Json.summary
