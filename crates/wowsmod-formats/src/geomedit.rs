@@ -707,6 +707,15 @@ pub fn compare_geometry(a: &Geometry, b: &Geometry) -> Result<GeoCompare> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::vertex::unpack_uv;
+
+    #[test]
+    fn mapping_names() {
+        assert_eq!(mapping_stem("Turret"), "TurretShape");
+        assert_eq!(mapping_stem("BD018_Ster_Sell_Sight_lodShape2"), "BD018_Ster_Sell_Sight_lodShape2");
+        assert_eq!(vertices_id("X_lodShape2"), crate::murmur3::murmur3_32(b"X_lodShape2.vertices", 0));
+        assert_eq!(indices_id("Turret"), crate::murmur3::murmur3_32(b"TurretShape.indices", 0));
+    }
     #[test]
     fn pack_roundtrip() {
         let n = [0.3f32, -0.5, 0.81];
