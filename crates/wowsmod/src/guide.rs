@@ -442,6 +442,10 @@ pub fn stash(v: &Value) {
     }
 }
 
+pub fn peek() -> Option<Value> {
+    LAST.lock().ok().and_then(|g| g.clone())
+}
+
 pub fn take() -> Option<Value> {
     LAST.lock().ok().and_then(|mut g| g.take())
 }

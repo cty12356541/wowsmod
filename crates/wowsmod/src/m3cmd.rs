@@ -917,6 +917,21 @@ fn run_model(cli: &Cli, c: &ModelCmd) -> Result<Value> {
                 std::fs::create_dir_all(d)?;
             }
             std::fs::write(out, &glb).map_err(|e| anyhow!("写 {}: {e}", out.display()))?;
+            // 素材许可: PMX 目录里有"禁止二次配布"类规则 → 侧车 <out>.license.json, 下游 import 据此给项目置受限
+            let side = crate::license::sidecar(out);
+            match crate::license::scan_dir_for(pmx) {
+                Some(mut v) => {
+                    v["asset"] = json!(out.display().to_string());
+                    std::fs::write(&side, serde_json::to_string_pretty(&v)?)?;
+                    rep["license"] = json!({"no_redistribute": true, "rules_file": v["rules_file"], "matched": v["matched"], "sidecar": side.display().to_string(),
+                        "note": "受限素材: 导入后项目会标记 [license] no_redistribute, pack 默认拒绝; 本地 install 不受影响"});
+                }
+                None => {
+                    let _ = std::fs::remove_file(&side);
+                    rep["license"] = json!({"no_redistribute": false, "note": "素材目录里没找到禁止再分发的规则文本; 仍请自行核对作者条款"});
+                }
+            }
+            rep["ok"] = json!(true);
             rep["out"] = json!(out.display().to_string());
             rep["bytes"] = json!(glb.len());
             rep["next"] = json!("wowsmod model import --mesh <out.glb> --height <visual 单位> ...(每个材质一个 .mfm)");
@@ -1022,7 +1037,50 @@ fn run_model(cli: &Cli, c: &ModelCmd) -> Result<Value> {
     let name = c.name();
     let path = tx.commit(name, &c, rec.clone())?;
     rec["edit_record"] = json!(path.display().to_string());
+    if let ModelCmd::Import { mesh, .. } | ModelCmd::Animate { mesh, .. } = &c {
+        rec["units"] = units_hint(&root, &p, &rec);
+        if let Some(v) = crate::license::lookup(mesh) {
+            let why = crate::license::reason(&v);
+            let mut p2 = Project::open(&t.project)?;
+            let added = p2.mark_restricted(&why)?;
+            rec["license"] = json!({"no_redistribute": true, "reason": why, "newly_marked": added,
+                "note": "项目已标记含禁止再分发素材: wowsmod pack 默认拒绝(本地 install 正常); 确需打包自用用 --allow-restricted"});
+        }
+    }
     Ok(rec)
+}
+
+/// 船体长度(visual 单位, 各分段包围盒 z 范围并集) → 米/单位与导入物尺寸换算
+fn hull_length_units(root: &Path) -> Option<f64> {
+    let (_, secs) = sections(root).ok()?;
+    let (mut lo, mut hi) = (f64::MAX, f64::MIN);
+    for s in &secs {
+        let v = Visual::parse(&std::fs::read_to_string(s.visuals.first()?).ok()?).ok()?;
+        let (mn, mx) = v.bbox?;
+        let dz = section_matrix(root, &s.sec).map(|m| m[3][2] as f64).unwrap_or(0.0);
+        lo = lo.min(mn[2] + dz);
+        hi = hi.max(mx[2] + dz);
+    }
+    (hi > lo).then_some(hi - lo)
+}
+
+fn units_hint(root: &Path, p: &Project, rec: &Value) -> Value {
+    let Some(len) = hull_length_units(root) else { return json!({"note": "算不出船体长度"}) };
+    let h = rec["placement"]["fit_height"]["target_height"].as_f64().or_else(|| rec["geometry"]["fit_height"]["target_height"].as_f64());
+    let real = p.cfg.meta.ship_length_m as f64;
+    let mut v = json!({"hull_length_units": (len * 1000.0).round() / 1000.0, "how": "米/单位 = 真实舰长(m) ÷ hull_length_units; 在 mod.toml [mod] ship_length_m 写上舰长即可自动换算"});
+    if let Some(h) = h {
+        v["object_height_units"] = json!(h);
+        v["object_height_pct_of_hull"] = json!(((h / len) * 1000.0).round() / 10.0);
+    }
+    if real > 0.0 {
+        let m = real / len;
+        v["m_per_unit"] = json!((m * 100.0).round() / 100.0);
+        if let Some(h) = h {
+            v["object_height_m"] = json!((h * m * 10.0).round() / 10.0);
+        }
+    }
+    v
 }
 
 // ───────────── list ─────────────

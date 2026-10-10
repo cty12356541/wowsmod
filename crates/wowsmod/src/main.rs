@@ -4,8 +4,10 @@
 //! 所有子命令支持 `--json`(机器可读输出, 供 AI 代理调用)。
 mod ai;
 mod design;
+mod design_preview;
 mod game;
 mod guide;
+mod license;
 mod m2cmd;
 mod m3cmd;
 mod m4cmd;
@@ -48,6 +50,9 @@ struct Cli {
     /// 输出 JSON / machine-readable JSON output
     #[arg(long, global = true)]
     json: bool,
+    /// 把 JSON 结果按 UTF-8 写进文件(隐含 --json; 适合 PowerShell 等会改编码的管道) / write JSON result to file (UTF-8)
+    #[arg(long, global = true, value_name = "FILE")]
+    json_out: Option<PathBuf>,
     #[command(subcommand)]
     cmd: Cmd,
 }
@@ -165,6 +170,8 @@ enum Cmd {
     /// 设计书/拆解书: init / check / revise / finalize(定稿后再执行; 未定稿时执行类命令会提示) / design book
     #[command(subcommand)]
     DesignBook(design::BookCmd),
+    /// 方向粗样一键出图: 按 spec(TOML) 为每个方向复制基础项目、跑一串 wowsmod 命令、同机位出图并拼总表 / one-shot direction previews
+    DesignPreview(design_preview::PreviewArgs),
     /// 发光: 写 _mg 的 B 通道(发光遮罩/强度)、把发光区漫反射染色、切换 .mfm 到 emissive 着色器 / emissive edit
     Glow(m2cmd::GlowArgs),
     /// 颜色换算: 想在港口里"看到"某颜色时贴图该用什么颜色(按勃艮第港口实测标定, 近似) / port colour compensation
@@ -242,14 +249,32 @@ enum PairingMode {
 fn main() {
     use clap::{CommandFactory, FromArgMatches};
     let m = guide::decorate(Cli::command()).get_matches();
-    let cli = match Cli::from_arg_matches(&m) {
+    let mut cli = match Cli::from_arg_matches(&m) {
         Ok(c) => c,
         Err(e) => e.exit(),
     };
+    let json_out = cli.json_out.clone();
+    if json_out.is_some() {
+        cli.json = true;
+    }
     let json_mode = cli.json;
     let key = guide::cmd_key();
+    let write_out = |v: &Value| {
+        if let Some(f) = &json_out {
+            if let Some(d) = f.parent().filter(|d| !d.as_os_str().is_empty()) {
+                let _ = std::fs::create_dir_all(d);
+            }
+            if let Err(e) = std::fs::write(f, serde_json::to_string_pretty(v).unwrap_or_default()) {
+                eprintln!("写 --json-out {} 失败: {e}", f.display());
+            }
+        }
+    };
     match run(cli) {
         Ok(code) => {
+            if json_out.is_some() {
+                let v = guide::peek().map(|v| guide::with_next(&v)).unwrap_or_else(|| json!({"ok": code == 0}));
+                write_out(&v);
+            }
             if !json_mode {
                 guide::print_next_human(code);
             }
@@ -258,6 +283,7 @@ fn main() {
         Err(e) => {
             let chain: Vec<String> = e.chain().map(|c| c.to_string()).collect();
             let hint = guide::error_hint(&key, &chain.join(" | "));
+            write_out(&json!({"ok": false, "error": chain, "next": hint}));
             if json_mode {
                 println!("{}", serde_json::to_string_pretty(&json!({"ok": false, "error": chain, "next": hint})).unwrap());
             } else {
@@ -309,6 +335,7 @@ fn run(cli: Cli) -> Result<i32> {
         Cmd::BakeRef(a) => design::cmd_bake_ref(&cli, a),
         Cmd::DesignTemplate(a) => design::cmd_template(&cli, a),
         Cmd::DesignBook(c) => design::cmd_book(&cli, c),
+        Cmd::DesignPreview(a) => design_preview::cmd(&cli, a),
         Cmd::Preview(a) => preview::cmd_preview(&cli, a),
         Cmd::Status(a) => ai::cmd_status(&cli, a),
         Cmd::Help { topic, search, tree, children, check } => ai::cmd_help(&cli, topic.as_deref(), search.as_deref(), *tree, *children, *check),

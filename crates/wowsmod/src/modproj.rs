@@ -26,6 +26,24 @@ pub struct ModToml {
     pub meta: ModMeta,
     #[serde(default)]
     pub install: InstallCfg,
+    /// 素材许可: 含"禁止二次配布"类素材时置位, pack 默认拒绝(本地 install 不受影响)
+    #[serde(default, skip_serializing_if = "LicenseCfg::is_empty")]
+    pub license: LicenseCfg,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct LicenseCfg {
+    /// true = 项目含禁止再分发的素材; `wowsmod pack` 默认拒绝, 需 `--allow-restricted` 显式覆盖
+    #[serde(default)]
+    pub no_redistribute: bool,
+    /// 来源说明(哪个素材、哪个规则文件、命中的字句)
+    #[serde(default)]
+    pub reasons: Vec<String>,
+}
+impl LicenseCfg {
+    pub fn is_empty(&self) -> bool {
+        !self.no_redistribute && self.reasons.is_empty()
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -43,6 +61,12 @@ pub struct ModMeta {
     pub ship: String,
     #[serde(default = "default_fmt")]
     pub format_version: u32,
+    /// 真实舰长(米, 可选): 给了就在导入人物/道具时把 visual 单位换算成米
+    #[serde(default, skip_serializing_if = "is_zero_f32")]
+    pub ship_length_m: f32,
+}
+fn is_zero_f32(x: &f32) -> bool {
+    *x == 0.0
 }
 fn default_version() -> String {
     "0.1.0".into()
@@ -137,14 +161,34 @@ impl Project {
         std::fs::create_dir_all(root.join("edits"))?;
         std::fs::create_dir_all(root.join(ASSETS))?;
         let cfg = ModToml {
-            meta: ModMeta { name: name.into(), version: default_version(), description: String::new(), game_build: build.into(), ship: ship.into(), format_version: 1 },
+            meta: ModMeta { name: name.into(), version: default_version(), description: String::new(), game_build: build.into(), ship: ship.into(), format_version: 1, ship_length_m: 0.0 },
             install: InstallCfg { mode: mode.into() },
+            license: LicenseCfg::default(),
         };
         let mut s = String::from("# wowsmod mod 项目(格式版本 1)。assets/res_mods 下的文件按相对路径安装到游戏 res_mods。\n");
         s += &toml::to_string_pretty(&cfg).map_err(|e| anyhow!("{e}"))?;
         std::fs::write(root.join("mod.toml"), s)?;
         std::fs::write(root.join(".gitignore"), ".install/\n")?;
         Ok(Project { root: root.to_path_buf(), cfg })
+    }
+    /// 重写 mod.toml(保留首行注释)
+    pub fn save_cfg(&self) -> Result<()> {
+        let mut s = String::from("# wowsmod mod 项目(格式版本 1)。assets/res_mods 下的文件按相对路径安装到游戏 res_mods。\n");
+        s += &toml::to_string_pretty(&self.cfg).map_err(|e| anyhow!("{e}"))?;
+        std::fs::write(self.root.join("mod.toml"), s)?;
+        Ok(())
+    }
+    /// 标记项目含禁止再分发素材(幂等); 返回是否新加了理由
+    pub fn mark_restricted(&mut self, reason: &str) -> Result<bool> {
+        let new = !self.cfg.license.reasons.iter().any(|r| r == reason);
+        if new {
+            self.cfg.license.reasons.push(reason.to_string());
+        }
+        if new || !self.cfg.license.no_redistribute {
+            self.cfg.license.no_redistribute = true;
+            self.save_cfg()?;
+        }
+        Ok(new)
     }
     pub fn assets(&self) -> PathBuf {
         self.root.join(ASSETS)

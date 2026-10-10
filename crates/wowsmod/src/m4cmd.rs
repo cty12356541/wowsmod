@@ -99,6 +99,9 @@ pub struct PackArgs {
     /// 另附可手动复制的完整 res_mods 树(含从你的游戏补齐的原版资源; 只适合自用/转给同版本玩家)
     #[arg(long)]
     pub full: bool,
+    /// 显式覆盖受限素材拦截(项目 [license] no_redistribute = true 时 pack 默认拒绝)。只用于自用备份, 不得公开分发
+    #[arg(long)]
+    pub allow_restricted: bool,
 }
 
 fn home() -> PathBuf {
@@ -559,6 +562,13 @@ fn forbidden(rel: &str) -> Option<&'static str> {
 pub fn cmd_pack(cli: &Cli, a: &PackArgs) -> Result<i32> {
     let p = Project::open(&a.project)?;
     let meta = &p.cfg.meta;
+    let lic = &p.cfg.license;
+    if lic.no_redistribute && !a.allow_restricted {
+        bail!(
+            "项目含禁止二次配布/再分发的素材, 默认不打包(本地 wowsmod install 不受影响):\n  {}\n下一步: 只在本机用 install; 确需打包自用备份时加 --allow-restricted(包内会写明受限, 不得公开分发); 去掉受限素材后可在 mod.toml 删除 [license] 段",
+            if lic.reasons.is_empty() { "mod.toml [license] no_redistribute = true".to_string() } else { lic.reasons.join("\n  ") }
+        );
+    }
     let mut entries = Vec::new();
     let mut files = Vec::new();
     let mut bad = Vec::new();
@@ -613,7 +623,8 @@ pub fn cmd_pack(cli: &Cli, a: &PackArgs) -> Result<i32> {
         full_note = json!(format!("res_mods/ 下是完整可复制的文件({full_n} 个), 含从游戏客户端 {} 补齐的原版资源", ctx.install.build));
     }
     let readme = format!(
-        "{name} {ver}\r\n{desc}\r\n\r\n目标船: {ship}    制作时客户端构建: {build}\r\n\r\n安装(推荐): 用 wowsmod\r\n  wowsmod install {name}-{ver}.{PKG_EXT}\r\n卸载:\r\n  wowsmod uninstall {name}\r\n\r\n说明: 包里只有 mod 自己的文件; SDK 占位文件({n_stub} 个)会在安装时从你自己的游戏客户端补齐,\r\n所以包里不含游戏原版资源, 也不含任何专有组件(Oodle 运行库、pfsunpack 等)。\r\n{full}",
+        "{name} {ver}\r\n{desc}\r\n\r\n目标船: {ship}    制作时客户端构建: {build}\r\n\r\n安装(推荐): 用 wowsmod\r\n  wowsmod install {name}-{ver}.{PKG_EXT}\r\n卸载:\r\n  wowsmod uninstall {name}\r\n\r\n说明: 包里只有 mod 自己的文件; SDK 占位文件({n_stub} 个)会在安装时从你自己的游戏客户端补齐,\r\n所以包里不含游戏原版资源, 也不含任何专有组件(Oodle 运行库、pfsunpack 等)。\r\n{full}{restricted}",
+        restricted = if lic.no_redistribute { format!("\r\n【受限】本包含禁止二次配布的素材, 仅限打包者本人自用备份, 不得公开分发/上传/转赠:\r\n  {}\r\n", lic.reasons.join("\r\n  ")) } else { String::new() },
         name = meta.name,
         ver = meta.version,
         desc = meta.description,
@@ -639,7 +650,7 @@ pub fn cmd_pack(cli: &Cli, a: &PackArgs) -> Result<i32> {
     std::fs::write(&out, &z)?;
     // 自检: 读回并校验
     let back = zipfile::read(&std::fs::read(&out)?).map_err(|e| anyhow!("自检失败: {e}"))?;
-    let v = json!({"ok": true, "package": out.display().to_string(), "bytes": z.len(), "sha256": sha256_hex(&z), "entries": back.len(), "mod_files": n_real, "stubs_filled_at_install": n_stub, "full_files": full_n, "excluded": ["oo2core*/oodle*", "pfsunpack*/mkut*", "*.exe/*.dll/脚本", ".install/", "edits/.undo"]});
+    let v = json!({"ok": true, "package": out.display().to_string(), "bytes": z.len(), "sha256": sha256_hex(&z), "entries": back.len(), "mod_files": n_real, "stubs_filled_at_install": n_stub, "full_files": full_n, "excluded": ["oo2core*/oodle*", "pfsunpack*/mkut*", "*.exe/*.dll/脚本", ".install/", "edits/.undo"], "restricted": lic.no_redistribute});
     crate::guide::stash(&v);
     if cli.json {
         emit(cli, &v);
