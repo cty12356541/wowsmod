@@ -291,6 +291,11 @@ impl<'a> GameLookup<'a> {
                 return Ok(hv[0]);
             }
         }
+        // 船模用到的资源都在 content/gameplay/ 下(M0 补齐时 default_ao.dds 等重名文件也取这里)
+        let cg: Vec<_> = v.iter().filter(|e| e.path.to_lowercase().starts_with("content/gameplay/")).collect();
+        if cg.len() == 1 {
+            return Ok(cg[0]);
+        }
         bail!("游戏包里有 {} 个名为 {name} 的不同文件, 无法确定: {}", v.len(), v.iter().map(|e| e.path.as_str()).collect::<Vec<_>>().join(", "))
     }
 }

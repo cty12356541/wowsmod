@@ -1,6 +1,11 @@
 # M2 报告(进行中 — 断点续作记录)
 
 ## 进度(最新在上)
+- [x] 命令实现(提交 24c5c44, 盒子与 Windows 构建 + 42 个单元测试通过):
+  - `tex info/export/import/rewrite/recolor`、`mask`、`glow`、`mod init/import-sdk/status`、`install --dev`、`uninstall`, 全部支持 `--json`。
+  - 盒子实测(本地贴图): tex rewrite 对 DeckHouse_a/Hull_n/Hull_mg/DeckHouse_ao 的 .dds+.dd0–2 与原文件逐字节一致; export→import(BC1)PSNR 45.1 dB, 头部 128 字节相同。
+  - 烟囱遮罩: MidBack 的 rs3(材质 DeckHouse_skinned)即烟囱主体, 752 个三角形, 覆盖 DeckHouse 贴图 3.1%, 与非 skinned DeckHouse 部件共用 UV 仅 0.09%。
+  - 换色 #1E3F66 + `--exclude-hue 0:65`(保留木甲板/锈迹/船底红): 选区平均色精确落到目标色, 明暗细节保留(预览 /workspace/m2/t1/rc_hull_preview.png)。
 - [x] 发光研究(着色器反汇编, 证据 out\m2_glow\dxbc\*.asm):
   - 官方发光皮肤(如 FSB020_France_Space_1957_*_emissive.mfm)用 shader 6 = PBS_ship_emissive, 参数 emissivePower=0.5, animMap=default_emission_timeline.dds。
   - PBS_ship_emissive 像素着色器(b22): 静态发光 = mg.B² × 漫反射颜色(线性) × g_emissionTint[实例](引擎按实例给, 值不确定) × tint.w × emissivePower;
