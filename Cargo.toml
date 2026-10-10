@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = ["crates/wowsmod-formats", "crates/wowsmod"]
+exclude = ["vendor/oozextract"]
 
 [workspace.package]
 version = "0.1.0"
@@ -26,3 +27,7 @@ panic = "unwind"
 opt-level = 2
 [profile.dev.package."*"]
 opt-level = 2
+
+# oozextract 0.5.5 的本地补丁版(MIT): 修复短块尾部预读越界(见 vendor/oozextract/WOWSMOD_PATCH.md)
+[patch.crates-io]
+oozextract = { path = "vendor/oozextract" }
