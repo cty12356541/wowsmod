@@ -1,0 +1,18 @@
+# 第一轮: 只镜像文本(报告/分析/设计书/脚本/清单); 图片用 e2e_rules.txt 第二轮补
++ *.md
++ *.json
++ *.txt
++ *.tsv
++ *.py
++ *.ps1
++ *.sh
++ *.toml
++ *.patch
++ *.log
+- sync/*
+- */.wowsmod/*
+- refs/firefly_mod/x/*
+- refs/mods/*
+- refs/frames/*/deep/*
+- robin/extracted/*
+max_mb 5
