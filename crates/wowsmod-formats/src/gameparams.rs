@@ -113,3 +113,54 @@ pub fn ships_from_raw(raw: &[u8]) -> Result<Vec<ShipParam>> {
     ships.sort_by(|a, b| a.index.cmp(&b.index));
     Ok(ships)
 }
+
+/// pickle 值 → JSON(对象取 state; 深度上限防止环)
+pub fn to_json(v: &Value, depth: usize) -> serde_json::Value {
+    use serde_json::Value as J;
+    if depth > 24 {
+        return J::Null;
+    }
+    match v.deref_obj() {
+        Value::None | Value::Mark => J::Null,
+        Value::Bool(b) => J::Bool(b),
+        Value::Int(i) => J::from(i),
+        Value::BigInt(_) => J::Null,
+        Value::Float(f) => serde_json::Number::from_f64(f).map(J::Number).unwrap_or(J::Null),
+        Value::Str(s) => J::String(s.to_string()),
+        Value::Bytes(b) => J::String(String::from_utf8_lossy(&b).into_owned()),
+        Value::List(l) => J::Array(l.borrow().iter().map(|x| to_json(x, depth + 1)).collect()),
+        Value::Tuple(t) => J::Array(t.iter().map(|x| to_json(x, depth + 1)).collect()),
+        Value::Dict(d) => {
+            let mut m = serde_json::Map::new();
+            for (k, x) in d.borrow().iter() {
+                let ks = match k {
+                    Value::Str(s) => s.to_string(),
+                    Value::Int(i) => i.to_string(),
+                    _ => continue,
+                };
+                m.insert(ks, to_json(x, depth + 1));
+            }
+            J::Object(m)
+        }
+        Value::Class(c) => J::String(c.to_string()),
+        Value::Object(_) => J::Null,
+    }
+}
+
+/// 取一条舰船条目的完整 JSON。`key` 可以是 name(PFSB510_Bourgogne)或 index(PFSB510)。
+pub fn ship_json(raw: &[u8], key: &str) -> Result<(String, serde_json::Value)> {
+    let u = decompress(raw)?;
+    let top = pickle::load(&u)?;
+    let dict = match &top {
+        Value::Tuple(t) => t.first().cloned().unwrap_or(Value::None),
+        v => v.clone(),
+    };
+    for (_, v) in dict.items() {
+        let name = v.get("name").and_then(|x| x.as_str().map(str::to_string)).unwrap_or_default();
+        let index = v.get("index").and_then(|x| x.as_str().map(str::to_string)).unwrap_or_default();
+        if name == key || index == key {
+            return Ok((name, to_json(&v, 0)));
+        }
+    }
+    Err(Error::NotFound(format!("GameParams 中没有 {key}")))
+}

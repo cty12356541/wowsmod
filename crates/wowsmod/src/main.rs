@@ -1,9 +1,10 @@
 //! wowsmod —— 莱服《战舰世界》(Мир кораблей) AI 改模工具箱命令行。
 //!
-//! 子命令: doctor / find / extract / export / check / geom / tex / mask / glow / mod / install / uninstall
+//! 子命令: doctor / find / extract / export / check / geom / tex / mask / glow / mod / install / uninstall / assemble / model
 //! 所有子命令支持 `--json`(机器可读输出, 供 AI 代理调用)。
 mod game;
 mod m2cmd;
+mod m3cmd;
 mod modproj;
 mod texcmd;
 
@@ -167,6 +168,11 @@ enum Cmd {
         #[arg(long)]
         dry_run: bool,
     },
+    /// 整船装配: SDK visual + geometry + GameParams 挂点 → 带层级的 GLB 与装配表 JSON / assemble a whole ship
+    Assemble(m3cmd::AssembleArgs),
+    /// 模型写回: list / scale / move / rotate / replace / remove / add / rebuild / export-blender / import-blender / undo / replay
+    #[command(subcommand)]
+    Model(m3cmd::ModelCmd),
     /// 按安装清单精确卸载(只删哈希一致的文件, 还原被覆盖的文件, 删除空的新建目录)
     Uninstall {
         dir: PathBuf,
@@ -228,6 +234,8 @@ fn run(cli: Cli) -> Result<i32> {
         Cmd::Mod(c) => m2cmd::cmd_mod(&cli, c),
         Cmd::Install { dir, dev, dry_run } => m2cmd::cmd_install(&cli, dir, *dev, *dry_run),
         Cmd::Uninstall { dir, dry_run } => m2cmd::cmd_uninstall(&cli, dir, *dry_run),
+        Cmd::Assemble(a) => m3cmd::cmd_assemble(&cli, a),
+        Cmd::Model(c) => m3cmd::cmd_model(&cli, c),
     }
 }
 

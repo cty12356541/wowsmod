@@ -24,6 +24,7 @@
 //! 部分实现参考 landaire/wows-toolkit (MIT, Copyright 2026 Lander Brandt),
 //! 具体文件头部有注明。
 
+pub mod assemble;
 pub mod assets_bin;
 pub mod bc7prep;
 pub mod color;
@@ -33,6 +34,7 @@ pub mod error;
 pub mod export;
 pub mod gameparams;
 pub mod geometry;
+pub mod geomedit;
 pub mod glb;
 pub mod health;
 pub mod idx;
@@ -44,10 +46,12 @@ pub mod pairing;
 pub mod pickle;
 pub mod pkg;
 pub mod recolor;
+pub mod scene;
 pub mod texture;
 pub mod util;
 pub mod uvmask;
 pub mod vertex;
 pub mod vertex_codec;
+pub mod visual;
 
 pub use error::{Error, Result};
