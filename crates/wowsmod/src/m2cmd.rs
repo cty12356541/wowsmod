@@ -521,6 +521,9 @@ pub struct GlowArgs {
     /// 遮罩外保留原 B 通道(默认清零; 原 B 不是发光遮罩, 保留会导致大面积误发光)
     #[arg(long)]
     pub keep_b_outside: bool,
+    /// B 上限 0..255(遮罩满值处的 B; 低值如 25–50 = 大面积微光, 官方/流萤式整船微光约 ≤49)
+    #[arg(long, default_value_t = 255)]
+    pub b_max: u8,
     #[command(flatten)]
     pub mask: MaskArgs,
     /// 要切到发光着色器的 .mfm(项目内文件名或路径), 可重复; 只有用这些材质的部件会发光
@@ -563,7 +566,7 @@ pub fn cmd_glow(cli: &Cli, a: &GlowArgs) -> Result<i32> {
     let mut mgi = texture::decode_level(&mg.dds, 0).map_err(|e| anyhow!("{e}"))?;
     let (m, minfo) = a.mask.build(mgi.width, mgi.height)?;
     let m = m.unwrap_or_else(|| recolor::Mask::filled(mgi.width, mgi.height, 1.0));
-    let gst = recolor::write_glow_channel(&mut mgi, &m, &GlowEdit { intensity: a.intensity, keep_outside: a.keep_b_outside });
+    let gst = recolor::write_glow_channel(&mut mgi, &m, &GlowEdit { intensity: a.intensity, keep_outside: a.keep_b_outside, b_max: a.b_max });
     let out_dir = a.out.clone();
     let dst_of = |t: &texcmd::Tex| -> Result<PathBuf> { texcmd::resolve_dst(out_dir.as_deref().map(|o| o as &Path), pj.as_ref(), t) };
     if let Some(o) = &a.out {
@@ -602,7 +605,7 @@ pub fn cmd_glow(cli: &Cli, a: &GlowArgs) -> Result<i32> {
     if a.mfm.is_empty() {
         warnings.push("没有 --mfm: 只改了贴图。发光需要材质用 PBS_ship_emissive 着色器(SDK 路线可改明文 .mfm); 否则 B 通道只影响贴花混合, 不会发光".to_string());
     }
-    let rec = json!({"mg": mg.label, "mg_sha256": mg.sha256, "mask": minfo, "glow": gst, "intensity": a.intensity, "tint": tint, "mfm": mfms, "outputs": texcmd::outputs_json(pj.as_ref(), &outs), "warnings": warnings});
+    let rec = json!({"mg": mg.label, "mg_sha256": mg.sha256, "mask": minfo, "glow": gst, "intensity": a.intensity, "b_max": a.b_max, "tint": tint, "mfm": mfms, "outputs": texcmd::outputs_json(pj.as_ref(), &outs), "warnings": warnings});
     let ep = if let Some(pj) = &pj { Some(pj.record_edit("glow", rec.clone())?) } else { None };
     report(cli, "已写入", &rec, ep.as_deref());
     if !cli.json {

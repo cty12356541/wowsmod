@@ -352,7 +352,9 @@ impl PreviewState {
                 }
                 let val = match ty.as_str() {
                     "Float" => json!(v.parse::<f64>().unwrap_or(0.0)),
-                    "Int" | "Bool" => json!(v.parse::<i64>().unwrap_or(0)),
+                    "Int" => json!(v.trim().parse::<i64>().unwrap_or(0)),
+                    // mfm 里 Bool 写作 true/false
+                    "Bool" => json!(matches!(v.trim().to_ascii_lowercase().as_str(), "true" | "1")),
                     _ => json!(v),
                 };
                 params.insert(n, val);
@@ -423,7 +425,7 @@ impl PreviewState {
     fn model_key(&self) -> Option<String> {
         let assets = self.project.assets();
         let edited_record = std::fs::read_dir(self.project.root.join("edits")).map(|rd| rd.flatten().any(|e| e.file_name().to_string_lossy().contains("_model_"))).unwrap_or(false);
-        let mut items: Vec<String> = vec!["fallback-v2".into()]; // 后处理格式版本, 变了就重建
+        let mut items: Vec<String> = vec!["fallback-v3".into()]; // 后处理格式版本, 变了就重建
         let mut real_geom = false;
         let mut st = vec![assets];
         while let Some(d) = st.pop() {
@@ -435,7 +437,8 @@ impl PreviewState {
                     continue;
                 }
                 let ext = p.extension().and_then(|x| x.to_str()).unwrap_or("").to_ascii_lowercase();
-                if ext != "geometry" && ext != "visual" {
+                // .model/.seq/.ssm: 动画对象(model animate)也要触发重新装配
+                if !matches!(ext.as_str(), "geometry" | "visual" | "model" | "seq" | "ssm") {
                     continue;
                 }
                 let Ok(m) = e.metadata() else { continue };
@@ -1271,6 +1274,10 @@ fn postprocess_glb_materials(raw: &[u8]) -> Result<Vec<u8>> {
                 n["extras"]["lods"] = json!([{"lod": 0, "extent": 1e9}]);
             }
             let name = n["name"].as_str().unwrap_or("").to_string();
+            if n["extras"].get("anim").is_some() {
+                // seq 驱动的独立模型: 单独成部件, 前端按 extras.anim.frames 播放
+                n["extras"]["part"] = json!(format!("anim/{name}"));
+            }
             if name.starts_with("HP_") {
                 n["extras"]["part"] = json!(name);
                 n["extras"]["hp"] = json!(name);

@@ -4,6 +4,8 @@
 - 哪些材质能发光: 用 `wowsmod lineart … --material x` 的报错列出材质; ship_material(_skinned) 类都有 emissive 变体(船体/上层/炮塔/炮管)。
 - 一张 `_mg` 的所有发光遮罩要**一次给齐**(多个 `--mask` 取并集), 后一次 glow 会清掉前一次。
 - 发光遮罩来源: 层 4 的图案键色、`lineart --crease/--boundary/--contour/--rings/--fill`(按几何/世界位置)。
+- 两种发光风格(参考原包时先量 `_mg` B 的最大值与占比): ①大面积微光——B 只有 0.1–0.2(×255 ≈ 25–50), 面积可大, emissivePower 用默认; ②局部强光——小面积 B=1。不要把①做成满值 B, 会整船发白。①用 `glow --b-max 40` / `model import --b-max 40`(满值处 B=40, 软边按比例)。
+- 衣物/薄片/头发类额外模型: 材质开 `doubleSided`, 镂空用 `alphaTestEnable`+`alphaReference`。
 - 发光色: 霓虹常是近白的浅色核心, 不是纯饱和色; emissivePower 0.3–0.4 起试。
 - 动画: `glow --mfm-set emissionAnimationMode=Int:1` 等(效果需港口确认)。
 

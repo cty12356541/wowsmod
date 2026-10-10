@@ -24,6 +24,7 @@
 //! 部分实现参考 landaire/wows-toolkit (MIT, Copyright 2026 Lander Brandt),
 //! 具体文件头部有注明。
 
+pub mod anim;
 pub mod assemble;
 pub mod assets_bin;
 pub mod bc7prep;

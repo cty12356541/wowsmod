@@ -164,6 +164,8 @@ Generated 2026-10-10 (Asia/Shanghai). Scope: Rust release dependency graph of `w
 - miniz_oxide 0.9.1
 - safe_arch 0.7.4
 - wide 0.7.33
+- zune-core 0.4.12
+- zune-jpeg 0.4.21
 
 ## npm packages by license (preview frontend build)
 
@@ -292,3 +294,9 @@ Direct runtime deps: `@radix-ui/react-dialog`, `@radix-ui/react-dropdown-menu`, 
 - `block_compression` MIT — BC1–7 codecs.
 
 - `miniz_oxide` MIT/Zlib/Apache — deflate.
+
+- `zune-jpeg` / `zune-core` MIT OR Apache-2.0 OR Zlib — JPEG 解码(model import 多材质 GLB 贴图), 纯 Rust。
+
+- 外部可选工具(不分发, 不链接): Blender(GPL-2.0+)与 mmd_tools 插件(GPL-3.0), 仅由 `scripts/model/pmx_to_glb_blender.py` 在用户机器上命令行调用。
+
+- 测试模型不入库: `scripts/model/fetch_test_models.sh` 下载 Khronos glTF-Sample-Assets 的 AlphaBlendModeTest(© 2018 Analytical Graphics, Inc., CC-BY-4.0, 作者 Ed Mackey)到本地。

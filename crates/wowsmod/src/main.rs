@@ -9,6 +9,7 @@ mod guide;
 mod m2cmd;
 mod m3cmd;
 mod m4cmd;
+mod meshsrc;
 mod mcp;
 mod preview;
 mod modproj;

@@ -27,6 +27,8 @@ sha2 = "0.10"
 # mod.toml(MIT/Apache)
 toml = "0.8"
 regex = "1"
+# model import 多材质 GLB 的 JPEG 贴图(MIT OR Apache-2.0 OR Zlib, 纯 Rust)
+zune-jpeg = "0.4"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"

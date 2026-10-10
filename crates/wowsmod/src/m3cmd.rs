@@ -28,6 +28,8 @@ use crate::modproj::{self, GameLookup, Project};
 
 #[path = "m3import.rs"]
 mod import;
+#[path = "m3anim.rs"]
+mod anim_cmd;
 use crate::{emit, game_ctx, Cli, GameCtx};
 
 /// 取真实 .geometry 字节: 先查 --geom-dir(按文件名, 递归), 再查游戏包(按需加载索引)。
@@ -632,6 +634,125 @@ pub enum ModelCmd {
         /// 只写进 LOD0(默认全部 LOD)
         #[arg(long)]
         lod0_only: bool,
+        /// 发光 B 上限 0..255(遮罩满值处的 B)。低值(25–50)= 大面积微光, 255 = 局部全亮
+        #[arg(long, default_value_t = 255)]
+        b_max: u8,
+        /// 材质: auto(GLB 自带材质且没给 --texture/--color 时, 每个 glTF 材质一个 .mfm + 自己的贴图, 共用图集只存一份) / single(整网格一个材质)
+        #[arg(long, default_value = "auto")]
+        materials: String,
+        /// 这些 glTF 材质(正则匹配材质名)整块发光
+        #[arg(long)]
+        glow_mat: Option<String>,
+        /// 全部材质双面(doubleSided; glTF 材质自带的 doubleSided 也会保留)
+        #[arg(long)]
+        double_sided: bool,
+        /// 全部材质 alpha 测试阈值 0..255(alphaTestEnable + alphaReference; glTF MASK 材质自动用 alphaCutoff)
+        #[arg(long)]
+        alpha_test: Option<u8>,
+        /// 等比缩放到这个高度(网格 y 向, visual 单位); 覆盖 --scale
+        #[arg(long)]
+        height: Option<f64>,
+    },
+    /// 外部网格做成会动的独立模型(misc/<名>.model + .seq/.ssm), 挂到分段 .model 的 <animations>: 自转/环绕/浮动
+    Animate {
+        #[command(flatten)]
+        t: Target,
+        /// 网格 .glb/.obj(多材质 GLB 同 import)
+        #[arg(long)]
+        mesh: PathBuf,
+        /// 模板渲染集(正则, 在 --section 的 visual 里找): 提供材质模板
+        #[arg(long)]
+        like: String,
+        /// 预设: spin(自转) / orbit(环绕) / float(浮动)
+        #[arg(long, default_value = "spin")]
+        preset: String,
+        /// 位置 x,y,z(分段坐标; orbit 时为圆心)
+        #[arg(long, default_value = "0,0,0", allow_hyphen_values = true)]
+        at: String,
+        /// 网格自身旋转(度)
+        #[arg(long, default_value = "0,0,0", allow_hyphen_values = true)]
+        rot: String,
+        #[arg(long, default_value = "1")]
+        scale: String,
+        /// 等比缩放到这个高度(visual 单位)
+        #[arg(long)]
+        height: Option<f64>,
+        /// 自转每分钟转数(负 = 反向); spin 默认 10
+        #[arg(long, allow_hyphen_values = true)]
+        rpm: Option<f64>,
+        /// 自转轴: vertical(yaw) / pitch / roll
+        #[arg(long, default_value = "vertical")]
+        axis: String,
+        /// orbit 半径(visual 单位)
+        #[arg(long, default_value_t = 0.0)]
+        radius: f64,
+        /// orbit 每分钟圈数(默认 3)
+        #[arg(long, allow_hyphen_values = true)]
+        orbit_rpm: Option<f64>,
+        /// orbit 初始相位(度)
+        #[arg(long, default_value_t = 0.0, allow_hyphen_values = true)]
+        phase: f64,
+        /// 上下浮动振幅(visual 单位; float 默认 0.02; 其它预设给了就叠加)
+        #[arg(long)]
+        float_amp: Option<f64>,
+        /// 浮动周期(秒)
+        #[arg(long, default_value_t = 4.0)]
+        period: f64,
+        /// 独立模型的顶点格式
+        #[arg(long, default_value = "set3/xyznuvtbpc")]
+        format: String,
+        /// 每级 LOD 的分段 .model 都挂(默认只挂 LOD0)
+        #[arg(long)]
+        all_lods: bool,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        texture: Option<PathBuf>,
+        #[arg(long)]
+        color: Option<String>,
+        #[arg(long)]
+        glow: Option<PathBuf>,
+        #[arg(long)]
+        glow_all: bool,
+        #[arg(long)]
+        glow_mat: Option<String>,
+        #[arg(long, default_value_t = 255)]
+        b_max: u8,
+        #[arg(long, default_value_t = 0.35)]
+        power: f32,
+        #[arg(long, default_value_t = 512)]
+        tex_size: u32,
+        #[arg(long, default_value_t = 90)]
+        gloss: u8,
+        #[arg(long, default_value = "auto")]
+        materials: String,
+        #[arg(long)]
+        double_sided: bool,
+        #[arg(long)]
+        alpha_test: Option<u8>,
+    },
+    /// 读 .seq 并按时间采样各对象的位置/旋转/可见性(只读; 用于核对动画)
+    AnimSample {
+        seq: PathBuf,
+        /// 采样间隔(秒)
+        #[arg(long, default_value_t = 1.0)]
+        step: f64,
+        /// 最多采样到(秒; 默认 seq 时长, 上限 120)
+        #[arg(long)]
+        until: Option<f64>,
+    },
+    /// PMX(MMD 模型)→ GLB: 纯 Rust; 每个材质一个 primitive, 贴图转 PNG 内嵌, 双面/透明标志带上; 骨骼/表情/物理不转换
+    Pmx2glb {
+        /// 输入 .pmx(贴图按 PMX 里的相对路径找)
+        pmx: PathBuf,
+        #[arg(short, long)]
+        out: PathBuf,
+        /// MMD 1 单位 = 多少米(常用 0.08)
+        #[arg(long, default_value_t = 0.08)]
+        unit_m: f32,
+        /// 保留 diffuse alpha = 0 的材质(MMD 里多为隐藏的切换部件, 默认跳过)
+        #[arg(long)]
+        keep_hidden: bool,
     },
     /// 等价重建: 解码全部渲染集后由编码器从零写出 geometry(验证编码器); 默认整船分段+全部部件
     Rebuild {
@@ -684,6 +805,7 @@ impl ModelCmd {
             | ModelCmd::Remove { t }
             | ModelCmd::Add { t, .. }
             | ModelCmd::Import { t, .. }
+            | ModelCmd::Animate { t, .. }
             | ModelCmd::Rebuild { t, .. }
             | ModelCmd::ExportBlender { t, .. }
             | ModelCmd::ImportBlender { t, .. } => Some(t),
@@ -703,6 +825,9 @@ impl ModelCmd {
             ModelCmd::Rebuild { .. } => "model_rebuild",
             ModelCmd::ExportBlender { .. } => "model_export_blender",
             ModelCmd::ImportBlender { .. } => "model_import_blender",
+            ModelCmd::Pmx2glb { .. } => "model_pmx2glb",
+            ModelCmd::Animate { .. } => "model_animate",
+            ModelCmd::AnimSample { .. } => "model_anim_sample",
             ModelCmd::Undo { .. } => "model_undo",
             ModelCmd::Replay { .. } => "model_replay",
         }
@@ -721,6 +846,12 @@ impl ModelCmd {
                 *glb = glb.as_ref().map(abs);
             }
             ModelCmd::Add { glb, .. } | ModelCmd::ImportBlender { glb, .. } => *glb = abs(glb),
+            ModelCmd::Pmx2glb { pmx, .. } => *pmx = abs(pmx),
+            ModelCmd::Animate { mesh, texture, glow, .. } => {
+                *mesh = abs(mesh);
+                *texture = texture.as_ref().map(abs);
+                *glow = glow.as_ref().map(abs);
+            }
             ModelCmd::Import { mesh, texture, glow, .. } => {
                 *mesh = abs(mesh);
                 *texture = texture.as_ref().map(abs);
@@ -755,6 +886,35 @@ fn run_model(cli: &Cli, c: &ModelCmd) -> Result<Value> {
     match &c {
         ModelCmd::Undo { project, force } => return undo(&Project::open(project)?, *force),
         ModelCmd::Replay { project, from } => return replay(cli, project, from),
+        ModelCmd::AnimSample { seq, step, until } => {
+            let txt = std::fs::read_to_string(seq).map_err(|e| anyhow!("{}: {e}", seq.display()))?;
+            let s = wowsmod_formats::anim::parse_seq(&txt).map_err(|e| anyhow!("{e}"))?;
+            let end = until.unwrap_or(s.duration).min(120.0).max(0.0);
+            let step = step.max(0.01);
+            let mut rows = Vec::new();
+            for (i, ob) in s.objects.iter().enumerate().skip(1) {
+                let mut t = 0.0;
+                while t <= end + 1e-9 {
+                    let (m, vis) = wowsmod_formats::anim::sample_object(&s, i, t);
+                    let r = wowsmod_formats::anim::sample_keys(&ob.rotation, t, [0.0; 3]);
+                    rows.push(json!({"object": ob.name, "t": t, "pos": [m[3][0], m[3][1], m[3][2]], "rotationEuler": r, "visible": vis}));
+                    t += step;
+                }
+            }
+            return Ok(json!({"seq": seq.display().to_string(), "duration": s.duration, "objects": s.objects.iter().map(|o| json!({"name": o.name, "resource": o.resource, "keys": {"position": o.position.len(), "rotationEuler": o.rotation.len(), "scale": o.scale.len()}, "attach": o.attach.iter().map(|a| json!(a)).collect::<Vec<_>>()})).collect::<Vec<_>>(),
+                "samples": rows, "assumptions": "Hermite 插值, 切线 = 值/秒; rotationEuler 度, (roll, pitch, yaw)"}));
+        }
+        ModelCmd::Pmx2glb { pmx, out, unit_m, keep_hidden } => {
+            let (glb, mut rep) = crate::meshsrc::pmx_file_to_glb(pmx, *unit_m, !*keep_hidden)?;
+            if let Some(d) = out.parent().filter(|d| !d.as_os_str().is_empty()) {
+                std::fs::create_dir_all(d)?;
+            }
+            std::fs::write(out, &glb).map_err(|e| anyhow!("写 {}: {e}", out.display()))?;
+            rep["out"] = json!(out.display().to_string());
+            rep["bytes"] = json!(glb.len());
+            rep["next"] = json!("wowsmod model import --mesh <out.glb> --height <visual 单位> ...(每个材质一个 .mfm)");
+            return Ok(rep);
+        }
         _ => {}
     }
     let t = c.target_mut().unwrap().clone();
@@ -782,7 +942,7 @@ fn run_model(cli: &Cli, c: &ModelCmd) -> Result<Value> {
         ModelCmd::Remove { .. } => remove(&mut tx, &root, &src, &t)?,
         ModelCmd::Replace { with, with_sdk, glb, space, .. } => replace(&mut tx, &p, &root, &src, &t, with.as_deref(), with_sdk.as_deref(), glb.as_deref(), space)?,
         ModelCmd::Add { glb, like, name, space, lod0_only, .. } => add(&mut tx, &root, &src, &t, glb, like, name.as_deref(), space, *lod0_only)?,
-        ModelCmd::Import { mesh, like, node, at, rot, scale, name, texture, color, glow, glow_all, power, tex_size, gloss, lod0_only, .. } => import::import(
+        ModelCmd::Import { mesh, like, node, at, rot, scale, name, texture, color, glow, glow_all, power, tex_size, gloss, lod0_only, b_max, materials, glow_mat, double_sided, alpha_test, height, .. } => import::import(
             &mut tx,
             &root,
             &src,
@@ -803,11 +963,47 @@ fn run_model(cli: &Cli, c: &ModelCmd) -> Result<Value> {
                 tex_size: *tex_size,
                 gloss: *gloss,
                 lod0_only: *lod0_only,
+                b_max: *b_max,
+                materials,
+                glow_mat: glow_mat.as_deref(),
+                double_sided: *double_sided,
+                alpha_test: *alpha_test,
+                height: *height,
             },
         )?,
         ModelCmd::Rebuild { recompute_tangents, .. } => rebuild(&mut tx, &root, &src, &t, *recompute_tangents)?,
         ModelCmd::ImportBlender { glb, .. } => import_blender(&mut tx, &root, &src, glb)?,
-        ModelCmd::Undo { .. } | ModelCmd::Replay { .. } => unreachable!(),
+        ModelCmd::Animate { mesh, like, preset, at, rot, scale, height, rpm, axis, radius, orbit_rpm, phase, float_amp, period, format, all_lods, name, texture, color, glow, glow_all, glow_mat, b_max, power, tex_size, gloss, materials, double_sided, alpha_test, .. } => anim_cmd::animate(
+            &mut tx,
+            &root,
+            &src,
+            &t,
+            &import::ImportOpts {
+                mesh,
+                like,
+                node: None,
+                at,
+                rot,
+                scale,
+                name: name.as_deref(),
+                texture: texture.as_deref(),
+                color: color.as_deref(),
+                glow: glow.as_deref(),
+                glow_all: *glow_all,
+                power: *power,
+                tex_size: *tex_size,
+                gloss: *gloss,
+                lod0_only: false,
+                b_max: *b_max,
+                materials,
+                glow_mat: glow_mat.as_deref(),
+                double_sided: *double_sided,
+                alpha_test: *alpha_test,
+                height: *height,
+            },
+            &anim_cmd::AnimOpts { preset, rpm: *rpm, axis, radius: *radius, orbit_rpm: *orbit_rpm, phase: *phase, float_amp: *float_amp, period: *period, format, all_lods: *all_lods },
+        )?,
+        ModelCmd::Undo { .. } | ModelCmd::Replay { .. } | ModelCmd::Pmx2glb { .. } | ModelCmd::AnimSample { .. } => unreachable!(),
     };
     let changed: Vec<String> = tx.pending.keys().map(|k| p.rel(k)).collect();
     rec["changed_files"] = json!(changed);
@@ -1062,6 +1258,7 @@ fn remove(tx: &mut Tx, root: &Path, src: &GeomSrc, t: &Target) -> Result<Value> 
 
 // ───────────── GLB → 网格 ─────────────
 
+#[derive(Clone)]
 struct GlbPrim {
     node: String,
     material: Option<String>,
@@ -1383,7 +1580,7 @@ fn export_blender(root: &Path, src: &GeomSrc, t: &Target, out: &Path, hullsets: 
             let positions: Vec<[f32; 3]> = m.positions.iter().map(|p| pos_game_to_gltf(xform_point(&sp, p.map(|x| x as f64)).map(|x| x as f32))).collect();
             let normals = m.normals.as_ref().map(|ns| ns.iter().map(|n| pos_game_to_gltf(norm_dir(xform_dir(&sp, n.map(|x| x as f64))))).collect());
             let indices: Vec<u32> = m.indices.chunks_exact(3).flat_map(|t| [t[0], t[2], t[1]]).collect();
-            let prim = ScenePrim { positions, normals, uvs: m.uvs.clone(), indices, material: Some(rs.material_identifier.clone()), extras: Value::Null };
+            let prim = ScenePrim { positions, normals, uvs: m.uvs.clone(), indices, material: Some(rs.material_identifier.clone()), material_index: None, extras: Value::Null };
             let mi = sb.add_mesh(&rn, &[prim]);
             sb.add_node(&rn, Some(mi), None, json!({"wowsmod_renderset": rn}), Some(parent));
             n_obj += 1;

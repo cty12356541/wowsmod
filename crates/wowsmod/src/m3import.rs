@@ -21,7 +21,7 @@ use wowsmod_formats::{
 };
 
 use super::{aabb_of_points, add_prims, convert_prim, find_template, inv, load_visuals, parse_vec3, sanitize, section_matrix, units_for, GeomSrc, GlbPrim, Target, Tx};
-use crate::texcmd;
+use crate::{meshsrc, texcmd};
 
 pub struct ImportOpts<'a> {
     pub mesh: &'a Path,
@@ -39,6 +39,18 @@ pub struct ImportOpts<'a> {
     pub tex_size: u32,
     pub gloss: u8,
     pub lod0_only: bool,
+    /// 发光 B 上限(遮罩满值处的 B, 0..255)
+    pub b_max: u8,
+    /// 材质模式: auto(GLB 有材质且没给 --texture/--color 时按材质拆) / single
+    pub materials: &'a str,
+    /// 这些材质(正则, 匹配 glTF 材质名)整块发光
+    pub glow_mat: Option<&'a str>,
+    /// 全部材质双面
+    pub double_sided: bool,
+    /// 全部材质 alpha 测试阈值(0..255)
+    pub alpha_test: Option<u8>,
+    /// 等比缩放到这个高度(glTF y 轴, visual 单位); 覆盖 --scale
+    pub height: Option<f64>,
 }
 
 // ───────────── 网格读取 ─────────────
@@ -124,6 +136,7 @@ pub fn read_obj(text: &str) -> Result<Vec<ScenePrim>> {
             positions: p.pos,
             indices: p.idx,
             material: p.mat,
+            material_index: None,
             extras: Value::Null,
         })
         .collect();
@@ -134,20 +147,20 @@ pub fn read_obj(text: &str) -> Result<Vec<ScenePrim>> {
 }
 
 /// 读网格(GLB/OBJ) → 各 primitive 用 `g`(glTF 世界 → 目标 visual 空间)转换
-fn mesh_prims(path: &Path, g: &M4) -> Result<Vec<GlbPrim>> {
+pub(super) fn mesh_prims(path: &Path, g: &M4) -> Result<Vec<(GlbPrim, Option<usize>)>> {
     let ext = path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
     let d = std::fs::read(path).map_err(|e| anyhow!("读取 {}: {e}", path.display()))?;
     let mut out = Vec::new();
     if ext == "obj" {
         for (i, p) in read_obj(&String::from_utf8_lossy(&d))?.iter().enumerate() {
-            out.push(GlbPrim { node: format!("obj{i}"), material: p.material.clone(), mesh: convert_prim(&IDENTITY, g, p) });
+            out.push((GlbPrim { node: format!("obj{i}"), material: p.material.clone(), mesh: convert_prim(&IDENTITY, g, p) }, None));
         }
     } else {
         let sc = scene::read_scene(&d).map_err(|e| anyhow!("{}: {e}", path.display()))?;
         for n in &sc.nodes {
             let Some(mi) = n.mesh else { continue };
             for p in &sc.meshes[mi].prims {
-                out.push(GlbPrim { node: n.name.clone(), material: p.material.clone(), mesh: convert_prim(&n.world, g, p) });
+                out.push((GlbPrim { node: n.name.clone(), material: p.material.clone(), mesh: convert_prim(&n.world, g, p) }, p.material_index));
             }
         }
     }
@@ -155,7 +168,7 @@ fn mesh_prims(path: &Path, g: &M4) -> Result<Vec<GlbPrim>> {
         bail!("{} 里没有网格", path.display());
     }
     // 没有 UV 时按包围盒做平面投影(最大的两个轴), 否则整块贴图只取一个像素
-    for gp in out.iter_mut() {
+    for (gp, _) in out.iter_mut() {
         if gp.mesh.uvs.is_none() {
             if let Some((mn, mx)) = aabb_of_points(gp.mesh.positions.iter().map(|p| p.map(|x| x as f64))) {
                 let ext: Vec<f64> = (0..3).map(|i| (mx[i] - mn[i]).max(1e-9)).collect();
@@ -167,6 +180,24 @@ fn mesh_prims(path: &Path, g: &M4) -> Result<Vec<GlbPrim>> {
         }
     }
     Ok(out)
+}
+
+/// 网格在 glTF 空间(节点世界矩阵后)的 y 向高度
+pub(super) fn mesh_height(path: &Path) -> Result<f64> {
+    let ext = path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+    let d = std::fs::read(path)?;
+    let pts: Vec<[f64; 3]> = if ext == "obj" {
+        read_obj(&String::from_utf8_lossy(&d))?.iter().flat_map(|p| p.positions.iter().map(|q| q.map(|x| x as f64))).collect()
+    } else {
+        let sc = scene::read_scene(&d).map_err(|e| anyhow!("{e}"))?;
+        sc.nodes
+            .iter()
+            .filter_map(|n| n.mesh.map(|m| (n, m)))
+            .flat_map(|(n, m)| sc.meshes[m].prims.iter().flat_map(move |p| p.positions.iter().map(move |q| scene::xform_gltf_point(&n.world, *q).map(|x| x as f64))))
+            .collect()
+    };
+    let (mn, mx) = aabb_of_points(pts.into_iter()).ok_or_else(|| anyhow!("网格没有顶点"))?;
+    Ok(mx[1] - mn[1])
 }
 
 // ───────────── 贴图 ─────────────
@@ -199,13 +230,17 @@ fn solid(w: u32, h: u32, c: [u8; 4]) -> Image {
 }
 
 /// 按模板贴图的格式/sRGB 编码一张新贴图(单文件, 完整 mip 链)
-fn encode_like(img: &Image, like: Option<&texcmd::Tex>, fallback: Format, filter: MipFilter) -> Result<(Vec<u8>, String)> {
+fn encode_like(img: &Image, like: Option<&texcmd::Tex>, fallback: Format, filter: MipFilter, need_alpha: bool) -> Result<(Vec<u8>, String)> {
     let (mut fmt, srgb) = match like {
         Some(t) => (t.dds.header.format, matches!(t.dds.header.dxgi, Some(29 | 72 | 75 | 78 | 91 | 93 | 99))),
         None => (fallback, false),
     };
     if fmt.block_bytes().is_none() && !matches!(fmt, Format::Rgba8 | Format::Bgra8) {
         fmt = fallback;
+    }
+    // alpha 测试要 alpha 通道: BC1 只有 1 位 alpha, 换 BC3
+    if need_alpha && matches!(fmt, Format::BC1) {
+        fmt = Format::BC3;
     }
     let chain = texture::mip_chain(img.clone(), 0, filter);
     let alpha = chain.iter().any(texture::has_alpha);
@@ -263,87 +298,30 @@ pub fn import(tx: &mut Tx, root: &Path, src: &GeomSrc, t: &Target, o: &ImportOpt
         attach = json!({"unit": u.kind, "name": u.name, "node": nn});
     }
     // 放置: 局部 TRS, 再乘挂接矩阵
-    let s = parse_vec3(o.scale)?;
+    let mut s = parse_vec3(o.scale)?;
+    let mut fit = json!(null);
+    if let Some(h) = o.height {
+        let mh = mesh_height(o.mesh)?;
+        if mh <= 1e-9 {
+            bail!("网格高度为 0, 不能 --height");
+        }
+        let k = h / mh;
+        s = [k; 3];
+        fit = json!({"mesh_height": mh, "target_height": h, "scale": k});
+    }
     let place = compose(parse_vec3(o.at)?, parse_vec3(o.rot)?, s);
     let g = mat_mul(&place, &base_m);
-    let prims = mesh_prims(o.mesh, &g)?;
+    let prims_m = mesh_prims(o.mesh, &g)?;
 
-    // 2) 独立材质: 复制模板 .mfm, 贴图换成新文件
     let base = o.name.map(sanitize).unwrap_or_else(|| format!("wm_{}", sanitize(&o.mesh.file_stem().unwrap().to_string_lossy())));
     let tpl_mfm_res = tpl.mfm.clone();
-    let tpl_mfm_path = proj_file(root, &tpl_mfm_res)?;
-    let mtext = tx.read_text(&tpl_mfm_path)?;
-    let dir_res = tpl_mfm_res.trim().rsplit_once('/').map(|x| x.0.to_string()).unwrap_or_default();
-    let dir_path = tpl_mfm_path.parent().unwrap().to_path_buf();
-    let tpl_mfm_name = tpl_mfm_path.file_name().unwrap().to_string_lossy().to_string();
-    let new_mfm_name = format!("{base}.mfm");
-    let mut ntext = mtext.replace(&format!("<{tpl_mfm_name}>"), &format!("<{new_mfm_name}>")).replace(&format!("</{tpl_mfm_name}>"), &format!("</{new_mfm_name}>"));
-    let props = mfm::properties(&mtext);
-    let ctx = src.game();
-    let sz = o.tex_size.clamp(16, 4096).next_power_of_two();
-    // 漫反射
-    let mut albedo = match (o.texture, o.color) {
-        (Some(p), _) => {
-            let im = texture::read_png(&std::fs::read(p).map_err(|e| anyhow!("读取 {}: {e}", p.display()))?).map_err(|e| anyhow!("{}: {e}", p.display()))?;
-            resize(&im, sz, sz)
-        }
-        (None, Some(c)) => {
-            let c = wowsmod_formats::color::parse_color(c).ok_or_else(|| anyhow!("颜色格式: #RRGGBB: {c}"))?;
-            solid(sz, sz, [c[0], c[1], c[2], 255])
-        }
-        (None, None) => solid(sz, sz, [128, 128, 128, 255]),
-    };
-    for p in albedo.px.chunks_exact_mut(4) {
-        p[3] = 255;
-    }
-    // 发光遮罩 → _mg 的 B
-    let glow_mask: Option<Image> = match (o.glow, o.glow_all) {
-        (Some(p), _) => Some(resize(&texture::read_png(&std::fs::read(p)?).map_err(|e| anyhow!("{}: {e}", p.display()))?, sz, sz)),
-        (None, true) => Some(solid(sz, sz, [255, 255, 255, 255])),
-        _ => None,
-    };
-    let mut mg = solid(sz, sz, [0, o.gloss, 0, 255]);
-    if let Some(gm) = &glow_mask {
-        for (d, s) in mg.px.chunks_exact_mut(4).zip(gm.px.chunks_exact(4)) {
-            let l = (s[0] as u32 * 2126 + s[1] as u32 * 7152 + s[2] as u32 * 722) / 10000;
-            d[2] = ((l * s[3] as u32) / 255) as u8;
-        }
-    }
-    let normal = solid(sz, sz, [128, 128, 255, 128]);
-    let ao = solid(sz, sz, [255, 255, 255, 255]);
-    let mut texs = Vec::new();
-    for (prop, suffix, img, fb, filt) in [
-        ("diffuseMap", "_a", &albedo, Format::BC7, MipFilter::BoxSrgb),
-        ("metallicGlossMap", "_mg", &mg, Format::BC7, MipFilter::BoxLinear),
-        ("normalMap", "_n", &normal, Format::BC3, MipFilter::BoxLinear),
-        ("ambientOcclusionMap", "_ao", &ao, Format::BC1, MipFilter::BoxLinear),
-    ] {
-        let Some((_, _, old)) = props.iter().find(|(k, ty, _)| k == prop && ty == "Texture") else { continue };
-        let fname = old.trim().rsplit('/').next().unwrap_or("").to_string();
-        let like = texcmd::load_tex(old.trim(), ctx, Some(tx.p), false).ok().or_else(|| texcmd::load_tex(&fname, ctx, None, true).ok());
-        let (bytes, fmt) = encode_like(img, like.as_ref(), fb, filt)?;
-        let nf = format!("{base}{suffix}.dds");
-        tx.write(&dir_path.join(&nf), bytes);
-        let res = format!("{dir_res}/{nf}");
-        ntext = mfm::set_property(&ntext, prop, "Texture", &res).map_err(|e| anyhow!("{e}"))?;
-        texs.push(json!({"property": prop, "file": res, "format": fmt, "size": [sz, sz], "like": like.as_ref().map(|l| l.label.clone()), "replaced": old.trim()}));
-    }
-    let glowing = glow_mask.is_some();
-    let mut fx_after = mfm::fx(&ntext).unwrap_or_default();
-    if glowing {
-        let nfx = mfm::emissive_variant(&fx_after).ok_or_else(|| anyhow!("模板着色器 {fx_after} 没有已知的 emissive 变体, 换一个模板(--like)"))?;
-        ntext = mfm::set_fx(&ntext, &nfx).map_err(|e| anyhow!("{e}"))?;
-        ntext = mfm::set_property(&ntext, "emissivePower", "Float", &format!("{:.4}", o.power)).map_err(|e| anyhow!("{e}"))?;
-        fx_after = nfx;
-    }
-    let new_mfm_res = format!("{dir_res}/{new_mfm_name}");
-    tx.write(&dir_path.join(&new_mfm_name), ntext.into_bytes());
+    let MatBuild { groups, mats_out, warn, n_written, n_shared, per_mat } = build_materials(tx, root, src, &tpl_mfm_res, None, o, &prims_m, &base)?;
 
     // 3) 几何: 用模板渲染集的格式/节点; 蒙皮模板时骨骼绑定取最近的模板顶点
     let mut per_tpl: Option<Vec<u8>> = None;
     let mut bind = json!(null);
     if tpl.world_space {
-        let all: Vec<[f32; 3]> = prims.iter().flat_map(|p| p.mesh.positions.clone()).collect();
+        let all: Vec<[f32; 3]> = prims_m.iter().flat_map(|(p, _)| p.mesh.positions.clone()).collect();
         let n = all.len().max(1) as f64;
         let c: [f64; 3] = std::array::from_fn(|i| all.iter().map(|p| p[i] as f64).sum::<f64>() / n);
         let md = ge.mesh(&tname).map_err(|e| anyhow!("{e}"))?;
@@ -353,14 +331,23 @@ pub fn import(tx: &mut Tx, root: &Path, src: &GeomSrc, t: &Target, o: &ImportOpt
         per_tpl = Some(rv);
         bind = json!({"nearest_template_vertex": bi, "template_vertex_pos": md.positions[bi], "template_vertex_bytes": hex, "bones": tpl.nodes, "distance": bd.sqrt(), "center": c, "note": "蒙皮模板: 新网格的骨骼绑定 = 该模板顶点的骨骼(放在哪块就跟哪块动)"});
     }
-    let added = add_prims_with(&mut ge, &mut vis, &prims, &base, tk, o.lod0_only, per_tpl.as_deref(), &new_mfm_res)?;
+    let mut added = Vec::new();
+    for (gp, stem, mres, _) in &groups {
+        added.extend(add_prims_with(&mut ge, &mut vis, gp, stem, tk, o.lod0_only, per_tpl.as_deref(), mres)?);
+    }
     // 发光: 新材质标识改成 EMISSIVE 族
     let mut idents = Vec::new();
-    for v in vis.iter_mut() {
-        let (nt, ch) = if glowing { mfm::set_emissive_identifiers(&v.text, &new_mfm_name) } else { (v.text.clone(), vec![]) };
-        if !ch.is_empty() {
-            *v = Visual::parse(&nt).map_err(|e| anyhow!("{e}"))?;
-            idents.extend(ch.into_iter().map(|(a, b)| json!([a, b])));
+    for (_, _, mres, glowing) in &groups {
+        if !glowing {
+            continue;
+        }
+        let mname = mres.rsplit('/').next().unwrap_or("").to_string();
+        for v in vis.iter_mut() {
+            let (nt, ch) = mfm::set_emissive_identifiers(&v.text, &mname);
+            if !ch.is_empty() {
+                *v = Visual::parse(&nt).map_err(|e| anyhow!("{e}"))?;
+                idents.extend(ch.into_iter().map(|(a, b)| json!([a, b])));
+            }
         }
     }
     let geo = ge.finish().map_err(|e| anyhow!("{e}"))?;
@@ -369,13 +356,279 @@ pub fn import(tx: &mut Tx, root: &Path, src: &GeomSrc, t: &Target, o: &ImportOpt
         tx.write_visual(vp, v);
     }
     Ok(json!({"unit": u.kind, "name": u.name, "attach": attach, "template": tname, "mesh": o.mesh.display().to_string(),
-        "placement": {"at": o.at, "rot_deg": o.rot, "scale": o.scale}, "added": added, "skin_binding": bind,
-        "material": {"mfm": new_mfm_res, "from": tpl_mfm_res, "fx": fx_after, "emissive": glowing, "emissivePower": glowing.then_some(o.power), "identifiers_changed": idents, "textures": texs},
+        "placement": {"at": o.at, "rot_deg": o.rot, "scale": s, "fit_height": fit}, "added": added, "skin_binding": bind,
+        "material_mode": if per_mat { "per-material" } else { "single" },
+        "materials": mats_out, "identifiers_changed": idents,
+        "textures_written": n_written, "texture_reuses": n_shared, "warnings": warn,
         "notes": [
             if u.kind == "part" { "写进部件几何: 该部件的所有实例都会出现(如 3 座主炮塔各一份)" } else { "写进船体分段: 固定在船体上" },
             if o.lod0_only { "只加到 LOD0, 远处会消失" } else { "加到全部 LOD visual" },
             "只改渲染网格, 不改装甲/碰撞"
         ]}))
+}
+
+/// 材质构建结果: 每组 (primitive, 渲染集基名, mfm 资源, 是否发光)
+pub(super) struct MatBuild {
+    pub groups: Vec<(Vec<GlbPrim>, String, String, bool)>,
+    pub mats_out: Vec<Value>,
+    pub warn: Vec<String>,
+    pub n_written: usize,
+    pub n_shared: usize,
+    pub per_mat: bool,
+}
+
+/// 2) 材质: 每组 primitive 一个独立 .mfm(复制模板 `tpl_mfm_res`), 贴图另建; 相同内容的贴图只写一份。
+/// `out_dir`: (资源目录, 项目路径) 覆盖输出位置(默认模板 .mfm 所在目录)
+#[allow(clippy::too_many_arguments)]
+pub(super) fn build_materials(tx: &mut Tx, root: &Path, src: &GeomSrc, tpl_mfm_res: &str, out_dir: Option<(&str, &Path)>, o: &ImportOpts, prims_m: &[(GlbPrim, Option<usize>)], base: &str) -> Result<MatBuild> {
+    let tpl_mfm_res = tpl_mfm_res.trim();
+    let base = base.to_string();
+    let tpl_mfm_path = proj_file(root, tpl_mfm_res)?;
+    let mtext = tx.read_text(&tpl_mfm_path)?;
+    let (dir_res, dir_path) = match out_dir {
+        Some((r, p)) => (r.to_string(), p.to_path_buf()),
+        None => (tpl_mfm_res.trim().rsplit_once('/').map(|x| x.0.to_string()).unwrap_or_default(), tpl_mfm_path.parent().unwrap().to_path_buf()),
+    };
+    let tpl_mfm_name = tpl_mfm_path.file_name().unwrap().to_string_lossy().to_string();
+    let props = mfm::properties(&mtext);
+    let ctx = src.game();
+    let sz = o.tex_size.clamp(16, 4096).next_power_of_two();
+    let is_glb = !o.mesh.extension().map(|e| e.eq_ignore_ascii_case("obj")).unwrap_or(false);
+    let gm = if is_glb { Some(meshsrc::read_glb_materials(&std::fs::read(o.mesh)?, o.mesh.parent())?) } else { None };
+    let per_mat = match o.materials {
+        "single" => false,
+        "auto" => gm.as_ref().map(|g| !g.mats.is_empty()).unwrap_or(false) && o.texture.is_none() && o.color.is_none(),
+        m => bail!("--materials 只能是 auto / single: {m}"),
+    };
+    let glow_re = o.glow_mat.map(regex::Regex::new).transpose().map_err(|e| anyhow!("--glow-mat 正则: {e}"))?;
+    let user_glow: Option<Image> = match o.glow {
+        Some(p) => Some(texture::read_png(&std::fs::read(p)?).map_err(|e| anyhow!("{}: {e}", p.display()))?),
+        None => None,
+    };
+    // 每个材质的规格
+    struct Spec {
+        key: String,
+        albedo: Image,
+        glow: Option<Image>,
+        alpha_ref: Option<u8>,
+        double_sided: bool,
+        src: Value,
+        prims: Vec<GlbPrim>,
+    }
+    let mut specs: Vec<Spec> = Vec::new();
+    let mut warn: Vec<String> = Vec::new();
+    let pow2 = |x: u32| x.clamp(1, sz).next_power_of_two().min(sz);
+    if per_mat {
+        let gm = gm.as_ref().unwrap();
+        warn.extend(gm.notes.iter().cloned());
+        let mut dec: std::collections::HashMap<usize, Option<Image>> = Default::default();
+        let mut decode = |i: usize, warn: &mut Vec<String>| -> Option<Image> {
+            dec.entry(i)
+                .or_insert_with(|| {
+                    let b = gm.images.get(i).cloned().flatten()?;
+                    match meshsrc::decode_image(&b) {
+                        Ok(im) => Some(im),
+                        Err(e) => {
+                            warn.push(format!("图片 {} 解码失败: {e}", gm.image_names.get(i).cloned().unwrap_or_default()));
+                            None
+                        }
+                    }
+                })
+                .clone()
+        };
+        // 按材质分组(保持出现顺序)
+        let mut order: Vec<Option<usize>> = Vec::new();
+        for (_, mi) in prims_m {
+            if !order.contains(mi) {
+                order.push(*mi);
+            }
+        }
+        let mut used_keys = std::collections::HashSet::new();
+        for mi in order {
+            let gmat = mi.and_then(|i| gm.mats.get(i));
+            let raw = gmat.map(|m| m.name.clone()).unwrap_or_else(|| "default".into());
+            let mut key: String = sanitize(&raw).chars().take(24).collect();
+            if key.trim_matches('_').is_empty() {
+                key = format!("m{}", mi.map(|x| x as i64).unwrap_or(-1).max(0));
+            }
+            let mut k2 = key.clone();
+            let mut n = 1;
+            while !used_keys.insert(k2.clone()) {
+                n += 1;
+                k2 = format!("{key}{n}");
+            }
+            let key = k2;
+            let prims: Vec<GlbPrim> = prims_m.iter().filter(|(_, m)| *m == mi).map(|(p, _)| p.clone()).collect();
+            let (mut albedo, mut alpha_ref, mut ds, mut src) = (solid(64, 64, [128, 128, 128, 255]), None, false, json!({"gltf_material": raw}));
+            let mut glow: Option<Image> = None;
+            if let Some(m) = gmat {
+                warn.extend(m.notes.iter().map(|x| format!("{raw}: {x}")));
+                let f = m.base_factor;
+                albedo = match m.base_image.and_then(|i| decode(i, &mut warn)) {
+                    Some(im) => resize(&im, pow2(im.width), pow2(im.height)),
+                    None => solid(64, 64, [255, 255, 255, 255]),
+                };
+                for p in albedo.px.chunks_exact_mut(4) {
+                    for c in 0..3 {
+                        // 系数作用在线性空间: 近似为 sRGB 值 × 系数^(1/2.2)
+                        p[c] = (p[c] as f32 * f[c].clamp(0.0, 1.0).powf(1.0 / 2.2)).round() as u8;
+                    }
+                    p[3] = (p[3] as f32 * f[3].clamp(0.0, 1.0)).round() as u8;
+                }
+                match m.alpha_mode.as_str() {
+                    "MASK" => alpha_ref = Some((m.alpha_cutoff.clamp(0.0, 1.0) * 255.0).round() as u8),
+                    "BLEND" => {
+                        alpha_ref = Some(128);
+                        warn.push(format!("{raw}: alphaMode BLEND 游戏船体材质没有半透明, 按 alpha 测试(阈值 128)处理"));
+                    }
+                    _ => {}
+                }
+                ds = m.double_sided;
+                // glTF 自发光 → 遮罩(亮度); 游戏里发光颜色 = 漫反射颜色
+                let ef = m.emissive_factor;
+                let emax = ef.iter().cloned().fold(0.0f32, f32::max);
+                if emax > 0.0 {
+                    let mut mask = match m.emissive_image.and_then(|i| decode(i, &mut warn)) {
+                        Some(im) => resize(&im, albedo.width, albedo.height),
+                        None => solid(albedo.width, albedo.height, [255, 255, 255, 255]),
+                    };
+                    for p in mask.px.chunks_exact_mut(4) {
+                        for c in 0..3 {
+                            p[c] = (p[c] as f32 * ef[c].clamp(0.0, 1.0)).round() as u8;
+                        }
+                        p[3] = 255;
+                    }
+                    glow = Some(mask);
+                    warn.push(format!("{raw}: glTF 自发光已转成发光遮罩; 游戏里发光颜色取漫反射颜色, 不是 emissive 颜色"));
+                }
+                src = json!({"gltf_material": raw, "baseColorFactor": f, "base_image": m.base_image.map(|i| gm.image_names.get(i).cloned()), "alphaMode": m.alpha_mode, "alphaCutoff": m.alpha_cutoff, "doubleSided": m.double_sided, "emissiveFactor": ef});
+            }
+            if o.glow_all || glow_re.as_ref().map(|r| r.is_match(&raw)).unwrap_or(false) {
+                glow = Some(solid(albedo.width, albedo.height, [255, 255, 255, 255]));
+            }
+            if let Some(ug) = &user_glow {
+                glow = Some(resize(ug, albedo.width, albedo.height));
+            }
+            specs.push(Spec { key, albedo, glow, alpha_ref, double_sided: ds, src, prims });
+        }
+    } else {
+        let mut albedo = match (o.texture, o.color) {
+            (Some(p), _) => {
+                let im = meshsrc::decode_image(&std::fs::read(p).map_err(|e| anyhow!("读取 {}: {e}", p.display()))?).map_err(|e| anyhow!("{}: {e}", p.display()))?;
+                resize(&im, sz, sz)
+            }
+            (None, Some(c)) => {
+                let c = wowsmod_formats::color::parse_color(c).ok_or_else(|| anyhow!("颜色格式: #RRGGBB: {c}"))?;
+                solid(sz, sz, [c[0], c[1], c[2], 255])
+            }
+            (None, None) => solid(sz, sz, [128, 128, 128, 255]),
+        };
+        if o.alpha_test.is_none() {
+            for p in albedo.px.chunks_exact_mut(4) {
+                p[3] = 255;
+            }
+        }
+        let glow = match (&user_glow, o.glow_all) {
+            (Some(g), _) => Some(resize(g, sz, sz)),
+            (None, true) => Some(solid(sz, sz, [255, 255, 255, 255])),
+            _ => None,
+        };
+        let prims = prims_m.iter().map(|(p, _)| p.clone()).collect();
+        specs.push(Spec { key: String::new(), albedo, glow, alpha_ref: None, double_sided: false, src: json!({"mode": "single"}), prims });
+    }
+    for sp in specs.iter_mut() {
+        if o.double_sided {
+            sp.double_sided = true;
+        }
+        if let Some(a) = o.alpha_test {
+            sp.alpha_ref = Some(a);
+        }
+        if sp.alpha_ref.is_none() {
+            sp.albedo.px.chunks_exact_mut(4).for_each(|p| p[3] = 255);
+        }
+    }
+    // 贴图: 先算全部(属性, 图)并按内容去重, 再命名写出
+    let flat_n = solid(64, 64, [128, 128, 255, 128]);
+    let flat_ao = solid(64, 64, [255, 255, 255, 255]);
+    let mut per_spec: Vec<Vec<(&'static str, &'static str, Image, Format, MipFilter)>> = Vec::new();
+    for sp in &specs {
+        let mg = match &sp.glow {
+            Some(gm) => {
+                let mut mg = solid(gm.width, gm.height, [0, o.gloss, 0, 255]);
+                for (d, s) in mg.px.chunks_exact_mut(4).zip(gm.px.chunks_exact(4)) {
+                    let l = (s[0] as u32 * 2126 + s[1] as u32 * 7152 + s[2] as u32 * 722) / 10000;
+                    d[2] = ((l * s[3] as u32 / 255) * o.b_max as u32 / 255) as u8;
+                }
+                mg
+            }
+            None => solid(64, 64, [0, o.gloss, 0, 255]),
+        };
+        per_spec.push(vec![
+            ("diffuseMap", "_a", sp.albedo.clone(), Format::BC7, MipFilter::BoxSrgb),
+            ("metallicGlossMap", "_mg", mg, Format::BC7, MipFilter::BoxLinear),
+            ("normalMap", "_n", flat_n.clone(), Format::BC3, MipFilter::BoxLinear),
+            ("ambientOcclusionMap", "_ao", flat_ao.clone(), Format::BC1, MipFilter::BoxLinear),
+        ]);
+    }
+    let mut users: std::collections::HashMap<(String, String), Vec<usize>> = Default::default();
+    for (i, v) in per_spec.iter().enumerate() {
+        for (prop, _, img, _, _) in v {
+            users.entry((prop.to_string(), meshsrc::image_hash(img))).or_default().push(i);
+        }
+    }
+    let mut written: std::collections::HashMap<(String, String), (String, String)> = Default::default();
+    let mut mats_out = Vec::new();
+    let mut groups: Vec<(Vec<GlbPrim>, String, String, bool)> = Vec::new(); // (prims, 渲染集基名, mfm 资源, 发光)
+    let (mut n_written, mut n_shared) = (0usize, 0usize);
+    for (i, sp) in specs.iter().enumerate() {
+        let stem = if sp.key.is_empty() { base.clone() } else { format!("{base}_{}", sp.key) };
+        let new_mfm_name = format!("{stem}.mfm");
+        let mut ntext = mtext.replace(&format!("<{tpl_mfm_name}>"), &format!("<{new_mfm_name}>")).replace(&format!("</{tpl_mfm_name}>"), &format!("</{new_mfm_name}>"));
+        let mut texs = Vec::new();
+        for (prop, suffix, img, fb, filt) in &per_spec[i] {
+            let Some((_, _, old)) = props.iter().find(|(k, ty, _)| k == prop && ty == "Texture") else { continue };
+            let key = (prop.to_string(), meshsrc::image_hash(img));
+            let shared_by = users.get(&key).map(|v| v.len()).unwrap_or(1);
+            let (res, fmt) = if let Some(w) = written.get(&key) {
+                n_shared += 1;
+                w.clone()
+            } else {
+                let fname = old.trim().rsplit('/').next().unwrap_or("").to_string();
+                let like = texcmd::load_tex(old.trim(), ctx, Some(tx.p), false).ok().or_else(|| texcmd::load_tex(&fname, ctx, None, true).ok());
+                let (bytes, fmt) = encode_like(img, like.as_ref(), *fb, *filt, *prop == "diffuseMap" && sp.alpha_ref.is_some())?;
+                // 多个材质共用的贴图用基名命名, 否则用材质名
+                let nf = if shared_by > 1 && !sp.key.is_empty() { format!("{base}_shared{}{suffix}.dds", written.values().filter(|(r, _)| r.contains("_shared") && r.ends_with(&format!("{suffix}.dds"))).count()) } else { format!("{stem}{suffix}.dds") };
+                tx.write(&dir_path.join(&nf), bytes);
+                n_written += 1;
+                let r = (format!("{dir_res}/{nf}"), fmt);
+                written.insert(key, r.clone());
+                r
+            };
+            ntext = mfm::set_property(&ntext, prop, "Texture", &res).map_err(|e| anyhow!("{e}"))?;
+            texs.push(json!({"property": prop, "file": res, "format": fmt, "size": [img.width, img.height], "shared_by_materials": shared_by, "replaced": old.trim()}));
+        }
+        if sp.double_sided {
+            ntext = mfm::set_property(&ntext, "doubleSided", "Bool", "true").map_err(|e| anyhow!("{e}"))?;
+        }
+        if let Some(a) = sp.alpha_ref {
+            ntext = mfm::set_property(&ntext, "alphaTestEnable", "Bool", "true").map_err(|e| anyhow!("{e}"))?;
+            ntext = mfm::set_property(&ntext, "alphaReference", "Int", &a.to_string()).map_err(|e| anyhow!("{e}"))?;
+        }
+        let glowing = sp.glow.is_some();
+        let mut fx_after = mfm::fx(&ntext).unwrap_or_default();
+        if glowing {
+            let nfx = mfm::emissive_variant(&fx_after).ok_or_else(|| anyhow!("模板着色器 {fx_after} 没有已知的 emissive 变体, 换一个模板(--like)"))?;
+            ntext = mfm::set_fx(&ntext, &nfx).map_err(|e| anyhow!("{e}"))?;
+            ntext = mfm::set_property(&ntext, "emissivePower", "Float", &format!("{:.4}", o.power)).map_err(|e| anyhow!("{e}"))?;
+            fx_after = nfx;
+        }
+        let new_mfm_res = format!("{dir_res}/{new_mfm_name}");
+        tx.write(&dir_path.join(&new_mfm_name), ntext.into_bytes());
+        mats_out.push(json!({"mfm": new_mfm_res, "from": tpl_mfm_res, "fx": fx_after, "emissive": glowing, "emissivePower": glowing.then_some(o.power), "b_max": glowing.then_some(o.b_max),
+            "doubleSided": sp.double_sided, "alphaReference": sp.alpha_ref, "source": sp.src, "textures": texs}));
+        groups.push((sp.prims.clone(), stem, new_mfm_res, glowing));
+    }
+    Ok(MatBuild { groups, mats_out, warn, n_written, n_shared, per_mat })
 }
 
 /// add_prims 的变体: 可给骨骼绑定模板顶点与新材质

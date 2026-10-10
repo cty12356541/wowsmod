@@ -341,6 +341,8 @@ pub struct GlowEdit {
     pub intensity: f32,
     /// 遮罩外的 B 是否保留原值(默认清零: 原贴图 B 通道并非发光遮罩, 不清会到处发光)
     pub keep_outside: bool,
+    /// 遮罩满值处的 B 上限(0..255, 默认 255)。低值(25–50)= 大面积微光: B 按比例缩放, 软边保留
+    pub b_max: u8,
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -350,14 +352,14 @@ pub struct GlowStats {
     pub b_nonzero_after: f64,
 }
 
-/// 写 _mg 的 B 通道: B = 255·sqrt(intensity·mask)(遮罩外清零或保留)。R/G/A 不动。
+/// 写 _mg 的 B 通道: B = b_max·sqrt(intensity·mask)(遮罩外清零或保留)。R/G/A 不动。
 pub fn write_glow_channel(mg: &mut Image, mask: &Mask, g: &GlowEdit) -> GlowStats {
     let m = mask.resized(mg.width, mg.height);
     let n = m.v.len().max(1) as f64;
     let before = mg.px.chunks_exact(4).filter(|p| p[2] > 8).count() as f64 / n;
     mg.px.par_chunks_exact_mut(4).zip(m.v.par_iter()).for_each(|(p, &w)| {
         let w = w.clamp(0.0, 1.0);
-        let val = ((g.intensity.clamp(0.0, 1.0) * w).sqrt() * 255.0 + 0.5) as u8;
+        let val = ((g.intensity.clamp(0.0, 1.0) * w).sqrt() * g.b_max as f32 + 0.5) as u8;
         if g.keep_outside {
             p[2] = p[2].max(val);
         } else {
@@ -430,10 +432,14 @@ mod tests {
         let mut m = Mask::filled(4, 1, 0.0);
         m.v[1] = 1.0;
         m.v[2] = 0.25;
-        let st = write_glow_channel(&mut mg, &m, &GlowEdit { intensity: 1.0, keep_outside: false });
+        let mut mg2 = mg.clone();
+        let st = write_glow_channel(&mut mg, &m, &GlowEdit { intensity: 1.0, keep_outside: false, b_max: 255 });
         assert_eq!([mg.px[2], mg.px[6], mg.px[10], mg.px[14]], [0, 255, 128, 0]);
         assert_eq!([mg.px[0], mg.px[1], mg.px[3]], [10, 20, 255]);
         assert!((st.b_nonzero_before - 0.5).abs() < 1e-9);
+        // B 上限: 满值处 = 40, 半值(sqrt .25)处 = 20
+        write_glow_channel(&mut mg2, &m, &GlowEdit { intensity: 1.0, keep_outside: false, b_max: 40 });
+        assert_eq!([mg2.px[2], mg2.px[6], mg2.px[10], mg2.px[14]], [0, 40, 20, 0]);
     }
     #[test]
     fn selector() {

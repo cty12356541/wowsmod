@@ -28,6 +28,8 @@ pub struct ScenePrim {
     pub uvs: Option<Vec<[f32; 2]>>,
     pub indices: Vec<u32>,
     pub material: Option<String>,
+    /// glTF materials[] 下标(读取时填; 写出时不用)
+    pub material_index: Option<usize>,
     pub extras: Value,
 }
 
@@ -264,6 +266,7 @@ pub fn read_scene(d: &[u8]) -> Result<Scene> {
             uvs: p.uvs,
             indices: idx,
             material: p.material,
+            material_index: pj["material"].as_u64().map(|x| x as usize),
             extras: pj["extras"].clone(),
         });
     }

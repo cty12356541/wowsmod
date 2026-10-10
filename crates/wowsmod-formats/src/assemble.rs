@@ -164,6 +164,69 @@ fn r4(x: f64) -> f64 {
     (x * 1e4).round() / 1e4
 }
 
+/// PnFMods/<mod>/<ship>/rel → sdk/rel
+fn res_path(sdk: &Path, res: &str) -> Option<PathBuf> {
+    let parts: Vec<&str> = res.trim().split('/').collect();
+    if parts.len() < 4 || parts[0] != "PnFMods" || parts.iter().any(|c| *c == "..") {
+        return None;
+    }
+    let mut p = sdk.to_path_buf();
+    for c in &parts[3..] {
+        p.push(c);
+    }
+    Some(p)
+}
+
+type MeshPrimsFn<'a> = dyn Fn(&mut GeoEdit, &Visual, &dyn Fn(&str) -> bool, &mut Vec<String>) -> Result<Vec<ScenePrim>> + 'a;
+
+/// 一个 .ssm 引用的全部 .seq 里, 有模型资源且可见的对象 → 场景节点(带 extras.anim 采样帧)
+#[allow(clippy::too_many_arguments)]
+fn add_animated(sb: &mut SceneBuilder, sdk: &Path, sec: &str, sm: &M4, ssm_res: &str, mesh_prims: &MeshPrimsFn, warn: &mut Vec<String>, anims: &mut Vec<Value>) -> Result<()> {
+    let ssm_p = res_path(sdk, ssm_res).ok_or_else(|| Error::NotFound(format!("{ssm_res} 不在本项目")))?;
+    for seq_res in crate::anim::ssm_sequences(&read_text(&ssm_p)?)? {
+        let seq_p = res_path(sdk, &seq_res).ok_or_else(|| Error::NotFound(format!("{seq_res} 不在本项目")))?;
+        let seq = crate::anim::parse_seq(&read_text(&seq_p)?)?;
+        let dur = seq.duration.max(1e-3);
+        // 采样: 最多 240 帧, 至少 1/30 秒一帧; 时长特别长(如 2000 s)时只采前 60 s
+        let span = dur.min(60.0);
+        let step = (span / 240.0).max(1.0 / 30.0);
+        for (i, ob) in seq.objects.iter().enumerate().skip(1) {
+            if !ob.resource.ends_with(".model") {
+                continue;
+            }
+            let Some(model_p) = res_path(sdk, &ob.resource) else { continue };
+            let mt = read_text(&model_p)?;
+            let mi = crate::visual::parse_model(&mt).ok();
+            let vis_res = mi.as_ref().map(|m| m.visual.clone()).unwrap_or_default();
+            let vp = res_path(sdk, &vis_res).map(|p| if p.extension().is_some() { p } else { p.with_extension("visual") }).unwrap_or_else(|| model_p.with_extension("visual"));
+            let (_, vis0) = crate::anim::sample_object(&seq, i, 0.0);
+            let always_hidden = !ob.visibility.is_empty() && ob.visibility.iter().all(|v| !v.1);
+            if always_hidden {
+                continue;
+            }
+            let vis = Visual::parse(&read_text(&vp)?)?;
+            let gd = std::fs::read(vp.with_extension("geometry")).map_err(|e| Error::NotFound(format!("{}: {e}", vp.with_extension("geometry").display())))?;
+            let mut ge = GeoEdit::parse(&gd)?;
+            let prims = mesh_prims(&mut ge, &vis, &|_| true, warn)?;
+            let mut frames = Vec::new();
+            let mut t = 0.0;
+            while t <= span + 1e-9 {
+                let (m, v) = crate::anim::sample_object(&seq, i, t);
+                let w = game_to_gltf(&mat_mul(&m, sm));
+                let flat: Vec<f64> = (0..4).flat_map(|c| (0..4).map(move |r| (w[r][c] * 1e5).round() / 1e5)).collect();
+                frames.push(json!({"t": (t * 1e4).round() / 1e4, "m": flat, "v": v}));
+                t += step;
+            }
+            let (m0, _) = crate::anim::sample_object(&seq, i, 0.0);
+            let name = format!("Anim_{sec}_{}", ob.name);
+            let mesh = sb.add_mesh(&name, &prims);
+            sb.add_node(&name, Some(mesh), Some(&game_to_gltf(&mat_mul(&m0, sm))), json!({"section": sec, "anim": {"seq": seq_res, "object": ob.name, "duration": dur, "loop": true, "span": span, "step": step, "frames": frames}}), None);
+            anims.push(json!({"section": sec, "ssm": ssm_res, "seq": seq_res, "object": ob.name, "model": ob.resource, "duration": dur, "visible_t0": vis0, "frames": frames.len()}));
+        }
+    }
+    Ok(())
+}
+
 /// 装配整船。`geometry(stem)` 返回 `<stem>.geometry` 的字节。返回 (GLB, 装配表, 警告)
 pub fn assemble(sdk: &Path, ship_name: &str, ship: &Value, geometry: &dyn Fn(&str) -> Result<Vec<u8>>, opts: &AssembleOpts) -> Result<(Vec<u8>, Value, Vec<String>)> {
     let (master, mv) = master_visual(sdk)?;
@@ -171,6 +234,7 @@ pub fn assemble(sdk: &Path, ship_name: &str, ship: &Value, geometry: &dyn Fn(&st
     let mut warn = Vec::new();
     let mut sb = SceneBuilder::new();
     let mut table_sections = serde_json::Map::new();
+    let mut anims: Vec<Value> = Vec::new();
     let mesh_prims = |ge: &mut GeoEdit, vis: &Visual, filter: &dyn Fn(&str) -> bool, warn: &mut Vec<String>| -> Result<Vec<ScenePrim>> {
         let mut prims = Vec::new();
         for rs in &vis.render_sets {
@@ -199,6 +263,7 @@ pub fn assemble(sdk: &Path, ship_name: &str, ship: &Value, geometry: &dyn Fn(&st
                 uvs,
                 indices,
                 material,
+                material_index: None,
                 extras: json!({"renderSet": node, "vertices": rs.vertices, "mfm": rs.mfm, "materialIdentifier": rs.material_identifier}),
             });
         }
@@ -216,6 +281,15 @@ pub fn assemble(sdk: &Path, ship_name: &str, ship: &Value, geometry: &dyn Fn(&st
         let mi = sb.add_mesh(&format!("Hull_{s}"), &prims);
         sb.add_node(&format!("Hull_{s}"), Some(mi), Some(&game_to_gltf(sm)), json!({"section": s}), None);
         table_sections.insert(s.clone(), json!({"renderSets": np, "vertices": nv}));
+        // 分段 .model 的 <animations>: 被 .seq 驱动的独立模型按 t=0 放置, 并附采样帧供工作台播放
+        let mp = sdk.join("ship").join(format!("{stem}.model"));
+        if let Ok(mt) = read_text(&mp) {
+            for ssm in crate::anim::model_animations(&mt) {
+                if let Err(e) = add_animated(&mut sb, sdk, s, sm, &ssm, &mesh_prims, &mut warn, &mut anims) {
+                    warn.push(format!("动画 {ssm}: {e}"));
+                }
+            }
+        }
     }
     let mut gunmesh: BTreeMap<String, usize> = BTreeMap::new();
     let mut mounts = Vec::new();
@@ -256,6 +330,7 @@ pub fn assemble(sdk: &Path, ship_name: &str, ship: &Value, geometry: &dyn Fn(&st
     let table = json!({
         "ship": ship_name, "hullModel": master, "sections": table_sections, "mounts": mounts,
         "hardpoints_total": hps.len(),
+        "animations": anims,
         "conventions": {
             "game": "BigWorld 左手系: x 右舷, y 上, z 船艏; .visual 矩阵为行向量约定, row3=平移",
             "gltf": "glTF 右手系: x 右舷, y 上, -z 船艏; C=diag(1,1,-1), v_gltf=C·v_game, N_gltf=C·Wᵀ·C",

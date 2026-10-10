@@ -2,4 +2,6 @@
 /testdata/
 /out/
 *.glb
+# 风格包正反例图只在本机保存(参考帧/原包缩略图版权归原作者)
+styles/*/examples/
 /target_render/

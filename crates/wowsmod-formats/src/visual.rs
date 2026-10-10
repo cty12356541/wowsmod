@@ -502,8 +502,9 @@ pub fn parse_model(text: &str) -> Result<ModelInfo> {
     let visual = root
         .child("nodefullVisual")
         .or_else(|| root.child("nodelessVisual"))
+        .or_else(|| root.child("visual"))
         .map(|e| e.text(text))
-        .ok_or_else(|| Error::format("model", "没有 nodefullVisual"))?;
+        .ok_or_else(|| Error::format("model", "没有 nodefullVisual / visual"))?;
     Ok(ModelInfo {
         visual,
         parent: root.child("parent").map(|e| e.text(text)),

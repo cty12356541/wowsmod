@@ -1,11 +1,12 @@
 # design-ref: 层 1 参考与需求 + 层 2 拆解清单
 
 ## 层 1 输入(按模式)
-- **replicate**: 参考视频优先, 封面只是一帧。`python scripts/ref/ref_frames.py --bv <BV号> --out <目录> --frames 48`(或 `--video <文件>`)→ 关键帧 + 带时间戳拼图 + info.json(简介常有原 mod 公开链接)。机房 IP 被拒(412)时改用浏览器播放截帧, 放进 `<目录>/frames/` 后 `--sheet-only`。若有公开 mod 包: 只读其结构(换了哪些贴图/分辨率、加了哪些 .geometry/.visual/挂点、mfm 着色器), 不再分发。
+- **replicate**: 参考视频优先, 封面只是一帧。`python scripts/ref/ref_frames.py --bv <BV号> --out <目录> --frames 48`(或 `--video <文件>`)→ 关键帧 + 带时间戳拼图 + info.json(简介常有原 mod 公开链接)。机房 IP 被拒(412)时改用浏览器播放截帧, 放进 `<目录>/frames/` 后 `--sheet-only`。若有公开 mod 包: 只读拆解, 写 `TEARDOWN.md`(见下方"拆原包")。
 - **theme**: 元素表——主色/辅色/发光色、标志图形、角色/作品里的标志物件(可能需要建模)。
 - **original**: 风格定义——2–3 个色块明度级、图案母题、发光上限、远近效果。
 
 **素材获取**(先于任何绘制, `wowsmod design-template assets` → `ASSETS.md`): 按主题找原始图片——官网/官方媒体、官方 wiki、社区 wiki、官方社区、设定集; 再查视频简介、置顶/热门评论、作者主页里的原 mod 链接(B 站: 简介 `x/web-interface/archive/desc?bvid=`, 评论 `x/v2/reply?type=1&oid=<aid>`, 先取 `x/frontend/finger/spi` 的 buvid3)。需登录/付费的写清地址、提取码、价格, 交用户下载并说明放哪。清单写来源/用途/分辨率/许可提示; 素材只本地用, 不进仓库不分发。
+**拆原包**(有原包时, 层 1 必做): `python scripts/ref/pack_teardown.py <包目录> --sdk <官方 SDK 船目录> --out teardown_auto.md` 出清单, 再人工写 TEARDOWN.md, 逐项回答: ①加载方式(Main.py 只注册还是有逻辑)与安装说明(客户端/是否要卸永久迷彩); ②替换/新增文件, 是整船重导出(.geometry 全在)还是只换贴图; ③额外模型挂法——写进分段 visual 的新渲染集 / 独立 .model 经 `.model <animations>`→.ssm→.seq 动起来 / 挂点; 尺寸与位置; ④LOD 与断裂(crack/patch)渲染集是否保留; ⑤每张贴图的尺寸/格式/mip, 是否用官方 UV; ⑥发光: 着色器、emissivePower、`_mg` 各通道统计(B 最大值与占比); ⑦材质标识是否改名; ⑧特效/粒子/GameParams 有无; ⑨对目标服(莱服/WG)的适用性; ⑩垃圾文件。原包**只作拆解与最终对照**: 不装进游戏、不拷成品文件进项目、不进仓库。
 **选目标**(多个参考时): 先评估每个参考的"素材可得性(原包/官方图/只能手绘) + 工具能力(需要的命令是否都有)", 写出选择理由再动手。
 
 **放大**: 用可得的最高画质抽帧(B 站匿名最高 1080P(qn=80); 1080P60/更高需登录; 匿名 DASH 只有 480P, 别用); 对舷侧/艏/艉/炮塔顶/上层建筑/炮管各截 1 张放大局部, 并在正侧帧上数图案数量, 用 `scripts/ref/coverage.py <帧> --box …` 量各明度层占比与平均色(框只框船体, 别带海面)。结论不要先下: "炮管是细线还是整根亮"这类判断必须看放大图。

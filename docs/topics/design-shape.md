@@ -8,8 +8,10 @@
   2. `wowsmod model import --project <项目> --mesh <网格> --like <模板渲染集> [--hp HP_x | --part <部件> | --section <分段>] --at x,y,z --rot 度 --scale s`
      - 随炮塔转: `--part <炮塔>` + `--like Turret`; 每个顶点按最近的模板顶点绑骨(炮塔本体 = 只随水平转, 炮管 = 也随俯仰)。对部件的改动作用于该部件的全部实例。
      - 船体固定物件: `--like <分段>_DeckHouse` 或 `--hp HP_*`。
-  3. 材质: 每次导入新建 `<名>.mfm` 与 `_a/_mg/_n/_ao` 贴图, 不与原船共用贴图。`--texture <png>` 或 `--color #RRGGBB`; 发光: `--glow <遮罩png>` 或 `--glow-all`, `--power 0.25–0.5`; 发光颜色 = 漫反射颜色。
+  3. 材质: 新建 `.mfm` 与 `_a/_mg/_n/_ao`, 不与原船共用。单材质: `--texture`/`--color`; 多材质 GLB 自动每材质一个 .mfm(共用图集只存一份, 双面/镂空随 glTF)。PMX 先 `model pmx2glb`, 用 `--height` 定尺寸。发光: `--glow`/`--glow-all`/`--glow-mat <正则>`, `--b-max` 定上限, `--power 0.25–0.5`; 发光颜色 = 漫反射颜色。
   4. 默认写进全部 LOD; 碰撞/装甲不变。撤销: `model undo`。
+- 原包常见做法(拆解所得, 供选方案): 人物/大件写进某分段 visual 当新渲染集(每件独立材质); 会动的物件是独立 .model, 由分段 `.model` 的 `<animations>`→.ssm(状态机)→.seq(position/rotationEuler/scale/visibility 轨道)驱动环绕/自转——用 `model animate`(见 `wowsmod help model`), 工作台会按 .seq 播放。不要学它删 LOD 和 crack/patch 渲染集(远景不降面、断裂时艉段异常)。
+- 外部角色模型: 优先官方发布的模型(如官方账号发布的 MMD/PMX), 需登录的交用户下载; 转成 glb/obj 后按材质分别 `model import`。
 - 检查: 工作台(`wowsmod preview` / `render`)会在有 model 编辑时自动重新装配几何; 近景用 `--query "view=custom&az=40&el=25&dist=7&focus=<部件名, | 写成 %7C>"`, 夜景加 `&light=night` 看发光。soft 图只用于量尺寸。
 
 **完成标准**
