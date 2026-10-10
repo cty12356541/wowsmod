@@ -1,6 +1,8 @@
 # replicate: 定制复刻(有参考视频/图)
 
-骨架见 `wowsmod help design`。下游与 theme/original 一致: 产出同格式的**拆解书**(`wowsmod design-book init <项目> --mode replicate`), 与用户确认"拆得对不对"并定稿后再执行。本模式只说各层的差异。
+骨架见 `wowsmod help design`。下游与 theme/original 一致: 产出同格式的**拆解书**(`wowsmod design-book init <项目> --mode replicate`), 本模式只说各层的差异。
+
+**复刻模式的"定稿"**: 参考本身就是设计依据, 定稿只确认"拆得对": §1–§3 每项都有证据帧/放大图、数量与覆盖率已量(`scripts/ref/coverage.py`)、不能做的已标出。满足即可先执行(`WOWSMOD_BOOK_IGNORE=1` 关掉未定稿提示), 同时把拆解书交用户复核; 用户复核通过再 `design-book finalize --by 用户`。
 
 - **层 1**: 必须拿到**视频**(封面只是一帧): `python scripts/ref/ref_frames.py --bv <BV号> --out <目录>` 或 `--video <文件>`; 看简介里的作者说明(灵感来源、"带模型/发光"、公开下载)。有公开 mod 包就拆结构: 换了哪些贴图(名字、分辨率)、新增哪些 .geometry/.visual/挂点、mfm 用了什么着色器 —— 这直接告诉你层 3–5 要做什么。`wowsmod design-template analysis` 记录, 结论汇总进拆解书 §1–§3。
 - **层 2**: 逐帧对照, 特别找: 只在视频某几秒出现的模型/特效、两舷不对称的图案、甲板/炮塔顶上的图(俯视帧)。

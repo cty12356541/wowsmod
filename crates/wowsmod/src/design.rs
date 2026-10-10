@@ -867,12 +867,16 @@ pub fn book_state(text: &str) -> BookState {
 
 /// 执行类命令调用: 项目里有设计书但未定稿时给提示(不阻止)
 pub fn draft_hint(root: &Path) {
+    // 明确知情后继续执行(如复刻模式先按草稿做): WOWSMOD_BOOK_IGNORE=1 关掉提示
+    if std::env::var("WOWSMOD_BOOK_IGNORE").map(|v| v == "1").unwrap_or(false) {
+        return;
+    }
     let p = book_path(root);
     let Ok(t) = std::fs::read_to_string(&p) else { return };
     let b = book_state(&t);
     if b.status != "已定稿" {
         eprintln!(
-            "提示: 设计书 {} 状态为 {:?}(版本 {}), 尚未定稿。按工作流应先与用户迭代设计书、用户确认后 `wowsmod design-book finalize`, 再执行修改; 探索性预览可忽略本提示。",
+            "提示: 设计书 {} 状态为 {:?}(版本 {}), 尚未定稿。按工作流应先与用户迭代设计书、用户确认后 `wowsmod design-book finalize`, 再执行修改; 探索性预览可忽略本提示(知情继续: 设 WOWSMOD_BOOK_IGNORE=1)。",
             p.display(),
             b.status,
             b.version
