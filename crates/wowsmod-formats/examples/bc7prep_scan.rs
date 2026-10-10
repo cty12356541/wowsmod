@@ -1,7 +1,8 @@
 //! 全量扫描: 读取游戏内全部 .dds/.dd0/.dd1/.dd2, 统计 BC7Prep 贴图的 flags / 模式计数,
 //! 并对每一个尝试还原(只检查能否还原、长度是否正确; 逐字节正确性由 accept_textures.ps1 与 pfsunpack 对比)。
 //! 遇到"不支持"的情形时把原始文件存到 <样本目录>(每类最多 3 个), 便于继续逆向。
-//! 用法: bc7prep_scan <idx 目录> <res_packages 目录> [样本目录]   → stdout 输出 JSON
+//! 第 4 个参数可指定 glob(默认 "*.dd[s012]"); 用 "*" 即对游戏内全部文件做一次解压 + crc32 校验(全量解包自检)。
+//! 用法: bc7prep_scan <idx 目录> <res_packages 目录> [样本目录|-] [glob]   → stdout 输出 JSON
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -10,11 +11,12 @@ use wowsmod_formats::{bc7prep, index::GameIndex, pkg::PkgReader};
 fn main() {
     let a: Vec<String> = std::env::args().collect();
     let (idx, res) = (PathBuf::from(&a[1]), PathBuf::from(&a[2]));
-    let sample_dir = a.get(3).map(PathBuf::from);
+    let sample_dir = a.get(3).filter(|s| s.as_str() != "-").map(PathBuf::from);
+    let pattern = a.get(4).cloned().unwrap_or_else(|| "*.dd[s012]".to_string());
     let ix = GameIndex::load_dir(&idx).expect("idx");
     let reader = PkgReader::new(&res);
     let tex: Vec<_> = ix
-        .search("*.dd[s012]")
+        .search(&pattern)
         .expect("glob")
         .into_iter()
         .collect();
@@ -25,6 +27,7 @@ fn main() {
         prep: u64,
         decoded: u64,
         read_errors: Vec<String>,
+        bytes: u64,
         flags: BTreeMap<String, u64>,
         mode_blocks: [u64; 10],
         decor_mode_blocks: [u64; 10],
@@ -51,6 +54,7 @@ fn main() {
                 let is = bc7prep::is_bc7prep_dds(&d);
                 let mut g = st.lock().unwrap();
                 g.textures += 1;
+                g.bytes += d.len() as u64;
                 if !is {
                     continue;
                 }
@@ -101,8 +105,8 @@ fn main() {
     println!(
         "{}",
         serde_json::to_string_pretty(&serde_json::json!({
-            "textures_scanned": g.textures, "bc7prep": g.prep, "decoded_ok": g.decoded,
-            "read_errors": g.read_errors.len(), "read_error_examples": g.read_errors.iter().take(5).collect::<Vec<_>>(),
+            "pattern": pattern, "files_matched": tex.len(), "files_read_ok": g.textures, "bytes": g.bytes, "bc7prep": g.prep, "decoded_ok": g.decoded,
+            "read_errors": g.read_errors.len(), "read_error_list": g.read_errors,
             "bad_length": g.bad_len, "flags": g.flags,
             "mode_blocks_plain": g.mode_blocks, "mode_blocks_decorrelated": g.decor_mode_blocks,
             "unsupported": unsup,

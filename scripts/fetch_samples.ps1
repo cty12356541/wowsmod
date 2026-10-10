@@ -37,7 +37,9 @@ if ($pfs) {
     $kw = @('FD033_Rangefinder_n.dd0', 'FGM049_380mm_45_Mle_1935_n.dd0', 'FGM549_430_50_Mle_1940_Grimlock_TF_n.dd1', 'IAD500_Savoia_Marchetti_SM93_Lazio_Ceremonial_n.dd1', 'LMY421_n.dd0', 'LNT047_Jin_Chan_rnb.dd1',
         # flags 第 16 位(颜色去相关)样本
         'particles/animated/Arpeggio_balls_2x1.dd0', 'particles/animated/Bubbles_6x6.dd0', 'particles/animated/Firework_fat_8x8.dd0', 'particles/animated/Smoke_curved_7x7_LM.dd1',
-        'LNT000_dock_SPB_02_rnb.dd1', 'LNT000_Dock_ChinaArpeggio_08_rnb.dd0', 'ZSD101_Huang_Long_3Kings_Hull_art.dd0')
+        'LNT000_dock_SPB_02_rnb.dd1', 'LNT000_Dock_ChinaArpeggio_08_rnb.dd0', 'ZSD101_Huang_Long_3Kings_Hull_art.dd0',
+        # 去相关 + 模式 2
+        'particles/animated/Pointer_APR24_1x30.dd0', 'particles/animated/Pointer_APR24_1x30.dd1', 'dyndecals/exterior/PCED005_d.dd0', 'maps/decals/55_Seychelles/55_Seychelles_LA_road_alpha_a.dd2')
     $r = Invoke-WowsmodJson $wm ($gargs + @('extract', '--ship', 'PFSB510') + $kw + @('-o', $probe))
     $r2 = Invoke-WowsmodJson $wm ($gargs + @('extract', '--ship', 'PFSB108', '-o', $probe))
     $prep = @(@($r.Json.bc7prep_files) + @($r2.Json.bc7prep_files) | Sort-Object -Unique)

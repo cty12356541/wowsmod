@@ -74,10 +74,6 @@ pub fn decode_payload(q: &[u8]) -> Result<Vec<u8>> {
         return Err(Error::Unsupported(format!("BC7Prep flags {flags:#x} 含未知位 / unknown flag bits")));
     }
     let decor = flags & FLAG_DECORRELATE != 0;
-    if decor && counts[2] != 0 {
-        // 模式 2 在去相关形式下没有真实样本可验证, 不猜
-        return Err(Error::Unsupported(format!("BC7Prep 去相关形式(flags {flags:#x})下的模式 2 块({} 个)尚无样本验证 / mode 2 with decorrelation not verified", counts[2])));
-    }
     let n: usize = counts.iter().sum();
     let map_len = n.div_ceil(2);
     let mut offs = [0usize; 10];
@@ -272,15 +268,16 @@ pub fn unprep_block(m: usize, r: u128) -> u128 {
     w.v
 }
 
-/// 颜色去相关形式(flags 第 16 位)的规范化记录 → 标准 BC7 块(模式 0,1,3..7; 模式 2 未验证, 返回"不支持")。
+/// 颜色去相关形式(flags 第 16 位)的规范化记录 → 标准 BC7 块(模式 0..7)。
 /// 颜色端点存为 G、R−G、B−G(模该字段位宽), alpha 原样。各模式的位置:
-/// - 模式 0/1/3: 与非去相关形式相同的位置, 只是原来放 R/G/B 的槽依次放 G/R−G/B−G;
+/// - 模式 0/1/2/3: 与非去相关形式相同的位置, 只是原来放 R/G/B 的槽依次放 G/R−G/B−G;
 /// - 模式 4: 5 位槽依次为 G0 G1 (R−G)0 (R−G)1 (B−G)0 (B−G)1 A0 A1(规范/未旋转顺序), 6 位分量最低位仍在 bit0/1;
 /// - 模式 5: 每个端点 4 字节 (G, R−G, B−G, A)(8 位域; 7 位颜色是 v<<1)。旋转 2(G 为 8 位)时 G 的最低位
 ///   放在 R−G 字节的最低位(R−G 本身是偶数);
 /// - 模式 6: 每个端点 4 字节 (G, R−G, B−G, A)(7 位值);
 /// - 模式 7: 每个端点 16 位字 [p | G<<1 | (R−G)<<6 | (B−G)<<11], A 为 72 起的 4 个 5 位值。
 pub fn unprep_block_decorrelated(m: usize, r: u128) -> Result<u128> {
+    // 返回 Result 以便将来遇到未见过的情形时报错; 目前模式 0..7 均已由真实样本验证
     let mut w = W::new();
     match m {
         0 => {
@@ -430,7 +427,22 @@ pub fn unprep_block_decorrelated(m: usize, r: u128) -> Result<u128> {
             }
             w.put(r >> 98, 30);
         }
-        2 => return Err(Error::Unsupported("BC7Prep 去相关形式下的模式 2 尚无样本验证 / mode 2 with decorrelation not verified".into())),
+        2 => {
+            w.put(4, 3);
+            let part: u32 = (0..6).map(|e| g(r, 16 * e, 1) << e).sum();
+            w.put(part as u128, 6);
+            let gg = |e: u32| g(r, 16 * e + 1, 5);
+            for e in 0..6 {
+                w.put(((gg(e) + g(r, 16 * e + 6, 5)) & 31) as u128, 5);
+            }
+            for e in 0..6 {
+                w.put(gg(e) as u128, 5);
+            }
+            for e in 0..6 {
+                w.put(((gg(e) + g(r, 16 * e + 11, 5)) & 31) as u128, 5);
+            }
+            w.put(r >> 99, 29);
+        }
         _ => unreachable!("mode {m}"),
     }
     debug_assert_eq!(w.o, 128);
@@ -627,6 +639,14 @@ mod tests {
                     set(&mut r, 65 + 2 * e, 1, db & 1);
                 }
             }
+            2 => {
+                for e in 0..6 {
+                    let (rv, gv, bv) = (g(base, 16 * e + 1, 5), g(base, 16 * e + 6, 5), g(base, 16 * e + 11, 5));
+                    set(&mut r, 16 * e + 1, 5, gv);
+                    set(&mut r, 16 * e + 6, 5, rv.wrapping_sub(gv) & 31);
+                    set(&mut r, 16 * e + 11, 5, bv.wrapping_sub(gv) & 31);
+                }
+            }
             3 => {
                 for e in 0..4 {
                     let (rv, gv, bv) = (g(base, 24 * e, 7), g(base, 24 * e + 8, 7), g(base, 24 * e + 16, 7));
@@ -690,7 +710,7 @@ mod tests {
     #[test]
     fn decorrelated_unprep_inverts_prep_random() {
         let mut s = 0x1600_0010_u64;
-        for m in [0usize, 1, 3, 4, 5, 6, 7] {
+        for m in 0..8usize {
             for _ in 0..20000 {
                 let lo = rng(&mut s) as u128 | (rng(&mut s) as u128) << 64;
                 let b = (lo << (m + 1)) | (1u128 << m);
@@ -698,7 +718,6 @@ mod tests {
                 assert_eq!(back, b, "mode {m}");
             }
         }
-        assert!(unprep_block_decorrelated(2, 0).is_err());
     }
 
     fn expand7(x: u32) -> u32 {
