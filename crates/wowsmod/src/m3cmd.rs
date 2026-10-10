@@ -753,6 +753,9 @@ pub enum ModelCmd {
         /// 保留 diffuse alpha = 0 的材质(MMD 里多为隐藏的切换部件, 默认跳过)
         #[arg(long)]
         keep_hidden: bool,
+        /// 静态摆姿势(可重复): arms-down[:度](双臂放下, 默认 60) | 骨骼名^度(朝下转) | 骨骼名=rx,ry,rz(度)
+        #[arg(long)]
+        pose: Vec<String>,
     },
     /// 等价重建: 解码全部渲染集后由编码器从零写出 geometry(验证编码器); 默认整船分段+全部部件
     Rebuild {
@@ -904,8 +907,12 @@ fn run_model(cli: &Cli, c: &ModelCmd) -> Result<Value> {
             return Ok(json!({"seq": seq.display().to_string(), "duration": s.duration, "objects": s.objects.iter().map(|o| json!({"name": o.name, "resource": o.resource, "keys": {"position": o.position.len(), "rotationEuler": o.rotation.len(), "scale": o.scale.len()}, "attach": o.attach.iter().map(|a| json!(a)).collect::<Vec<_>>()})).collect::<Vec<_>>(),
                 "samples": rows, "assumptions": "Hermite 插值, 切线 = 值/秒; rotationEuler 度, (roll, pitch, yaw)"}));
         }
-        ModelCmd::Pmx2glb { pmx, out, unit_m, keep_hidden } => {
-            let (glb, mut rep) = crate::meshsrc::pmx_file_to_glb(pmx, *unit_m, !*keep_hidden)?;
+        ModelCmd::Pmx2glb { pmx, out, unit_m, keep_hidden, pose } => {
+            let mut ops = Vec::new();
+            for p in pose {
+                ops.extend(crate::meshsrc::parse_pose(p)?);
+            }
+            let (glb, mut rep) = crate::meshsrc::pmx_file_to_glb(pmx, *unit_m, !*keep_hidden, &ops)?;
             if let Some(d) = out.parent().filter(|d| !d.as_os_str().is_empty()) {
                 std::fs::create_dir_all(d)?;
             }

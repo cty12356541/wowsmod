@@ -15,10 +15,10 @@ wowsmod model replace --project <项目> --part A --with B   # 或 --glb 网格
 wowsmod model add --project <项目> --glb new.glb --like <渲染集>   # 共用模板材质
 wowsmod model import --project <项目> --mesh wing.obj --like Turret --part FGM049 --at 0.4,0.12,-0.2 --glow mask.png   # 新部件+独立材质/贴图, 见 help ref.model.import
 wowsmod model import --project <项目> --mesh figure.glb --like Turret --part FGM049 --height 0.06   # 多材质 GLB: 每个 glTF 材质一个 .mfm
-wowsmod model pmx2glb figure.pmx -o figure.glb            # MMD 模型 → GLB(纯 Rust, 静态网格)
+wowsmod model pmx2glb figure.pmx -o figure.glb --pose arms-down:55   # MMD → GLB; --pose 静态摆姿势(骨^度 / 骨=rx,ry,rz)
 wowsmod model undo --project <项目>
 ```
-- 坐标是游戏坐标:x 右舷,y 上,z 船艏;单位与 .visual 相同(约 1 = 30 m)。
+- 坐标是游戏坐标:x 右舷,y 上,z 船艏;单位与 .visual 相同; 米/单位 = 真实舰长 ÷ `model list` 的 bbox 长度(布艮第 247 m/17.8 ≈ 14 m)。
 - 渲染集的编辑默认作用于全部 LOD,所以拉远后不会变回原样。
 - 每次编辑都记录在 `edits/` 下,可以 `undo`,也可以用 `replay` 在别的项目上重放。
 - 检查:`wowsmod render <项目> --compare --view all`。

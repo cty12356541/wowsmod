@@ -312,6 +312,16 @@ pub struct Pmx {
     pub indices: Vec<u32>,
     pub textures: Vec<String>,
     pub materials: Vec<PmxMat>,
+    /// 每顶点最多 4 个 (骨骼, 权重); SDEF 按 BDEF2 处理
+    pub weights: Vec<[(i32, f32); 4]>,
+    pub bones: Vec<PmxBone>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct PmxBone {
+    pub name: String,
+    pub pos: [f32; 3],
+    pub parent: i32,
 }
 
 struct Rd<'a> {
@@ -398,14 +408,27 @@ pub fn read_pmx(b: &[u8]) -> Result<Pmx> {
         p.uvs.push(r.fv::<2>()?);
         r.take(16 * add_uv)?;
         let wt = r.u8()?;
-        let bs = bsz as usize;
+        let mut w = [(-1i32, 0.0f32); 4];
         match wt {
-            0 => r.take(bs)?,
-            1 => r.take(bs * 2 + 4)?,
-            2 | 4 => r.take(bs * 4 + 16)?,
-            3 => r.take(bs * 2 + 4 + 36)?,
+            0 => w[0] = (r.sidx(bsz)? as i32, 1.0),
+            1 | 3 => {
+                let (a, b) = (r.sidx(bsz)? as i32, r.sidx(bsz)? as i32);
+                let x = r.f32()?;
+                w[0] = (a, x);
+                w[1] = (b, 1.0 - x);
+                if wt == 3 {
+                    r.take(36)?; // SDEF C/R0/R1: 近似为 BDEF2
+                }
+            }
+            2 | 4 => {
+                let ids = [r.sidx(bsz)?, r.sidx(bsz)?, r.sidx(bsz)?, r.sidx(bsz)?];
+                for (k, id) in ids.iter().enumerate() {
+                    w[k] = (*id as i32, r.f32()?);
+                }
+            }
             _ => bail!("PMX 顶点权重类型 {wt}"),
         };
+        p.weights.push(w);
         r.f32()?; // 描边倍率
     }
     let ni = r.i32()? as usize;
@@ -447,7 +470,55 @@ pub fn read_pmx(b: &[u8]) -> Result<Pmx> {
         used += cnt;
         p.materials.push(PmxMat { name, diffuse, flags, texture: (tex >= 0 && (tex as usize) < nt).then_some(tex as usize), index_count: cnt });
     }
-    // 之后是骨骼/表情/显示枠/刚体/关节: 静态网格不需要
+    // 骨骼(摆姿势用); 读失败不影响静态网格
+    if let Ok(nb) = r.i32() {
+        let mut bones = Vec::new();
+        let ok = (|| -> Result<()> {
+            for _ in 0..nb.max(0) {
+                let name = r.text(utf8)?;
+                let _en = r.text(utf8)?;
+                let pos = r.fv::<3>()?;
+                let parent = r.sidx(bsz)? as i32;
+                r.i32()?; // 变形阶层
+                let flags = u16::from_le_bytes(r.take(2)?.try_into().unwrap());
+                if flags & 0x1 != 0 {
+                    r.sidx(bsz)?;
+                } else {
+                    r.fv::<3>()?;
+                }
+                if flags & 0x300 != 0 {
+                    r.sidx(bsz)?;
+                    r.f32()?;
+                }
+                if flags & 0x400 != 0 {
+                    r.fv::<3>()?;
+                }
+                if flags & 0x800 != 0 {
+                    r.fv::<6>()?;
+                }
+                if flags & 0x2000 != 0 {
+                    r.i32()?;
+                }
+                if flags & 0x20 != 0 {
+                    r.sidx(bsz)?;
+                    r.i32()?;
+                    r.f32()?;
+                    let nl = r.i32()?;
+                    for _ in 0..nl.max(0) {
+                        r.sidx(bsz)?;
+                        if r.u8()? != 0 {
+                            r.fv::<6>()?;
+                        }
+                    }
+                }
+                bones.push(PmxBone { name, pos, parent });
+            }
+            Ok(())
+        })();
+        if ok.is_ok() {
+            p.bones = bones;
+        }
+    }
     Ok(p)
 }
 
@@ -610,16 +681,178 @@ pub fn pmx_to_glb(p: &Pmx, base_dir: &Path, unit_m: f32, skip_hidden: bool) -> R
     Ok((out, rep))
 }
 
-pub fn pmx_file_to_glb(input: &Path, unit_m: f32, skip_hidden: bool) -> Result<(Vec<u8>, Value)> {
+pub fn pmx_file_to_glb(input: &Path, unit_m: f32, skip_hidden: bool, pose: &[PoseOp]) -> Result<(Vec<u8>, Value)> {
     let b = std::fs::read(input).map_err(|e| anyhow!("读取 {}: {e}", input.display()))?;
-    let p = read_pmx(&b)?;
+    let mut p = read_pmx(&b)?;
+    let pose_rep = if pose.is_empty() { Value::Null } else { apply_pose(&mut p, pose)? };
     let dir: PathBuf = input.parent().map(|x| x.to_path_buf()).unwrap_or_default();
-    pmx_to_glb(&p, &dir, unit_m, skip_hidden)
+    let (g, mut rep) = pmx_to_glb(&p, &dir, unit_m, skip_hidden)?;
+    rep["pose"] = pose_rep;
+    rep["bones"] = json!(p.bones.len());
+    Ok((g, rep))
+}
+
+// ---------- 摆姿势(静态): 骨骼正向运动学 + 线性蒙皮 ----------
+/// 姿势操作: 某骨骼(按名字)绕轴旋转; Lower = 把骨骼指向下方转动 deg 度(手臂放下等)
+#[derive(Clone, Debug)]
+pub enum PoseOp {
+    /// 骨骼名, 绕世界轴(静止姿势坐标)的欧拉角 x,y,z(度, 依次 X→Y→Z)
+    Euler(String, [f32; 3]),
+    /// 骨骼名, 朝 -Y(向下)转动的角度(度); 转轴 = 骨骼方向 × 向下
+    Lower(String, f32),
+}
+
+/// 解析: "arms-down[:度]" 预设, 或 "骨骼名=rx,ry,rz", 或 "骨骼名^度"(向下转)
+pub fn parse_pose(spec: &str) -> Result<Vec<PoseOp>> {
+    let spec = spec.trim();
+    if let Some(rest) = spec.strip_prefix("arms-down") {
+        let d: f32 = rest.trim_start_matches(':').parse().unwrap_or(60.0);
+        return Ok(vec![PoseOp::Lower("左腕".into(), d), PoseOp::Lower("右腕".into(), d)]);
+    }
+    if let Some((n, d)) = spec.split_once('^') {
+        return Ok(vec![PoseOp::Lower(n.trim().into(), d.trim().parse().map_err(|_| anyhow!("--pose {spec}: 角度"))?)]);
+    }
+    let (n, v) = spec.split_once('=').ok_or_else(|| anyhow!("--pose 格式: arms-down[:度] | 骨骼名=rx,ry,rz | 骨骼名^度"))?;
+    let a: Vec<f32> = v.split(',').map(|x| x.trim().parse::<f32>()).collect::<std::result::Result<_, _>>().map_err(|_| anyhow!("--pose {spec}: 角度"))?;
+    if a.len() != 3 {
+        bail!("--pose {spec}: 需要 3 个角度");
+    }
+    Ok(vec![PoseOp::Euler(n.trim().into(), [a[0], a[1], a[2]])])
+}
+
+type Q = [f32; 4]; // x,y,z,w
+fn q_axis(ax: [f32; 3], deg: f32) -> Q {
+    let l = (ax[0] * ax[0] + ax[1] * ax[1] + ax[2] * ax[2]).sqrt().max(1e-9);
+    let h = deg.to_radians() * 0.5;
+    let s = h.sin() / l;
+    [ax[0] * s, ax[1] * s, ax[2] * s, h.cos()]
+}
+fn q_mul(a: Q, b: Q) -> Q {
+    [
+        a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],
+        a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0],
+        a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3],
+        a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2],
+    ]
+}
+fn q_rot(q: Q, v: [f32; 3]) -> [f32; 3] {
+    let p = q_mul(q_mul(q, [v[0], v[1], v[2], 0.0]), [-q[0], -q[1], -q[2], q[3]]);
+    [p[0], p[1], p[2]]
+}
+
+/// 把姿势烘进顶点(位置与法线)。骨骼静止姿势无朝向(PMX 惯例), 局部旋转即在父骨骼已旋转的坐标系里。
+pub fn apply_pose(p: &mut Pmx, ops: &[PoseOp]) -> Result<Value> {
+    let nb = p.bones.len();
+    if nb == 0 {
+        bail!("PMX 没有可用的骨骼数据, 不能摆姿势");
+    }
+    let find = |n: &str| p.bones.iter().position(|b| b.name == n);
+    let mut local: Vec<Q> = vec![[0.0, 0.0, 0.0, 1.0]; nb];
+    let mut applied = Vec::new();
+    let mut missing = Vec::new();
+    for op in ops {
+        match op {
+            PoseOp::Euler(n, e) => match find(n) {
+                Some(i) => {
+                    let q = q_mul(q_axis([0.0, 0.0, 1.0], e[2]), q_mul(q_axis([0.0, 1.0, 0.0], e[1]), q_axis([1.0, 0.0, 0.0], e[0])));
+                    local[i] = q_mul(q, local[i]);
+                    applied.push(json!({"bone": n, "euler": e}));
+                }
+                None => missing.push(n.clone()),
+            },
+            PoseOp::Lower(n, d) => match find(n) {
+                Some(i) => {
+                    // 骨骼方向: 指向第一个子骨骼
+                    let c = p.bones.iter().position(|b| b.parent == i as i32).ok_or_else(|| anyhow!("骨骼 {n} 没有子骨骼, 无法确定方向"))?;
+                    let (a, b) = (p.bones[i].pos, p.bones[c].pos);
+                    let dir = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+                    let down = [0.0, -1.0, 0.0];
+                    let ax = [dir[1] * down[2] - dir[2] * down[1], dir[2] * down[0] - dir[0] * down[2], dir[0] * down[1] - dir[1] * down[0]];
+                    local[i] = q_mul(q_axis(ax, *d), local[i]);
+                    applied.push(json!({"bone": n, "lower_deg": d}));
+                }
+                None => missing.push(n.clone()),
+            },
+        }
+    }
+    if applied.is_empty() {
+        bail!("姿势里的骨骼都不存在: {missing:?}(骨骼名见 PMX; 常见: 左腕/右腕/左ひじ/右ひじ/首/頭)");
+    }
+    // 正向运动学: 世界旋转 R_b = R_parent * L_b; 世界位置 P_b = P_parent' + R_parent*(rest_b - rest_parent)
+    let mut order: Vec<usize> = Vec::with_capacity(nb);
+    let mut done = vec![false; nb];
+    while order.len() < nb {
+        let before = order.len();
+        for i in 0..nb {
+            let pa = p.bones[i].parent;
+            if !done[i] && (pa < 0 || pa as usize >= nb || done[pa as usize]) {
+                done[i] = true;
+                order.push(i);
+            }
+        }
+        if order.len() == before {
+            bail!("PMX 骨骼父子关系有环");
+        }
+    }
+    let mut wr: Vec<Q> = vec![[0.0, 0.0, 0.0, 1.0]; nb];
+    let mut wp: Vec<[f32; 3]> = p.bones.iter().map(|b| b.pos).collect();
+    for &i in &order {
+        let pa = p.bones[i].parent;
+        if pa >= 0 && (pa as usize) < nb {
+            let pa = pa as usize;
+            let off = [p.bones[i].pos[0] - p.bones[pa].pos[0], p.bones[i].pos[1] - p.bones[pa].pos[1], p.bones[i].pos[2] - p.bones[pa].pos[2]];
+            let o = q_rot(wr[pa], off);
+            wp[i] = [wp[pa][0] + o[0], wp[pa][1] + o[1], wp[pa][2] + o[2]];
+            wr[i] = q_mul(wr[pa], local[i]);
+        } else {
+            wr[i] = local[i];
+        }
+    }
+    let mut moved = 0usize;
+    for (vi, w) in p.weights.iter().enumerate() {
+        let v = p.positions[vi];
+        let nrm = p.normals[vi];
+        let (mut acc, mut accn, mut tw) = ([0.0f32; 3], [0.0f32; 3], 0.0f32);
+        for &(b, wt) in w {
+            if b < 0 || b as usize >= nb || wt <= 0.0 {
+                continue;
+            }
+            let b = b as usize;
+            let rest = p.bones[b].pos;
+            let r = q_rot(wr[b], [v[0] - rest[0], v[1] - rest[1], v[2] - rest[2]]);
+            let rn = q_rot(wr[b], nrm);
+            for k in 0..3 {
+                acc[k] += wt * (wp[b][k] + r[k]);
+                accn[k] += wt * rn[k];
+            }
+            tw += wt;
+        }
+        if tw > 0.0 {
+            let np = [acc[0] / tw, acc[1] / tw, acc[2] / tw];
+            if (np[0] - v[0]).abs() + (np[1] - v[1]).abs() + (np[2] - v[2]).abs() > 1e-5 {
+                moved += 1;
+            }
+            p.positions[vi] = np;
+            let l = (accn[0] * accn[0] + accn[1] * accn[1] + accn[2] * accn[2]).sqrt().max(1e-9);
+            p.normals[vi] = [accn[0] / l, accn[1] / l, accn[2] / l];
+        }
+    }
+    Ok(json!({"applied": applied, "missing_bones": missing, "vertices_moved": moved, "note": "静态摆姿势: 线性蒙皮(SDEF 近似为 BDEF2), 无 IK/物理; 手指等细节不动"}))
 }
 
 #[cfg(test)]
 pub mod tests {
     use super::*;
+
+    #[test]
+    fn pose_spec_parses() {
+        let a = parse_pose("arms-down:45").unwrap();
+        assert_eq!(a.len(), 2);
+        assert!(matches!(&a[0], PoseOp::Lower(_, d) if (*d - 45.0).abs() < 1e-3));
+        let b = parse_pose("首=10,0,0").unwrap();
+        assert!(matches!(&b[0], PoseOp::Euler(n, r) if n == "首" && (r[0] - 10.0).abs() < 1e-3));
+        assert!(parse_pose("左腕^30").is_ok());
+    }
 
     /// 测试用最小 PMX 2.0 写出器(UTF-8, 索引 4 字节)
     pub fn tiny_pmx(tex: &str) -> Vec<u8> {
