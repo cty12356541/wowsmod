@@ -25,6 +25,9 @@ use wowsmod_formats::{
 };
 
 use crate::modproj::{self, GameLookup, Project};
+
+#[path = "m3import.rs"]
+mod import;
 use crate::{emit, game_ctx, Cli, GameCtx};
 
 /// 取真实 .geometry 字节: 先查 --geom-dir(按文件名, 递归), 再查游戏包(按需加载索引)。
@@ -580,6 +583,56 @@ pub enum ModelCmd {
         #[arg(long)]
         lod0_only: bool,
     },
+    /// 导入外部网格(GLB/OBJ)为新部件: 独立材质与贴图(_a/_mg/_n/_ao), 可发光; 挂到 --part(随炮塔转)/ --hp 挂点 / --section
+    Import {
+        #[command(flatten)]
+        t: Target,
+        /// 网格文件 .glb / .obj(glTF 约定: y 上, 右手; 单位同 visual, 约 1 = 30 m)
+        #[arg(long)]
+        mesh: PathBuf,
+        /// 模板渲染集(正则): 提供顶点格式、挂接节点、着色器; 材质与贴图会另建
+        #[arg(long)]
+        like: String,
+        /// 挂接节点(部件/分段 visual 里的节点名, 如 Rotate_Y); 默认模板渲染集的第一个节点
+        #[arg(long)]
+        node: Option<String>,
+        /// 相对挂接节点的位置 x,y,z(游戏坐标)
+        #[arg(long, default_value = "0,0,0", allow_hyphen_values = true)]
+        at: String,
+        /// 旋转(度, 依次绕 x,y,z)
+        #[arg(long, default_value = "0,0,0", allow_hyphen_values = true)]
+        rot: String,
+        /// 缩放(一个数=等比; 或 x,y,z)
+        #[arg(long, default_value = "1")]
+        scale: String,
+        /// 新渲染集/材质/贴图基名(默认 wm_<网格名>)
+        #[arg(long)]
+        name: Option<String>,
+        /// 漫反射 PNG(按网格 UV); 不给时用 --color 纯色
+        #[arg(long)]
+        texture: Option<PathBuf>,
+        /// 纯色漫反射 #RRGGBB(发光颜色 = 漫反射颜色)
+        #[arg(long)]
+        color: Option<String>,
+        /// 发光遮罩 PNG(亮度×alpha → _mg 的 B)
+        #[arg(long)]
+        glow: Option<PathBuf>,
+        /// 整个网格发光
+        #[arg(long)]
+        glow_all: bool,
+        /// emissivePower(0.25–0.5 已很亮)
+        #[arg(long, default_value_t = 0.35)]
+        power: f32,
+        /// 新贴图边长(像素, 取 2 的幂)
+        #[arg(long, default_value_t = 512)]
+        tex_size: u32,
+        /// 光泽度(_mg 的 G, 0–255)
+        #[arg(long, default_value_t = 90)]
+        gloss: u8,
+        /// 只写进 LOD0(默认全部 LOD)
+        #[arg(long)]
+        lod0_only: bool,
+    },
     /// 等价重建: 解码全部渲染集后由编码器从零写出 geometry(验证编码器); 默认整船分段+全部部件
     Rebuild {
         #[command(flatten)]
@@ -630,6 +683,7 @@ impl ModelCmd {
             | ModelCmd::Replace { t, .. }
             | ModelCmd::Remove { t }
             | ModelCmd::Add { t, .. }
+            | ModelCmd::Import { t, .. }
             | ModelCmd::Rebuild { t, .. }
             | ModelCmd::ExportBlender { t, .. }
             | ModelCmd::ImportBlender { t, .. } => Some(t),
@@ -645,6 +699,7 @@ impl ModelCmd {
             ModelCmd::Replace { .. } => "model_replace",
             ModelCmd::Remove { .. } => "model_remove",
             ModelCmd::Add { .. } => "model_add",
+            ModelCmd::Import { .. } => "model_import",
             ModelCmd::Rebuild { .. } => "model_rebuild",
             ModelCmd::ExportBlender { .. } => "model_export_blender",
             ModelCmd::ImportBlender { .. } => "model_import_blender",
@@ -666,6 +721,11 @@ impl ModelCmd {
                 *glb = glb.as_ref().map(abs);
             }
             ModelCmd::Add { glb, .. } | ModelCmd::ImportBlender { glb, .. } => *glb = abs(glb),
+            ModelCmd::Import { mesh, texture, glow, .. } => {
+                *mesh = abs(mesh);
+                *texture = texture.as_ref().map(abs);
+                *glow = glow.as_ref().map(abs);
+            }
             ModelCmd::ExportBlender { out, .. } => {
                 if let Some(parent) = out.parent() {
                     if let Ok(pp) = std::fs::canonicalize(if parent.as_os_str().is_empty() { Path::new(".") } else { parent }) {
@@ -722,6 +782,29 @@ fn run_model(cli: &Cli, c: &ModelCmd) -> Result<Value> {
         ModelCmd::Remove { .. } => remove(&mut tx, &root, &src, &t)?,
         ModelCmd::Replace { with, with_sdk, glb, space, .. } => replace(&mut tx, &p, &root, &src, &t, with.as_deref(), with_sdk.as_deref(), glb.as_deref(), space)?,
         ModelCmd::Add { glb, like, name, space, lod0_only, .. } => add(&mut tx, &root, &src, &t, glb, like, name.as_deref(), space, *lod0_only)?,
+        ModelCmd::Import { mesh, like, node, at, rot, scale, name, texture, color, glow, glow_all, power, tex_size, gloss, lod0_only, .. } => import::import(
+            &mut tx,
+            &root,
+            &src,
+            &t,
+            &import::ImportOpts {
+                mesh,
+                like,
+                node: node.as_deref(),
+                at,
+                rot,
+                scale,
+                name: name.as_deref(),
+                texture: texture.as_deref(),
+                color: color.as_deref(),
+                glow: glow.as_deref(),
+                glow_all: *glow_all,
+                power: *power,
+                tex_size: *tex_size,
+                gloss: *gloss,
+                lod0_only: *lod0_only,
+            },
+        )?,
         ModelCmd::Rebuild { recompute_tangents, .. } => rebuild(&mut tx, &root, &src, &t, *recompute_tangents)?,
         ModelCmd::ImportBlender { glb, .. } => import_blender(&mut tx, &root, &src, glb)?,
         ModelCmd::Undo { .. } | ModelCmd::Replay { .. } => unreachable!(),
@@ -1040,12 +1123,12 @@ fn find_template(v: &Visual, pat: &str) -> Result<usize> {
     v.render_sets
         .iter()
         .position(|r| re.is_match(&r.base_name()) || r.nodes.first().map(|n| re.is_match(n)).unwrap_or(false))
-        .ok_or_else(|| anyhow!("LOD0 visual 里没有匹配 {pat:?} 的渲染集"))
+        .ok_or_else(|| anyhow!("LOD0 visual 里没有匹配 {pat:?} 的渲染集; 可选: {}", v.render_sets.iter().map(|r| r.base_name()).collect::<Vec<_>>().join(", ")))
 }
 
 /// 把 GLB primitive 作为新渲染集写进 unit(全部 LOD 或仅 LOD0)。prim 坐标在 visual 空间。
 /// 材质: GLB 材质名等于本 visual 某渲染集的 identifier 时用那个渲染集做模板, 否则用 `tpl_k`。
-fn add_prims(ge: &mut GeoEdit, vis: &mut [Visual], prims: &[GlbPrim], base: &str, tpl_k: usize, lod0_only: bool) -> Result<Vec<Value>> {
+fn add_prims(ge: &mut GeoEdit, vis: &mut [Visual], prims: &[GlbPrim], base: &str, tpl_k: usize, lod0_only: bool, tpl_vertex: Option<&[u8]>) -> Result<Vec<Value>> {
     let mut out = Vec::new();
     for (i, gp) in prims.iter().enumerate() {
         let name = if prims.len() == 1 { base.to_string() } else { format!("{base}_{i}") };
@@ -1053,7 +1136,10 @@ fn add_prims(ge: &mut GeoEdit, vis: &mut [Visual], prims: &[GlbPrim], base: &str
         let r = vis[0].render_sets[k].clone();
         let rn = r.base_name();
         let fmt = ge.info(&rn).map_err(|e| anyhow!("{rn}: {e}"))?.format;
-        let tv = ge.raw_vertex(&rn, 0).map_err(|e| anyhow!("{e}"))?;
+        let tv = match tpl_vertex {
+            Some(t) => t.to_vec(),
+            None => ge.raw_vertex(&rn, 0).map_err(|e| anyhow!("{e}"))?,
+        };
         let to_vs = rs_to_visual(&vis[0], k);
         let space = inv(&to_vs)?;
         let mut m = gp.mesh.clone();
@@ -1107,7 +1193,7 @@ fn add(tx: &mut Tx, root: &Path, src: &GeomSrc, t: &Target, glb: &Path, like: &s
     let tk = find_template(&vis[0], like)?;
     let tname = vis[0].render_sets[tk].base_name();
     let base = name.map(sanitize).unwrap_or_else(|| format!("wm_{}", sanitize(&glb.file_stem().unwrap().to_string_lossy())));
-    let added = add_prims(&mut ge, &mut vis, &prims, &base, tk, lod0_only)?;
+    let added = add_prims(&mut ge, &mut vis, &prims, &base, tk, lod0_only, None)?;
     let geo = ge.finish().map_err(|e| anyhow!("{e}"))?;
     tx.write(&u.geometry, geo.serialize());
     for (vp, v) in u.visuals.iter().zip(&vis) {
@@ -1166,7 +1252,7 @@ fn replace(tx: &mut Tx, p: &Project, root: &Path, src: &GeomSrc, t: &Target, wit
             let mut ge = GeoEdit::parse(&tx.geometry(&u.geometry, src)?).map_err(|e| anyhow!("{e}"))?;
             let base = format!("wm_{}", sanitize(&glb.file_stem().unwrap().to_string_lossy()));
             // 先加新网格(模板仍在 visual 里), 再删旧渲染集家族
-            let added = add_prims(&mut ge, &mut vis, &prims, &base, sel[0], false)?;
+            let added = add_prims(&mut ge, &mut vis, &prims, &base, sel[0], false, None)?;
             let mut removed = Vec::new();
             for v in vis.iter_mut() {
                 for k in (0..v.render_sets.len()).rev() {
@@ -1450,7 +1536,7 @@ fn import_blender(tx: &mut Tx, root: &Path, src: &GeomSrc, glb: &Path) -> Result
                 .or_else(|| vis[0].render_sets.iter().position(|r| !r.base_name().contains("_crack_")))
                 .unwrap_or(0);
             let base = format!("wm_{}_{}", sanitize(&gpm.node), i);
-            added.extend(add_prims(&mut ge, &mut vis, &[gpm], &base, tk, false)?);
+            added.extend(add_prims(&mut ge, &mut vis, &[gpm], &base, tk, false, None)?);
         }
         if changed.is_empty() && added.is_empty() {
             out.push(json!({"unit": kind, "name": name, "unchanged": unchanged}));

@@ -46,10 +46,6 @@ pub struct PreviewState {
     name_index: Mutex<Option<HashMap<String, Vec<PathBuf>>>>,
     /// GameParams 里的等级/国家/类型 + 本地化船名(后台线程加载, 按游戏版本缓存在临时目录)
     ship_meta: std::sync::Arc<RwLock<Value>>,
-    /// 游戏索引: 小写文件名 → entries 下标(一次建好; 以前每张贴图都线性扫全部条目, 增量重载要 8 秒)
-    game_names: std::sync::OnceLock<HashMap<String, Vec<usize>>>,
-    /// 最近一次 rebuild 各阶段耗时
-    phases: Mutex<Vec<(&'static str, f32)>>,
 }
 
 #[derive(Clone)]
@@ -95,6 +91,8 @@ struct Geom {
     bytes: Vec<u8>,
     /// 缓存文件 (大小, mtime): 变了才重读
     stamp: Option<(u64, u128)>,
+    /// 模型编辑指纹(有 model 编辑时 = 项目内真实 .geometry 与全部 .visual 的路径+大小+mtime); 没有编辑为 None
+    model_key: Option<String>,
 }
 
 impl PreviewState {
@@ -131,8 +129,6 @@ impl PreviewState {
             game_memo: Mutex::new(HashMap::new()),
             name_index: Mutex::new(None),
             ship_meta: std::sync::Arc::new(RwLock::new(Value::Null)),
-            game_names: std::sync::OnceLock::new(),
-            phases: Mutex::new(vec![]),
         };
         st.load_ship_meta();
         st.rebuild()?;
@@ -218,8 +214,7 @@ impl PreviewState {
         let new_blobs = after.iter().filter(|h| !before.contains(*h)).count();
         let geom_after = self.geom.read().unwrap().as_ref().map(|g| g.hash.clone());
         self.bump("steps", json!({}));
-        let phases: serde_json::Map<String, Value> = self.phases.lock().unwrap().iter().map(|(k, v)| (k.to_string(), json!(v))).collect();
-        Ok(json!({"new_textures": new_blobs, "textures": after.len(), "geometry_changed": geom_before != geom_after, "head": self.head_id(), "seconds": t0.elapsed().as_secs_f32(), "phases": phases}))
+        Ok(json!({"new_textures": new_blobs, "textures": after.len(), "geometry_changed": geom_before != geom_after, "head": self.head_id(), "seconds": t0.elapsed().as_secs_f32()}))
     }
 
     /// 项目内容指纹(文件路径+大小+mtime), 用来判断要不要增量重载。跳过 renders/.render/.wowsmod(缓存的 geometry.glb 除外)
@@ -243,12 +238,6 @@ impl PreviewState {
     }
 
     fn rebuild(&self) -> Result<()> {
-        let mut ph: Vec<(&'static str, f32)> = vec![];
-        let mut tp = std::time::Instant::now();
-        let mut lap = |k: &'static str, ph: &mut Vec<(&'static str, f32)>| {
-            ph.push((k, tp.elapsed().as_secs_f32()));
-            tp = std::time::Instant::now();
-        };
         // 文件名索引(一次遍历)
         let mut idx: HashMap<String, Vec<PathBuf>> = HashMap::new();
         for f in self.project.files().unwrap_or_default() {
@@ -257,16 +246,12 @@ impl PreviewState {
             }
         }
         *self.name_index.lock().unwrap() = Some(idx);
-        lap("index", &mut ph);
         let edits = load_edits(&self.project.root)?;
         let steps = group_steps(&self.project.root, &edits)?;
-        lap("edits", &mut ph);
         // base materials from SDK copy
         let mut blobs = HashMap::new();
         let base_mats = self.scan_materials(false, &mut blobs)?;
-        lap("scan_base", &mut ph);
         let head_mats = self.scan_materials(true, &mut blobs)?;
-        lap("scan_head", &mut ph);
         // intermediate: start from base, apply texture outputs from edits
         let mut mats_map = HashMap::new();
         mats_map.insert("base".into(), base_mats.clone());
@@ -296,11 +281,8 @@ impl PreviewState {
         *self.mats.write().unwrap() = mats_map;
         *self.blobs.write().unwrap() = blobs;
         *self.steps.write().unwrap() = steps;
-        lap("steps", &mut ph);
         self.ensure_geometry()?;
         self.ensure_sim_parts()?;
-        lap("geometry", &mut ph);
-        *self.phases.lock().unwrap() = ph;
         // 步骤标题里的贴图名 → 部件中文名
         {
             let parts_doc = self.parts.read().unwrap().clone();
@@ -344,10 +326,8 @@ impl PreviewState {
             if let Ok(t) = std::fs::read_to_string(p) {
                 // per material block
                 for mat in t.split("<material>").skip(1) {
-                    static RE_ID: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-                    static RE_MFM: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-                    let id = RE_ID.get_or_init(|| regex::Regex::new(r"<identifier>\s*(\S+)\s*</identifier>").unwrap()).captures(mat).map(|c| c[1].to_string());
-                    let mf = RE_MFM.get_or_init(|| regex::Regex::new(r"<mfm>\s*(\S+)\s*</mfm>").unwrap()).captures(mat).map(|c| Path::new(&c[1]).file_name().unwrap().to_string_lossy().to_string());
+                    let id = regex::Regex::new(r"<identifier>\s*(\S+)\s*</identifier>").unwrap().captures(mat).map(|c| c[1].to_string());
+                    let mf = regex::Regex::new(r"<mfm>\s*(\S+)\s*</mfm>").unwrap().captures(mat).map(|c| Path::new(&c[1]).file_name().unwrap().to_string_lossy().to_string());
                     if let (Some(id), Some(mf)) = (id, mf) {
                         if id.contains("EMISSIVE") {
                             emissive_id.insert(mf);
@@ -417,17 +397,7 @@ impl PreviewState {
         }
         // 2) game by file name
         if let Some(ctx) = &self.ctx {
-            let names = self.game_names.get_or_init(|| {
-                let mut m: HashMap<String, Vec<usize>> = HashMap::new();
-                for (i, e) in ctx.index.entries.iter().enumerate() {
-                    let f = e.path.rsplit('/').next().unwrap_or(&e.path);
-                    if f.len() > 4 && f[f.len() - 4..].eq_ignore_ascii_case(".dds") {
-                        m.entry(f.to_lowercase()).or_default().push(i);
-                    }
-                }
-                m
-            });
-            let hits: Vec<_> = names.get(&format!("{name}.dds").to_lowercase()).map(|v| v.iter().map(|i| &ctx.index.entries[*i]).collect()).unwrap_or_default();
+            let hits: Vec<_> = ctx.index.entries.iter().filter(|e| e.path.rsplit('/').next().map(|x| x.eq_ignore_ascii_case(&format!("{name}.dds"))).unwrap_or(false)).collect();
             if hits.len() == 1 {
                 let vp = hits[0].path.clone();
                 if let Some(h) = self.game_memo.lock().unwrap().get(&vp).cloned() {
@@ -449,18 +419,76 @@ impl PreviewState {
         (None, true, None, None)
     }
 
+    /// 项目有 model 编辑(真实 .geometry 或 edits/ 里有 model 记录)时, 返回几何指纹; 否则 None(用原船种子几何)
+    fn model_key(&self) -> Option<String> {
+        let assets = self.project.assets();
+        let edited_record = std::fs::read_dir(self.project.root.join("edits")).map(|rd| rd.flatten().any(|e| e.file_name().to_string_lossy().contains("_model_"))).unwrap_or(false);
+        let mut items: Vec<String> = vec!["fallback-v2".into()]; // 后处理格式版本, 变了就重建
+        let mut real_geom = false;
+        let mut st = vec![assets];
+        while let Some(d) = st.pop() {
+            let Ok(rd) = std::fs::read_dir(&d) else { continue };
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    st.push(p);
+                    continue;
+                }
+                let ext = p.extension().and_then(|x| x.to_str()).unwrap_or("").to_ascii_lowercase();
+                if ext != "geometry" && ext != "visual" {
+                    continue;
+                }
+                let Ok(m) = e.metadata() else { continue };
+                if ext == "geometry" {
+                    if m.len() < 4096 && std::fs::read(&p).map(|d| mfm::is_sdk_stub(&d)).unwrap_or(true) {
+                        continue;
+                    }
+                    real_geom = true;
+                }
+                items.push(format!("{}|{}|{}", p.display(), m.len(), mtime_ns(&m)));
+            }
+        }
+        if !real_geom && !edited_record {
+            return None;
+        }
+        items.sort();
+        Some(hash16(items.join("\n").as_bytes()))
+    }
+
     fn ensure_geometry(&self) -> Result<()> {
         let cache = self.project.root.join(".wowsmod/cache");
         let cached = cache.join("geometry.glb");
+        let key_file = cache.join("geometry.model_key");
+        let key = self.model_key();
         let stamp_now = std::fs::metadata(&cached).ok().map(|m| (m.len(), mtime_ns(&m)));
         if let Some(g) = self.geom.read().unwrap().as_ref() {
-            // 缓存文件没变(或本来就不是从缓存文件来的)就复用
-            if g.stamp.is_none() || g.stamp == stamp_now {
+            // 缓存文件没变(或本来就不是从缓存文件来的)且模型编辑没变就复用
+            if (g.stamp.is_none() || g.stamp == stamp_now) && g.model_key == key {
                 return Ok(());
             }
         }
         std::fs::create_dir_all(&cache)?;
-        let bytes = if cached.is_file() {
+        let key_on_disk = std::fs::read_to_string(&key_file).ok();
+        let bytes = if let Some(k) = &key {
+            // 有模型编辑: 由项目重新装配(新增/替换/缩放的网格才能在工作台看到)
+            if cached.is_file() && key_on_disk.as_deref() == Some(k.as_str()) {
+                std::fs::read(&cached)?
+            } else {
+                let b = self.build_geometry_fallback(&cached)?;
+                std::fs::write(&key_file, k)?;
+                b
+            }
+        } else if key_on_disk.is_some() {
+            // 编辑已撤销: 丢掉按编辑装配的缓存, 回到原船几何
+            let _ = std::fs::remove_file(&key_file);
+            let _ = std::fs::remove_file(&cached);
+            if let Some(seed) = find_seed(&self.ship).filter(|s| s.join("geometry.glb").is_file()) {
+                std::fs::copy(seed.join("geometry.glb"), &cached)?;
+                std::fs::read(&cached)?
+            } else {
+                self.build_geometry_fallback(&cached)?
+            }
+        } else if cached.is_file() {
             std::fs::read(&cached)?
         } else if let Some(seed) = find_seed(&self.ship) {
             let src = seed.join("geometry.glb");
@@ -475,7 +503,7 @@ impl PreviewState {
         };
         let hash = hash16(&bytes);
         let stamp = std::fs::metadata(&cached).ok().map(|m| (m.len(), mtime_ns(&m)));
-        *self.geom.write().unwrap() = Some(Geom { hash, bytes, stamp });
+        *self.geom.write().unwrap() = Some(Geom { hash, bytes, stamp, model_key: key });
         Ok(())
     }
 
@@ -1214,13 +1242,18 @@ fn postprocess_glb_materials(raw: &[u8]) -> Result<Vec<u8>> {
         for m in meshes {
             if let Some(prims) = m["primitives"].as_array_mut() {
                 for p in prims {
-                    let mfm_path = p["extras"]["mfm"].as_str().unwrap_or("");
-                    let name = Path::new(mfm_path).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "unknown.mfm".into());
+                    let mfm_path = p["extras"]["mfm"].as_str().unwrap_or("").to_string();
+                    let name = Path::new(&mfm_path).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "unknown.mfm".into());
                     let idx = *mat_index.entry(name.clone()).or_insert_with(|| {
                         materials.push(json!({"name": name}));
                         materials.len() - 1
                     });
                     p["material"] = json!(idx);
+                    // 前端用 extras.mfm 覆盖材质名查表(键为文件名), 全路径会让整船查不到材质而全白
+                    if !mfm_path.is_empty() {
+                        p["extras"]["mfm_path"] = json!(mfm_path);
+                        p["extras"]["mfm"] = json!(name.clone());
+                    }
                     // keep identifier in extras
                     if p["extras"].get("materialIdentifier").is_some() {
                         let id = p["extras"]["materialIdentifier"].clone();
