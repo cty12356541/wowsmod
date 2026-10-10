@@ -12,3 +12,7 @@ wowsmod preview <项目>                          # 启动本机预览页(可交
 - 输出默认写到 `<项目>/renders/`。`--json` 含绝对路径 `out` 与 meta。
 - MCP 的 `wowsmod_render` 直接返回 PNG 图片内容; 找不到浏览器时返回文本说明(不算错误)。
 - 软件光栅(`--engine soft`)只有漫反射+发光近似, 用于没浏览器的环境。真实观感以 WebGL 出图和进港截图为准。
+
+## 设计用: 任意角度与世界→像素映射
+- `--yaw <度> --pitch <度>`(soft): 任意机位, 如 `--yaw 35 --pitch 14` 接近进港斜视。
+- `--json` 输出的 `frame` 给出世界→像素映射, 用来在同框设计图上按世界坐标作画, 再 `wowsmod bake-ref` 投影进 UV(见 `wowsmod help replicate`)。

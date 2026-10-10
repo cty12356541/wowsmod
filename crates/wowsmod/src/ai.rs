@@ -167,6 +167,7 @@ pub fn agents_md(exe: &str) -> String {
 2. 按任务读对应主题:
    - 新建项目:project
    - 换色 / 涂装:recolor
+   - 设计一套外观(复刻参考图 / 主题 / 原创):先判断模式,读 design
    - 发光:glow
    - 改模型:model,或用 Blender 改:blender
    - 出图:render

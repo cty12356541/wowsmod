@@ -10,6 +10,7 @@ wowsmod 是 Lesta《战舰世界》(Мир кораблей)客户端的改模�
 |---|---|
 | 新建 mod 项目(SDK 路线,改整船) | project |
 | 改颜色 / 涂装 / 去迷彩 | recolor |
+| 设计整套外观(先判断模式: 复刻参考图 / 主题 / 原创) | design → replicate / theme / original |
 | 让部件发光 | glow |
 | 缩放 / 移动 / 删除 / 替换部件,导入新网格 | model |
 | 用 Blender 改模型 | blender |
