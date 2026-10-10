@@ -9,7 +9,8 @@
 //!
 //! 载荷布局(紧跟 148 字节 DDS+DX10 头):
 //! - 48 字节头: u32 版本(0x7bc), u32 flags, u32 counts[10](各"模式"块数, Σ = 块总数 N)。
-//!   flags 第 m 位 = 1 表示模式 m 的记录按字节拆成两个平面(SoA), 拆分点见 [`SPLIT`]。
+//!   flags 第 m 位(m = 0..7)= 1 表示模式 m 的记录按字节拆成两个平面(SoA), 拆分点见 [`SPLIT`];
+//!   flags 第 16 位 = 1 表示颜色去相关: 端点按 (G, R−G, B−G[, A]) 存放(模 2^位宽), 见 [`unprep_block_decorrelated`]。
 //! - 按模式 0..9 依次的记录组: 模式 0..7 每块 16 字节(规范化后的字段排列), 模式 9 每块 4 字节(纯色 RGBA8)。
 //! - 尾部 ceil(N/2) 字节模式图, 每块一个 nibble(低 nibble 在前), 按块序。
 //!   模式 m 的第 k 个块(块序)对应模式 m 组里第 k 条记录。
@@ -19,6 +20,8 @@ use crate::error::{Error, Result};
 pub const VERSION: u32 = 0x7bc;
 /// 拆平面时第一平面的字节宽度(按模式)。
 pub const SPLIT: [usize; 8] = [8, 8, 12, 12, 6, 8, 8, 12];
+/// flags 中表示"颜色去相关"的位。
+pub const FLAG_DECORRELATE: u32 = 1 << 16;
 const DDS_HDR: usize = 148;
 
 /// 文件是否为 BC7Prep 形式的 DDS(DX10 头 + BC7 + 偏移 40 标志 = 1 + 载荷版本号匹配)。
@@ -67,8 +70,13 @@ pub fn decode_payload(q: &[u8]) -> Result<Vec<u8>> {
     if counts[8] != 0 {
         return Err(Error::Unsupported(format!("BC7Prep 模式 8 计数 {}(未见过的情形) / mode-8 records not supported", counts[8])));
     }
-    if flags >> 8 != 0 {
+    if flags & !(0xff | FLAG_DECORRELATE) != 0 {
         return Err(Error::Unsupported(format!("BC7Prep flags {flags:#x} 含未知位 / unknown flag bits")));
+    }
+    let decor = flags & FLAG_DECORRELATE != 0;
+    if decor && counts[2] != 0 {
+        // 模式 2 在去相关形式下没有真实样本可验证, 不猜
+        return Err(Error::Unsupported(format!("BC7Prep 去相关形式(flags {flags:#x})下的模式 2 块({} 个)尚无样本验证 / mode 2 with decorrelation not verified", counts[2])));
     }
     let n: usize = counts.iter().sum();
     let map_len = n.div_ceil(2);
@@ -98,7 +106,12 @@ pub fn decode_payload(q: &[u8]) -> Result<Vec<u8>> {
         }
         let blk: u128 = if m == 9 {
             let b = &q[offs[9] + 4 * j..offs[9] + 4 * j + 4];
-            solid_block([b[0], b[1], b[2], b[3]])
+            if decor {
+                // (G, R−G, B−G, A)
+                solid_block([b[0].wrapping_add(b[1]), b[0], b[0].wrapping_add(b[2]), b[3]])
+            } else {
+                solid_block([b[0], b[1], b[2], b[3]])
+            }
         } else {
             let mut rec = [0u8; 16];
             if (flags >> m) & 1 == 1 {
@@ -110,7 +123,12 @@ pub fn decode_payload(q: &[u8]) -> Result<Vec<u8>> {
             } else {
                 rec.copy_from_slice(&q[offs[m] + 16 * j..offs[m] + 16 * j + 16]);
             }
-            unprep_block(m, u128::from_le_bytes(rec))
+            let r = u128::from_le_bytes(rec);
+            if decor {
+                unprep_block_decorrelated(m, r)?
+            } else {
+                unprep_block(m, r)
+            }
         };
         out[16 * i..16 * i + 16].copy_from_slice(&blk.to_le_bytes());
     }
@@ -252,6 +270,171 @@ pub fn unprep_block(m: usize, r: u128) -> u128 {
     }
     debug_assert_eq!(w.o, 128);
     w.v
+}
+
+/// 颜色去相关形式(flags 第 16 位)的规范化记录 → 标准 BC7 块(模式 0,1,3..7; 模式 2 未验证, 返回"不支持")。
+/// 颜色端点存为 G、R−G、B−G(模该字段位宽), alpha 原样。各模式的位置:
+/// - 模式 0/1/3: 与非去相关形式相同的位置, 只是原来放 R/G/B 的槽依次放 G/R−G/B−G;
+/// - 模式 4: 5 位槽依次为 G0 G1 (R−G)0 (R−G)1 (B−G)0 (B−G)1 A0 A1(规范/未旋转顺序), 6 位分量最低位仍在 bit0/1;
+/// - 模式 5: 每个端点 4 字节 (G, R−G, B−G, A)(8 位域; 7 位颜色是 v<<1)。旋转 2(G 为 8 位)时 G 的最低位
+///   放在 R−G 字节的最低位(R−G 本身是偶数);
+/// - 模式 6: 每个端点 4 字节 (G, R−G, B−G, A)(7 位值);
+/// - 模式 7: 每个端点 16 位字 [p | G<<1 | (R−G)<<6 | (B−G)<<11], A 为 72 起的 4 个 5 位值。
+pub fn unprep_block_decorrelated(m: usize, r: u128) -> Result<u128> {
+    let mut w = W::new();
+    match m {
+        0 => {
+            w.put(1, 1);
+            w.put(g(r, 72, 4) as u128, 4);
+            let gg: Vec<u32> = (0..6).map(|e| g(r, 4 * e, 4)).collect();
+            for e in 0..6 {
+                w.put(((gg[e as usize] + g(r, 24 + 4 * e, 4)) & 15) as u128, 4);
+            }
+            for e in 0..6 {
+                w.put(gg[e] as u128, 4);
+            }
+            for e in 0..6 {
+                w.put(((gg[e as usize] + g(r, 48 + 4 * e, 4)) & 15) as u128, 4);
+            }
+            for k in 0..6 {
+                w.put(g(r, 77 + k, 1) as u128, 1);
+            }
+            w.put(r >> 83, 45);
+        }
+        1 => {
+            w.put(2, 2);
+            w.put(g(r, 72, 6) as u128, 6);
+            let gg: Vec<u32> = (0..4).map(|e| g(r, 16 * e, 6)).collect();
+            for e in 0..4u32 {
+                let dr = g(r, 64 + 2 * e, 1) | g(r, 16 * e + 6, 5) << 1;
+                w.put(((gg[e as usize] + dr) & 63) as u128, 6);
+            }
+            for e in 0..4 {
+                w.put(gg[e] as u128, 6);
+            }
+            for e in 0..4u32 {
+                let db = g(r, 65 + 2 * e, 1) | g(r, 16 * e + 11, 5) << 1;
+                w.put(((gg[e as usize] + db) & 63) as u128, 6);
+            }
+            w.put(g(r, 80, 2) as u128, 2);
+            w.put(r >> 82, 46);
+        }
+        3 => {
+            w.put(8, 4);
+            let part: u32 = (0..6).map(|k| g(r, 7 + 8 * k, 1) << k).sum();
+            w.put(part as u128, 6);
+            let gg: Vec<u32> = (0..4).map(|e| g(r, 24 * e, 7)).collect();
+            for e in 0..4u32 {
+                w.put(((gg[e as usize] + g(r, 24 * e + 8, 7)) & 127) as u128, 7);
+            }
+            for e in 0..4 {
+                w.put(gg[e] as u128, 7);
+            }
+            for e in 0..4u32 {
+                w.put(((gg[e as usize] + g(r, 24 * e + 16, 7)) & 127) as u128, 7);
+            }
+            w.put(g(r, 55, 1) as u128, 1);
+            w.put(g(r, 63, 1) as u128, 1);
+            w.put(g(r, 96, 2) as u128, 2);
+            w.put(r >> 98, 30);
+        }
+        4 => {
+            let rot = g(r, 48, 2);
+            let im = g(r, 42, 1);
+            let f = |k: u32| g(r, 2 + 5 * k, 5);
+            // 规范槽(R,G,B,A) × 端点, 5 位高位
+            let slot = |c: u32, e: u32| -> u32 {
+                match c {
+                    0 => (f(e) + f(2 + e)) & 31,
+                    1 => f(e),
+                    2 => (f(e) + f(4 + e)) & 31,
+                    _ => f(6 + e),
+                }
+            };
+            let sc = if rot == 0 { 3 } else { rot - 1 };
+            w.put(16, 5);
+            w.put(rot as u128, 2);
+            w.put(im as u128, 1);
+            for c in 0..3 {
+                let src = if c == sc { 3 } else { c };
+                for e in 0..2 {
+                    w.put(slot(src, e) as u128, 5);
+                }
+            }
+            for e in 0..2 {
+                w.put((slot(sc, e) << 1 | g(r, e, 1)) as u128, 6);
+            }
+            w.put(r >> 50, 78);
+        }
+        5 => {
+            let rot = g(r, 64, 2);
+            let mut slot = [[0u32; 2]; 4];
+            for e in 0..2u32 {
+                let b = |k: u32| g(r, 32 * e + 8 * k, 8);
+                let (gv, rv) = if rot == 2 { (b(0) | (b(1) & 1), (b(0) + (b(1) & !1)) & 255) } else { (b(0), (b(0) + b(1)) & 255) };
+                slot[0][e as usize] = rv;
+                slot[1][e as usize] = gv;
+                slot[2][e as usize] = (b(0) + b(2)) & 255;
+                slot[3][e as usize] = b(3);
+            }
+            let sc = if rot == 0 { 3 } else { rot as usize - 1 };
+            w.put(32, 6);
+            w.put(rot as u128, 2);
+            for c in 0..3 {
+                let src = if c == sc { 3 } else { c };
+                for e in 0..2 {
+                    w.put((slot[src][e] >> 1) as u128, 7);
+                }
+            }
+            for e in 0..2 {
+                w.put(slot[sc][e] as u128, 8);
+            }
+            w.put(r >> 66, 62);
+        }
+        6 => {
+            let s = |k: u32| g(r, 8 * k, 7);
+            w.put(64, 7);
+            for e in 0..2 {
+                w.put(((s(4 * e) + s(4 * e + 1)) & 127) as u128, 7);
+            }
+            for e in 0..2 {
+                w.put(s(4 * e) as u128, 7);
+            }
+            for e in 0..2 {
+                w.put(((s(4 * e) + s(4 * e + 2)) & 127) as u128, 7);
+            }
+            for e in 0..2 {
+                w.put(s(4 * e + 3) as u128, 7);
+            }
+            w.put(g(r, 63, 2) as u128, 2);
+            w.put(r >> 65, 63);
+        }
+        7 => {
+            w.put(128, 8);
+            w.put(g(r, 92, 6) as u128, 6);
+            let wd = |e: u32| g(r, 16 * e, 16);
+            for e in 0..4 {
+                w.put((((wd(e) >> 1) + (wd(e) >> 6)) & 31) as u128, 5);
+            }
+            for e in 0..4 {
+                w.put(((wd(e) >> 1) & 31) as u128, 5);
+            }
+            for e in 0..4 {
+                w.put((((wd(e) >> 1) + (wd(e) >> 11)) & 31) as u128, 5);
+            }
+            for e in 0..4 {
+                w.put(g(r, 72 + 5 * e, 5) as u128, 5);
+            }
+            for e in 0..4 {
+                w.put((wd(e) & 1) as u128, 1);
+            }
+            w.put(r >> 98, 30);
+        }
+        2 => return Err(Error::Unsupported("BC7Prep 去相关形式下的模式 2 尚无样本验证 / mode 2 with decorrelation not verified".into())),
+        _ => unreachable!("mode {m}"),
+    }
+    debug_assert_eq!(w.o, 128);
+    Ok(w.v)
 }
 
 /// 纯色(模式 9 记录) → 标准 BC7 模式 5 块: 旋转 0, 颜色索引全为 1, alpha 索引全为 0,
@@ -412,6 +595,110 @@ mod tests {
                 assert_eq!(back, b, "mode {m}");
             }
         }
+    }
+
+    /// 测试用: 去相关形式的正向变换(标准块 → 记录), 由非去相关记录改写而来。
+    fn prep_block_decorrelated(m: usize, b: u128) -> u128 {
+        let base = prep_block(m, b);
+        let mut r = base;
+        let mut set = |r: &mut u128, s: u32, n: u32, v: u32| {
+            let mask = ((1u128 << n) - 1) << s;
+            *r = (*r & !mask) | (((v as u128) << s) & mask);
+        };
+        match m {
+            0 => {
+                for e in 0..6 {
+                    let (rv, gv, bv) = (g(base, 4 * e, 4), g(base, 24 + 4 * e, 4), g(base, 48 + 4 * e, 4));
+                    set(&mut r, 4 * e, 4, gv);
+                    set(&mut r, 24 + 4 * e, 4, rv.wrapping_sub(gv) & 15);
+                    set(&mut r, 48 + 4 * e, 4, bv.wrapping_sub(gv) & 15);
+                }
+            }
+            1 => {
+                for e in 0..4 {
+                    let rv = g(base, 16 * e, 6);
+                    let gv = g(base, 64 + 2 * e, 1) | g(base, 16 * e + 6, 5) << 1;
+                    let bv = g(base, 65 + 2 * e, 1) | g(base, 16 * e + 11, 5) << 1;
+                    let (dr, db) = (rv.wrapping_sub(gv) & 63, bv.wrapping_sub(gv) & 63);
+                    set(&mut r, 16 * e, 6, gv);
+                    set(&mut r, 16 * e + 6, 5, dr >> 1);
+                    set(&mut r, 64 + 2 * e, 1, dr & 1);
+                    set(&mut r, 16 * e + 11, 5, db >> 1);
+                    set(&mut r, 65 + 2 * e, 1, db & 1);
+                }
+            }
+            3 => {
+                for e in 0..4 {
+                    let (rv, gv, bv) = (g(base, 24 * e, 7), g(base, 24 * e + 8, 7), g(base, 24 * e + 16, 7));
+                    set(&mut r, 24 * e, 7, gv);
+                    set(&mut r, 24 * e + 8, 7, rv.wrapping_sub(gv) & 127);
+                    set(&mut r, 24 * e + 16, 7, bv.wrapping_sub(gv) & 127);
+                }
+            }
+            4 => {
+                let sl = |c: u32, e: u32| g(base, 2 + 10 * c + 5 * e, 5);
+                for e in 0..2 {
+                    set(&mut r, 2 + 5 * e, 5, sl(1, e));
+                    set(&mut r, 2 + 5 * (2 + e), 5, sl(0, e).wrapping_sub(sl(1, e)) & 31);
+                    set(&mut r, 2 + 5 * (4 + e), 5, sl(2, e).wrapping_sub(sl(1, e)) & 31);
+                    set(&mut r, 2 + 5 * (6 + e), 5, sl(3, e));
+                }
+            }
+            5 => {
+                let rot = g(base, 64, 2);
+                let sl = |c: u32, e: u32| g(base, 16 * c + 8 * e, 8);
+                for e in 0..2 {
+                    let (rv, gv, bv, av) = (sl(0, e), sl(1, e), sl(2, e), sl(3, e));
+                    let g0 = gv & !1;
+                    let b1 = if rot == 2 { (rv.wrapping_sub(g0) & 255) | (gv & 1) } else { rv.wrapping_sub(gv) & 255 };
+                    set(&mut r, 32 * e, 8, if rot == 2 { g0 } else { gv });
+                    set(&mut r, 32 * e + 8, 8, b1);
+                    set(&mut r, 32 * e + 16, 8, bv.wrapping_sub(if rot == 2 { g0 } else { gv }) & 255);
+                    set(&mut r, 32 * e + 24, 8, av);
+                }
+            }
+            6 => {
+                let ch = |c: u32, e: u32| g(base, 16 * c + 8 * e, 7);
+                for e in 0..2 {
+                    let (rv, gv, bv, av) = (ch(0, e), ch(1, e), ch(2, e), ch(3, e));
+                    set(&mut r, 32 * e, 7, gv);
+                    set(&mut r, 32 * e + 8, 7, rv.wrapping_sub(gv) & 127);
+                    set(&mut r, 32 * e + 16, 7, bv.wrapping_sub(gv) & 127);
+                    set(&mut r, 32 * e + 24, 7, av);
+                }
+            }
+            7 => {
+                let v = |c: u32, e: u32| g(base, 16 * c + 4 * e, 4) << 1 | g(base, 76 + 4 * c + e, 1);
+                let mut out = r & !((1u128 << 98) - 1); // 保留索引
+                let mut put = |s: u32, n: u32, x: u32| out |= ((x as u128) & ((1u128 << n) - 1)) << s;
+                for e in 0..4 {
+                    let (rv, gv, bv) = (v(0, e), v(1, e), v(2, e));
+                    put(16 * e, 1, g(base, 72 + e, 1));
+                    put(16 * e + 1, 5, gv);
+                    put(16 * e + 6, 5, rv.wrapping_sub(gv) & 31);
+                    put(16 * e + 11, 5, bv.wrapping_sub(gv) & 31);
+                    put(72 + 5 * e, 5, v(3, e));
+                }
+                put(92, 6, g(base, 92, 6));
+                return out;
+            }
+            _ => unreachable!(),
+        }
+        r
+    }
+
+    #[test]
+    fn decorrelated_unprep_inverts_prep_random() {
+        let mut s = 0x1600_0010_u64;
+        for m in [0usize, 1, 3, 4, 5, 6, 7] {
+            for _ in 0..20000 {
+                let lo = rng(&mut s) as u128 | (rng(&mut s) as u128) << 64;
+                let b = (lo << (m + 1)) | (1u128 << m);
+                let back = unprep_block_decorrelated(m, prep_block_decorrelated(m, b)).unwrap();
+                assert_eq!(back, b, "mode {m}");
+            }
+        }
+        assert!(unprep_block_decorrelated(2, 0).is_err());
     }
 
     fn expand7(x: u32) -> u32 {

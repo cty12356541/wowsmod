@@ -34,7 +34,10 @@ Get-ChildItem $gi.res_packages -Filter 'trails_*.pkg' | Copy-Item -Destination (
 $pfs = $null; try { $pfs = Get-PfsunpackExe $Pfsunpack } catch { Write-Warning "跳过 BC7Prep 样本: $_" }
 if ($pfs) {
     $probe = Join-Path $tmp 'bc7probe'
-    $kw = @('FD033_Rangefinder_n.dd0', 'FGM049_380mm_45_Mle_1935_n.dd0', 'FGM549_430_50_Mle_1940_Grimlock_TF_n.dd1', 'IAD500_Savoia_Marchetti_SM93_Lazio_Ceremonial_n.dd1', 'LMY421_n.dd0', 'LNT047_Jin_Chan_rnb.dd1')
+    $kw = @('FD033_Rangefinder_n.dd0', 'FGM049_380mm_45_Mle_1935_n.dd0', 'FGM549_430_50_Mle_1940_Grimlock_TF_n.dd1', 'IAD500_Savoia_Marchetti_SM93_Lazio_Ceremonial_n.dd1', 'LMY421_n.dd0', 'LNT047_Jin_Chan_rnb.dd1',
+        # flags 第 16 位(颜色去相关)样本
+        'particles/animated/Arpeggio_balls_2x1.dd0', 'particles/animated/Bubbles_6x6.dd0', 'particles/animated/Firework_fat_8x8.dd0', 'particles/animated/Smoke_curved_7x7_LM.dd1',
+        'LNT000_dock_SPB_02_rnb.dd1', 'LNT000_Dock_ChinaArpeggio_08_rnb.dd0', 'ZSD101_Huang_Long_3Kings_Hull_art.dd0')
     $r = Invoke-WowsmodJson $wm ($gargs + @('extract', '--ship', 'PFSB510') + $kw + @('-o', $probe))
     $r2 = Invoke-WowsmodJson $wm ($gargs + @('extract', '--ship', 'PFSB108', '-o', $probe))
     $prep = @(@($r.Json.bc7prep_files) + @($r2.Json.bc7prep_files) | Sort-Object -Unique)
