@@ -637,7 +637,7 @@ pub enum ModelCmd {
         /// 发光 B 上限 0..255(遮罩满值处的 B)。低值(25–50)= 大面积微光, 255 = 局部全亮
         #[arg(long, default_value_t = 255)]
         b_max: u8,
-        /// 材质: auto(GLB 自带材质且没给 --texture/--color 时, 每个 glTF 材质一个 .mfm + 自己的贴图, 共用图集只存一份) / single(整网格一个材质)
+        /// 材质: auto(GLB 自带材质且没给 --texture/--color 时按 glTF 材质分, 贴图/发光/双面/镂空都相同的合成一个 .mfm; 共用图集只存一份) / split(不合并) / single(整网格一个材质)
         #[arg(long, default_value = "auto")]
         materials: String,
         /// 这些 glTF 材质(正则匹配材质名)整块发光

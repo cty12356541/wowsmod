@@ -397,8 +397,8 @@ pub(super) fn build_materials(tx: &mut Tx, root: &Path, src: &GeomSrc, tpl_mfm_r
     let gm = if is_glb { Some(meshsrc::read_glb_materials(&std::fs::read(o.mesh)?, o.mesh.parent())?) } else { None };
     let per_mat = match o.materials {
         "single" => false,
-        "auto" => gm.as_ref().map(|g| !g.mats.is_empty()).unwrap_or(false) && o.texture.is_none() && o.color.is_none(),
-        m => bail!("--materials 只能是 auto / single: {m}"),
+        "auto" | "split" => gm.as_ref().map(|g| !g.mats.is_empty()).unwrap_or(false) && o.texture.is_none() && o.color.is_none(),
+        m => bail!("--materials 只能是 auto(按材质, 相同贴图/设置的合并) / split(不合并) / single: {m}"),
     };
     let glow_re = o.glow_mat.map(regex::Regex::new).transpose().map_err(|e| anyhow!("--glow-mat 正则: {e}"))?;
     let user_glow: Option<Image> = match o.glow {
@@ -546,6 +546,26 @@ pub(super) fn build_materials(tx: &mut Tx, root: &Path, src: &GeomSrc, tpl_mfm_r
         if sp.alpha_ref.is_none() {
             sp.albedo.px.chunks_exact_mut(4).for_each(|p| p[3] = 255);
         }
+    }
+    // 合并: 贴图/发光/双面/镂空都相同的材质渲染结果一样, 合成一个 .mfm(少 draw call; PMX 常有几十个同图材质)
+    if per_mat && o.materials != "split" && specs.len() > 1 {
+        let sig = |sp: &Spec| format!("{}|{}|{:?}|{}", meshsrc::image_hash(&sp.albedo), sp.glow.as_ref().map(meshsrc::image_hash).unwrap_or_default(), sp.alpha_ref, sp.double_sided);
+        let mut merged: Vec<Spec> = Vec::new();
+        let mut sigs: Vec<String> = Vec::new();
+        for sp in specs.drain(..) {
+            let g = sig(&sp);
+            if let Some(i) = sigs.iter().position(|x| *x == g) {
+                let m = &mut merged[i];
+                m.prims.extend(sp.prims);
+                let mut list = m.src.get("merged").and_then(|v| v.as_array().cloned()).unwrap_or_else(|| vec![m.src.clone()]);
+                list.push(sp.src);
+                m.src = json!({"merged": list});
+            } else {
+                sigs.push(g);
+                merged.push(sp);
+            }
+        }
+        specs = merged;
     }
     // 贴图: 先算全部(属性, 图)并按内容去重, 再命名写出
     let flat_n = solid(64, 64, [128, 128, 255, 128]);
