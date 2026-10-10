@@ -22,7 +22,7 @@
 | 7 验收 | 同角度对比参考; 港口白天/夜间/远近 | 清单逐项打勾; 否则退回对应层 | design-verify |
 
 ## 模板(命令输出, 复制到项目里填写)
-`wowsmod design-template book|analysis|breakdown|acceptance` → 设计书(= design-book init 的内容) / 参考分析 / 拆解清单 / 分层验收清单。视频抽帧+拼图脚本: `scripts/ref/ref_frames.py`(见 design-ref)。
+`wowsmod design-template book|assets|analysis|breakdown|acceptance` → 设计书(= design-book init 的内容) / 素材清单 / 参考分析 / 拆解清单 / 分层验收清单。视频抽帧+拼图脚本: `scripts/ref/ref_frames.py`(见 design-ref)。
 
 ## 反例(真实失败, 不要重复)
 复刻某视频涂装时: ①只看了一张封面, 没看视频 → 漏掉甲板/炮塔顶图案和整段发光船壳, 也无法判断有没有额外建模(事后看帧才确认该参考没有, 而同类其他参考有翼/光环/炮塔外壳); ②跳过层 2–3 直接改贴图; ③层 4 用程序生成的均匀线条/圆环代替**有粗细、收尖、成组的笔刷图案**, 结果"深色底+几道线", 用户评价"完全不一样"; ④只看 soft 渲染, 从没在 preview 工作台里打开过。根因都是跳层与证据不足。
@@ -32,6 +32,8 @@
 
 ## 预热出图(要出图先预热)
 进入出图对比/自检(design-verify)之前, 先 `wowsmod render --warm <项目>` 启动常驻出图实例: 之后每张 `wowsmod render <项目> --compare` 约 1 秒, 改完贴图/mfm 直接再 render(按哈希增量重载, 不用重启)。`wowsmod render status <项目>` 确认就绪; 空闲 15 分钟自动退出, 用完可 `wowsmod render stop <项目>`。详见 `wowsmod help render`。
+
+**缺能力先补工具**: 清单里某项要的命令还没有(如额外模型需要 model import), 先补工具或如实告诉用户做不到; 不要用别的手段硬凑(不能把模型降级成贴图、把插画降级成程序笔触)。
 
 ## 修订记录
 见 `wowsmod help design-changelog`(每轮: 差在哪 / 根因 / 怎么补 / 效果)。

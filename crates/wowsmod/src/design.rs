@@ -749,11 +749,12 @@ pub const TEMPLATES: &[(&str, &str)] = &[
     ("breakdown", include_str!("../../../docs/templates/breakdown.md")),
     ("acceptance", include_str!("../../../docs/templates/acceptance.md")),
     ("book", include_str!("../../../docs/templates/book.md")),
+    ("assets", include_str!("../../../docs/templates/assets.md")),
 ];
 
 #[derive(Args, Debug)]
 pub struct TemplateArgs {
-    /// analysis(参考分析) | breakdown(拆解清单) | acceptance(分层验收清单) | book(设计书/拆解书)
+    /// analysis(参考分析) | breakdown(拆解清单) | acceptance(分层验收清单) | book(设计书/拆解书) | assets(素材清单)
     pub name: String,
     /// 写到文件(不给则打印)
     #[arg(short, long)]
