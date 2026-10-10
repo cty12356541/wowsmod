@@ -123,6 +123,31 @@ pub enum TexCmd {
         #[arg(long, default_value = "high")]
         quality: String,
     },
+    /// 改单个通道: 在遮罩内把 R/G/B/A 设为常数或乘系数(如清零 _mg 的 B 通道 = 去掉迷彩/涂装遮罩, 让 _a 颜色直接显示)
+    Channel {
+        tex: String,
+        /// r / g / b / a
+        #[arg(long)]
+        channel: String,
+        /// 设为该值(0..255)
+        #[arg(long)]
+        set: Option<u8>,
+        /// 乘以该系数
+        #[arg(long)]
+        mul: Option<f32>,
+        #[arg(short, long)]
+        out: Option<PathBuf>,
+        #[arg(long)]
+        project: Option<PathBuf>,
+        #[arg(long)]
+        from_game: bool,
+        #[command(flatten)]
+        mask: MaskArgs,
+        #[arg(long)]
+        preview: Option<PathBuf>,
+        #[arg(long, default_value = "high")]
+        quality: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -266,6 +291,53 @@ pub fn cmd_tex(cli: &Cli, c: &TexCmd) -> Result<i32> {
             let rec = json!({"source": t.label, "source_sha256": t.sha256, "mask": minfo, "selector": format!("{sel:?}"), "recolor": format!("{rc:?}"), "stats": st, "outputs": texcmd::outputs_json(pj.as_ref(), &outs)});
             let ep = if let Some(pj) = &pj { Some(pj.record_edit("tex_recolor", rec.clone())?) } else { None };
             report(cli, "已换色", &rec, ep.as_deref());
+            Ok(0)
+        }
+        TexCmd::Channel { tex, channel, set, mul, out, project, from_game, mask, preview, quality } => {
+            let pj = open_proj(project)?;
+            let ctx = game_ctx(cli, need_game_for(tex))?;
+            let t = texcmd::load_tex(tex, ctx.as_ref(), pj.as_ref(), *from_game)?;
+            let q = texcmd::quality(quality)?;
+            let ci = match channel.to_ascii_lowercase().as_str() {
+                "r" => 0,
+                "g" => 1,
+                "b" => 2,
+                "a" => 3,
+                _ => bail!("--channel 只能是 r/g/b/a"),
+            };
+            if set.is_none() == mul.is_none() {
+                bail!("--set 与 --mul 二选一");
+            }
+            let mut img = texture::decode_level(&t.dds, 0).map_err(|e| anyhow!("解码: {e}"))?;
+            let (m, minfo) = mask.build(img.width, img.height)?;
+            let (mut before, mut after, mut n) = (0f64, 0f64, 0f64);
+            for (i, p) in img.px.chunks_exact_mut(4).enumerate() {
+                let w = m.as_ref().map(|m| m.v[i]).unwrap_or(1.0).clamp(0.0, 1.0);
+                let old = p[ci] as f32;
+                let target = if let Some(v) = set { *v as f32 } else { (old * mul.unwrap()).clamp(0.0, 255.0) };
+                let v = old + (target - old) * w;
+                p[ci] = v.round().clamp(0.0, 255.0) as u8;
+                before += old as f64;
+                after += p[ci] as f64;
+                n += 1.0;
+            }
+            let dst = texcmd::resolve_dst(out.as_deref(), pj.as_ref(), &t)?;
+            if let Some(pv) = preview {
+                let mut b = img.clone();
+                for p in b.px.chunks_exact_mut(4) {
+                    let v = p[ci];
+                    p[0] = v;
+                    p[1] = v;
+                    p[2] = v;
+                    p[3] = 255;
+                }
+                texcmd::preview(&b, pv, 1024)?;
+            }
+            let (outs, _) = texcmd::write_tex(&img, &t, &dst, q, None, None)?;
+            let st = json!({"channel": channel, "mean_before": before / n.max(1.0), "mean_after": after / n.max(1.0)});
+            let rec = json!({"source": t.label, "source_sha256": t.sha256, "mask": minfo, "set": set, "mul": mul, "stats": st, "outputs": texcmd::outputs_json(pj.as_ref(), &outs)});
+            let ep = if let Some(pj) = &pj { Some(pj.record_edit("tex_channel", rec.clone())?) } else { None };
+            report(cli, "已改通道", &rec, ep.as_deref());
             Ok(0)
         }
     }
