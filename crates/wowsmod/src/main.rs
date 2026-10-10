@@ -162,7 +162,6 @@ enum Cmd {
     /// mod 项目: init / import-sdk / status
     #[command(subcommand)]
     Mod(m2cmd::ModCmd),
-    /// 把项目安装到 res_mods(--dev: 直接复制并记录清单; 自动补齐 SDK 占位与贴图分卷)
     /// 安装 mod 项目或 .wsmod 包到 res_mods(登记每个文件的哈希/备份, 检查与已装 mod 的冲突, 失败自动回滚)
     Install(m4cmd::InstallArgs),
     /// 整船装配: SDK visual + geometry + GameParams 挂点 → 带层级的 GLB 与装配表 JSON / assemble a whole ship

@@ -93,7 +93,7 @@ pub struct MigrateArgs {
 pub struct PackArgs {
     /// mod 项目目录
     pub project: PathBuf,
-    /// 输出包(默认 <项目>/dist/<名>-<版本>.wsmod)
+    /// 输出 .wsmod 文件或目录(默认 <项目>/dist/<名>-<版本>.wsmod)
     #[arg(short, long)]
     pub out: Option<PathBuf>,
     /// 另附可手动复制的完整 res_mods 树(含从你的游戏补齐的原版资源; 只适合自用/转给同版本玩家)
@@ -165,7 +165,14 @@ pub fn open_package(pkg: &Path) -> Result<(Project, Value)> {
 }
 
 fn is_pkg(p: &Path) -> bool {
-    p.is_file() && p.extension().map(|e| e.eq_ignore_ascii_case(PKG_EXT) || e.eq_ignore_ascii_case("zip")).unwrap_or(false)
+    if !p.is_file() {
+        return false;
+    }
+    if p.extension().map(|e| e.eq_ignore_ascii_case(PKG_EXT) || e.eq_ignore_ascii_case("zip")).unwrap_or(false) {
+        return true;
+    }
+    // 没有扩展名也认 zip 魔数
+    std::fs::File::open(p).and_then(|mut f| { use std::io::Read; let mut b = [0u8; 4]; f.read_exact(&mut b).map(|_| b == *b"PK\x03\x04") }).unwrap_or(false)
 }
 
 fn open_target(p: &Path) -> Result<(Project, String)> {
@@ -589,7 +596,13 @@ pub fn cmd_pack(cli: &Cli, a: &PackArgs) -> Result<i32> {
         "ship": meta.ship, "mode": p.cfg.install.mode, "game_build": meta.game_build, "files": files, "stubs": n_stub, "real_files": n_real, "full": a.full, "full_note": full_note, "edits": edits});
     entries.insert(0, ZipEntry { name: PKG_MANIFEST.into(), data: serde_json::to_vec_pretty(&man)? });
     let z = zipfile::write(&entries).map_err(|e| anyhow!("{e}"))?;
-    let out = a.out.clone().unwrap_or_else(|| p.root.join("dist").join(format!("{}-{}{}.{PKG_EXT}", meta.name, meta.version, if a.full { "-full" } else { "" })));
+    let fname = format!("{}-{}{}.{PKG_EXT}", meta.name, meta.version, if a.full { "-full" } else { "" });
+    // -o 可以是文件(以 .wsmod 结尾)或目录(已存在的目录 / 没有扩展名的路径)
+    let out = match &a.out {
+        None => p.root.join("dist").join(&fname),
+        Some(o) if o.is_dir() || o.extension().is_none() => o.join(&fname),
+        Some(o) => o.clone(),
+    };
     if let Some(d) = out.parent() {
         std::fs::create_dir_all(d)?;
     }
