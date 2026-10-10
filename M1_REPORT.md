@@ -7,7 +7,7 @@
 | 项 | 位置 |
 |----|------|
 | 源码 / 本地 git | `D:\WoWSModding\wowsmod` (未 push) |
-| 单文件 exe | `target\release\wowsmod.exe` ≈ 3.0 MiB, MSVC + crt-static |
+| 单文件 exe | `target\release\wowsmod.exe` 3,139,584 字节 (≈3.0 MiB), SHA256 `8EB28C340EDFB923…D30706`, MSVC + crt-static; dumpbin 依赖: kernel32/ntdll/api-ms-win-core-synch-l1-2-0/bcryptprimitives/advapi32(无 MSVC 运行库 DLL) |
 | 设计说明 | `docs/DESIGN.md` |
 | 中文 README | `README.md` |
 | 验收脚本 | `scripts\accept_*.ps1`, `scripts\fetch_samples.ps1` |
