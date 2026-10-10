@@ -736,3 +736,285 @@ mod tests {
         assert!(!facing_ok(&Some("y>0.7".into()), [0.0, 0.2, 0.9]).unwrap());
     }
 }
+
+/// 设计工作表模板(与船/参考无关, 用占位符)
+pub const TEMPLATES: &[(&str, &str)] = &[
+    ("analysis", include_str!("../../../docs/templates/analysis.md")),
+    ("breakdown", include_str!("../../../docs/templates/breakdown.md")),
+    ("acceptance", include_str!("../../../docs/templates/acceptance.md")),
+    ("book", include_str!("../../../docs/templates/book.md")),
+];
+
+#[derive(Args, Debug)]
+pub struct TemplateArgs {
+    /// analysis(参考分析) | breakdown(拆解清单) | acceptance(分层验收清单) | book(设计书/拆解书)
+    pub name: String,
+    /// 写到文件(不给则打印)
+    #[arg(short, long)]
+    pub out: Option<PathBuf>,
+}
+
+pub fn cmd_template(cli: &Cli, a: &TemplateArgs) -> Result<i32> {
+    let Some((n, body)) = TEMPLATES.iter().find(|t| t.0 == a.name.as_str()) else {
+        bail!("没有模板 {:?}; 可选: {}", a.name, TEMPLATES.iter().map(|t| t.0).collect::<Vec<_>>().join(", "));
+    };
+    if let Some(o) = &a.out {
+        if let Some(d) = o.parent() {
+            std::fs::create_dir_all(d)?;
+        }
+        std::fs::write(o, body)?;
+    }
+    if cli.json {
+        emit(cli, &json!({"ok": true, "template": n, "out": a.out.as_ref().map(|p| p.display().to_string()), "content": if a.out.is_none() { Some(*body) } else { None }, "next": ["填写后按 wowsmod help design 的分层推进"]}));
+    } else if a.out.is_none() {
+        print!("{body}");
+    } else {
+        println!("已写模板 {n} → {}", a.out.as_ref().unwrap().display());
+    }
+    Ok(0)
+}
+
+// ---------------- 设计书 ----------------
+
+/// 项目里设计书的约定位置
+pub fn book_path(root: &Path) -> PathBuf {
+    root.join("design").join("BOOK.md")
+}
+
+#[derive(Debug, Default)]
+pub struct BookState {
+    pub version: String,
+    pub status: String,
+    pub mode: String,
+    pub ship: String,
+    pub finalized: String,
+    pub problems: Vec<String>,
+}
+
+fn field(text: &str, key: &str) -> String {
+    for l in text.lines() {
+        let l = l.trim().trim_start_matches(['-', '*', ' ']);
+        if let Some(r) = l.strip_prefix(key) {
+            let r = r.trim_start();
+            if let Some(v) = r.strip_prefix(':').or_else(|| r.strip_prefix('：')) {
+                return v.trim().to_string();
+            }
+        }
+    }
+    String::new()
+}
+
+/// 解析并检查设计书: 机读字段 + 必填节是否还留着 <占位符>
+pub fn book_state(text: &str) -> BookState {
+    let mut b = BookState {
+        version: field(text, "版本"),
+        status: field(text, "状态"),
+        mode: field(text, "模式"),
+        ship: field(text, "目标船"),
+        finalized: field(text, "定稿"),
+        problems: vec![],
+    };
+    if !regex::Regex::new(r"^v\d+(\.\d+)*$").unwrap().is_match(&b.version) {
+        b.problems.push(format!("版本号格式应为 vN.N, 现在是 {:?}", b.version));
+    }
+    if !["草稿", "评审中", "已定稿"].contains(&b.status.as_str()) {
+        b.problems.push(format!("状态应为 草稿/评审中/已定稿, 现在是 {:?}", b.status));
+    }
+    if !["theme", "original", "replicate"].contains(&b.mode.as_str()) {
+        b.problems.push(format!("模式应为 theme/original/replicate, 现在是 {:?}", b.mode));
+    }
+    if b.ship.is_empty() || b.ship.contains('<') {
+        b.problems.push("目标船未填".into());
+    }
+    // 必填节: 1 2 3 4; 节内不能有 <…> 占位符(注释除外)
+    let no_comment = regex::Regex::new(r"(?s)<!--.*?-->").unwrap().replace_all(text, "");
+    let ph = regex::Regex::new(r"<[^<>\n]{1,80}>").unwrap();
+    let mut sec = String::new();
+    let mut sub = String::new();
+    for l in no_comment.lines() {
+        if let Some(h) = l.strip_prefix("## ") {
+            sec = h.trim().to_string();
+            sub.clear();
+            continue;
+        }
+        if let Some(h) = l.strip_prefix("### ") {
+            sub = h.trim().to_string();
+            continue;
+        }
+        // §1 只检查与 模式 对应的小节(### theme / ### original / ### replicate)
+        let other_mode = sec.starts_with("1 ")
+            && ["theme", "original", "replicate"].iter().any(|m| sub.starts_with(m) && *m != b.mode.as_str());
+        let need = !other_mode && ["1 ", "2 ", "3 ", "4 "].iter().any(|p| sec.starts_with(p));
+        if need {
+            for m in ph.find_iter(l) {
+                b.problems.push(format!("§{} 还有占位符 {}", sec, m.as_str()));
+            }
+        }
+    }
+    for s in ["## 1 ", "## 2 ", "## 3 ", "## 4 "] {
+        if !no_comment.contains(s) {
+            b.problems.push(format!("缺少章节 {s}…"));
+        }
+    }
+    b
+}
+
+/// 执行类命令调用: 项目里有设计书但未定稿时给提示(不阻止)
+pub fn draft_hint(root: &Path) {
+    let p = book_path(root);
+    let Ok(t) = std::fs::read_to_string(&p) else { return };
+    let b = book_state(&t);
+    if b.status != "已定稿" {
+        eprintln!(
+            "提示: 设计书 {} 状态为 {:?}(版本 {}), 尚未定稿。按工作流应先与用户迭代设计书、用户确认后 `wowsmod design-book finalize`, 再执行修改; 探索性预览可忽略本提示。",
+            p.display(),
+            b.status,
+            b.version
+        );
+    }
+}
+
+#[derive(clap::Subcommand, Debug)]
+pub enum BookCmd {
+    /// 在项目里生成设计书 design/BOOK.md(theme/original 为设计书, replicate 为拆解书)
+    Init {
+        project: PathBuf,
+        #[arg(long, value_parser = ["theme", "original", "replicate"])]
+        mode: String,
+        #[arg(long, default_value = "")]
+        title: String,
+        #[arg(long)]
+        force: bool,
+    },
+    /// 检查设计书: 字段、版本号、必填节占位符、是否已定稿(未定稿退出码 2)
+    Check {
+        /// 项目目录或 .md 文件
+        target: PathBuf,
+    },
+    /// 用户确认后定稿: 检查通过才写入 状态=已定稿 + 定稿日期/确认人
+    Finalize {
+        target: PathBuf,
+        /// 确认人(写进 定稿 字段), 如 用户
+        #[arg(long)]
+        by: String,
+    },
+    /// 改稿: 版本号 +0.1, 状态回到 评审中, 记一行修订记录
+    Revise {
+        target: PathBuf,
+        /// 本次改了什么 / 用户意见
+        #[arg(long)]
+        note: String,
+    },
+}
+
+fn book_file(t: &Path) -> PathBuf {
+    if t.is_dir() { book_path(t) } else { t.to_path_buf() }
+}
+
+fn set_field(text: &str, key: &str, val: &str) -> String {
+    let re = regex::Regex::new(&format!(r"(?m)^{key}\s*[:：].*$")).unwrap();
+    re.replace(text, format!("{key}: {val}").as_str()).into_owned()
+}
+
+fn bump(v: &str) -> String {
+    let n: Vec<u32> = v.trim_start_matches('v').split('.').filter_map(|x| x.parse().ok()).collect();
+    match n.as_slice() {
+        [a, b, ..] => format!("v{a}.{}", b + 1),
+        [a] => format!("v{a}.1"),
+        _ => "v0.2".into(),
+    }
+}
+
+fn today() -> String {
+    std::process::Command::new(if cfg!(windows) { "powershell" } else { "date" })
+        .args(if cfg!(windows) { vec!["-NoProfile", "-Command", "Get-Date -Format yyyy-MM-dd"] } else { vec!["+%Y-%m-%d"] })
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "<日期>".into())
+}
+
+pub fn cmd_book(cli: &Cli, c: &BookCmd) -> Result<i32> {
+    match c {
+        BookCmd::Init { project, mode, title, force } => {
+            let p = book_path(project);
+            if p.exists() && !force {
+                bail!("{} 已存在(--force 覆盖)", p.display());
+            }
+            std::fs::create_dir_all(p.parent().unwrap())?;
+            let ship = Project::open(project).map(|x| x.cfg.meta.ship).unwrap_or_default();
+            let mut t = TEMPLATES.iter().find(|t| t.0 == "book").unwrap().1.to_string();
+            t = set_field(&t, "模式", mode);
+            if !ship.is_empty() {
+                t = set_field(&t, "目标船", &ship);
+            }
+            if !title.is_empty() {
+                t = t.replacen("<标题>", title, 1);
+            }
+            t = t.replacen("| v0.1 | <日期> |", &format!("| v0.1 | {} |", today()), 1);
+            std::fs::write(&p, t)?;
+            emit_or_print(cli, json!({"ok": true, "book": p.display().to_string(), "mode": mode,
+                "next": ["填 §1(按模式)→§2 设计语言卡→§3 逐部件→§4 2~3 个方向预览, 交用户评审", "改稿用 wowsmod design-book revise --note …", "用户确认后 wowsmod design-book finalize --by 用户"]}),
+                &format!("已生成设计书 → {}", p.display()));
+            Ok(0)
+        }
+        BookCmd::Check { target } => {
+            let p = book_file(target);
+            let t = std::fs::read_to_string(&p).with_context(|| format!("读取 {}(先 wowsmod design-book init)", p.display()))?;
+            let b = book_state(&t);
+            let fin = b.status == "已定稿" && b.problems.is_empty();
+            let r = json!({"ok": true, "book": p.display().to_string(), "version": b.version, "status": b.status, "mode": b.mode, "finalized": fin, "finalized_by": b.finalized, "problems": b.problems});
+            if cli.json {
+                emit(cli, &r);
+            } else {
+                println!("{}  版本 {}  状态 {}  模式 {}", p.display(), b.version, b.status, b.mode);
+                for x in &b.problems {
+                    println!("  ✗ {x}");
+                }
+                println!("{}", if fin { "✓ 已定稿, 可按分层执行" } else { "未定稿: 先完成并与用户评审" });
+            }
+            Ok(if fin { 0 } else { 2 })
+        }
+        BookCmd::Finalize { target, by } => {
+            let p = book_file(target);
+            let t = std::fs::read_to_string(&p)?;
+            let b = book_state(&t);
+            if !b.problems.is_empty() {
+                bail!("设计书未通过检查, 不能定稿: {}", b.problems.join("; "));
+            }
+            let mut t = set_field(&t, "状态", "已定稿");
+            t = set_field(&t, "定稿", &format!("{} {by} 确认 ({})", today(), b.version));
+            std::fs::write(&p, t)?;
+            emit_or_print(cli, json!({"ok": true, "book": p.display().to_string(), "version": b.version, "next": ["按 wowsmod help design 分层执行, 每层对照设计书 §2–§3 自查, 记到 §5"]}), &format!("已定稿 {} {}", p.display(), b.version));
+            Ok(0)
+        }
+        BookCmd::Revise { target, note } => {
+            let p = book_file(target);
+            let t = std::fs::read_to_string(&p)?;
+            let b = book_state(&t);
+            let nv = bump(&b.version);
+            let mut t = set_field(&t, "版本", &nv);
+            t = set_field(&t, "状态", "评审中");
+            t = set_field(&t, "定稿", "未定稿");
+            let row = format!("| {nv} | {} | {} | |", today(), note.replace('|', "/"));
+            // 插到修订记录表最后一行之后
+            if let Some(i) = t.find("## 修订记录") {
+                let after = &t[i..];
+                let end = after.find("\n\n").map(|e| i + e).unwrap_or(t.len());
+                t.insert_str(end, &format!("\n{row}"));
+            }
+            std::fs::write(&p, t)?;
+            emit_or_print(cli, json!({"ok": true, "book": p.display().to_string(), "version": nv, "status": "评审中"}), &format!("改稿 → {nv}(评审中)"));
+            Ok(0)
+        }
+    }
+}
+
+fn emit_or_print(cli: &Cli, v: Value, human: &str) {
+    if cli.json {
+        emit(cli, &v);
+    } else {
+        println!("{human}");
+    }
+}

@@ -1,35 +1,31 @@
-# design: 外观设计共用(先判断模式)
+# design: 做一套外观 mod 的分层骨架(先判断模式)
 
-先判断模式: 有参考图/视频 → `wowsmod help replicate`; 给了主题(角色/作品) → `wowsmod help theme`; 只有风格描述 → `wowsmod help original`。
+**先判断模式**: 有参考视频/图 → replicate; 用户给一个角色+作品 → theme; 只有风格/情绪, 没有参考对象 → original。
 
-## 部件分区表(例: 勃艮第 FSB510, 其他船用 `lineart --material x` 报错列表看材质名)
-| 区 | 材质(.mfm) | 贴图 |
-|---|---|---|
-| 舷侧+甲板+船底 | FSB025_…_Hull(_skinned) | Hull_a/_mg(4096) |
-| 上层建筑 | FSB025_…_DeckHouse(_skinned) | DeckHouse_a/_mg |
-| 主炮塔+炮管(4 根共一套 UV) | FGM049_…_skinned | FGM049_a/_mg |
-| 炮管根部/套筒 | C035_Gun_Barrel_skinned | C035_a/_mg |
-| 副炮/高炮 | FGS036 / FGS053 / FGA056 / FGA014 | 各自 _a |
-世界坐标: y 向上, 水线 y≈0, 船艏在 -z; 炮塔实例已摆好(lineart/bake-ref 用的整船)。
+**三种模式下游一致: 先出「设计书」(replicate 叫「拆解书」), 与用户多轮迭代, 定稿后才执行。**
+- 生成/检查/改稿/定稿: `wowsmod design-book init <项目> --mode <模式>` / `check` / `revise --note` / `finalize --by 用户`(只在用户明确说定稿后)。项目里有未定稿的设计书时, 执行类命令(tex/mask/glow/lineart/bake-ref/model/install)会提示。
+- 只有第一步不同: theme = 资料收集 + 设计语言提炼; original = 概念探索(多个风格方向+情绪板/预览, 用户选定后共同定义); replicate = 视频抽帧 + 原 mod 结构拆解。见各模式主题。
+- 设计书内容 = 层 1–2 的产物 + 方向预览; 定稿后按层 3–7 执行, **每层对照设计书 §2–§3 自查**, 偏差记到 §5。
 
-## 发光规则
-- 发光 = `_mg` B 通道遮罩 × 漫反射颜色; glow 会把 .mfm 切到 emissive 着色器并改 .visual 标识(含 TL2_ 炮塔标识)。
-- 支持: ship_material(_skinned).fx → ship_emissive_material(_skinned).fx(船体、上层、炮塔、炮管都可)。
-- 同一张 _mg 的所有发光遮罩一次给齐; 发光色偏白青(#B8F2FF)比饱和青更像霓虹; emissivePower 0.3–0.4。
+**出图规则(每层完成标准都包含)**: 必须在 `wowsmod preview <项目>` 工作台或浏览器引擎的 `wowsmod render`(默认引擎, 预热后)里出图检查; `--engine soft` 只用于对位/量尺寸/烘焙, **不能作为任何一层的完成依据**。整个执行期工作台保持打开, 每一步修改都应在工作台时间线里看得到。
 
-## 港口光照补偿
-港口白天会把暗色压得更黑: 想要屏幕上 #0B0E14 级别的近黑, 贴图用 #1E1F23–#232529(`wowsmod help recolor` 的 port-albedo)。块面浅灰在港口会更亮, 比参考暗一档。
+**规则: 一层一层做, 每层写下产物并自答"自评问题"; 未达"完成标准"不进下一层; 验收不达标退回对应层(动到设计书则 revise 并重新定稿)。**
 
-## 新命令速查
-- `render --engine soft --view side|--yaw Y --pitch P --width W --json`: 输出 `frame`(世界→像素)
-- `bake-ref`: 同框设计图 → 某材质 UV(遮挡判断, --mirror-x 两舷, --key 键色抠遮罩)
-- `lineart`: --crease 折边 / --boundary 外轮廓 / --contour 等值线 / --rings 圆环 / --normal-edges 板缝 / --fill 按世界盒子整块选
+| 层 | 做什么 | 完成标准(摘要) | 细节 |
+|---|---|---|---|
+| 1 参考与需求 | 复刻: 视频抽帧+原 mod 结构; 主题: 资料+设计语言卡; 原创: 概念探索+设计语言卡 | 有覆盖全船/多角度/昼夜/开火的帧或等价描述 | design-ref |
+| 2 映射/拆解 | 设计书 §3 逐部件列: 图案贴图/额外模型/发光/动画/特效, 标可行性与命令 | 每个参考元素都在清单里, 缺能力已标出 | design-ref |
+| 3 大形 | 额外建模、部件增删改, 先定位置比例 | 同角度 render 轮廓与参考一致 | design-shape |
+| 4 贴图 | 完整高分辨率图案: 底色→大图案→细节线 | 关掉发光看仍是"那套涂装" | design-paint |
+| 5 发光与材质 | 发光遮罩、emissive 材质、金属/光泽 | 发光只在清单指定处, 占比在上限内 | design-glow |
+| 6 特效 | 炮口火焰/开火烟/烟囱烟/曳光(全局贴图) | 已评估全局影响并按规定验证 | design-fx |
+| 7 验收 | 同角度对比参考; 港口白天/夜间/远近 | 清单逐项打勾; 否则退回对应层 | design-verify |
 
-## 自检清单(render 与进港都过一遍)
-1. 同角度和参考/概念并排, 元素是否都在、位置是否对
-2. 没有规则网格条纹、没有跨部件断开的明显接缝
-3. 发光不糊成整块(上层建筑 lineart 覆盖率 ≤ 4%)
-4. 水线以下没有放重要元素
-5. 远景缩小仍可读; 近景无拉伸模糊
-6. 进港截图白天正常; python 日志 registerShipMod done 且无新错误
-7. 结束 `uninstall`, res_mods 还原
+## 模板(命令输出, 复制到项目里填写)
+`wowsmod design-template book|analysis|breakdown|acceptance` → 设计书(= design-book init 的内容) / 参考分析 / 拆解清单 / 分层验收清单。视频抽帧+拼图脚本: `scripts/ref/ref_frames.py`(见 design-ref)。
+
+## 反例(真实失败, 不要重复)
+复刻某视频涂装时: ①只看了一张封面, 没看视频 → 漏掉甲板/炮塔顶图案和整段发光船壳, 也无法判断有没有额外建模(事后看帧才确认该参考没有, 而同类其他参考有翼/光环/炮塔外壳); ②跳过层 2–3 直接改贴图; ③层 4 用程序生成的均匀线条/圆环代替**有粗细、收尖、成组的笔刷图案**, 结果"深色底+几道线", 用户评价"完全不一样"; ④只看 soft 渲染, 从没在 preview 工作台里打开过。根因都是跳层与证据不足。
+
+## 通用约束
+只用 wowsmod 改项目; install 前先 render; 验证只在港口(开火类特效需训练房且需用户授权); 结束 uninstall 复原。

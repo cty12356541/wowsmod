@@ -159,6 +159,11 @@ enum Cmd {
     Lineart(design::LineartArgs),
     /// 把同机位的设计图/参考图投影进材质 UV, 可按颜色抠遮罩 / project a reference/design image into UV
     BakeRef(design::BakeRefArgs),
+    /// 设计模板: 参考分析 / 拆解清单 / 分层验收清单(markdown, 复制到项目里填写) / design worksheets
+    DesignTemplate(design::TemplateArgs),
+    /// 设计书/拆解书: init / check / revise / finalize(定稿后再执行; 未定稿时执行类命令会提示) / design book
+    #[command(subcommand)]
+    DesignBook(design::BookCmd),
     /// 发光: 写 _mg 的 B 通道(发光遮罩/强度)、把发光区漫反射染色、切换 .mfm 到 emissive 着色器 / emissive edit
     Glow(m2cmd::GlowArgs),
     /// 颜色换算: 想在港口里"看到"某颜色时贴图该用什么颜色(按勃艮第港口实测标定, 近似) / port colour compensation
@@ -263,6 +268,10 @@ fn main() {
 }
 
 fn run(cli: Cli) -> Result<i32> {
+    // 执行类命令: 项目里的设计书未定稿时提示
+    if matches!(cli.cmd, Cmd::Tex(_) | Cmd::Mask { .. } | Cmd::Glow(_) | Cmd::Lineart(_) | Cmd::BakeRef(_) | Cmd::Model(_) | Cmd::Install(_)) {
+        modproj::EXEC_CMD.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
     match &cli.cmd {
         Cmd::Doctor => cmd_doctor(&cli),
         Cmd::Find { pattern, ship, limit } => cmd_find(&cli, pattern, *ship, *limit),
@@ -288,6 +297,8 @@ fn run(cli: Cli) -> Result<i32> {
         Cmd::Render(a) => render::cmd_render(&cli, a),
         Cmd::Lineart(a) => design::cmd_lineart(&cli, a),
         Cmd::BakeRef(a) => design::cmd_bake_ref(&cli, a),
+        Cmd::DesignTemplate(a) => design::cmd_template(&cli, a),
+        Cmd::DesignBook(c) => design::cmd_book(&cli, c),
         Cmd::Preview(a) => preview::cmd_preview(&cli, a),
         Cmd::Status(a) => ai::cmd_status(&cli, a),
         Cmd::Help { topic, search } => ai::cmd_help(&cli, topic.as_deref(), search.as_deref()),

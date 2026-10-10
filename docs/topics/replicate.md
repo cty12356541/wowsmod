@@ -1,27 +1,14 @@
-# replicate: 定制复刻(有参考图/视频)
+# replicate: 定制复刻(有参考视频/图)
 
-目标: 让游戏里的船和参考图"同角度看起来像"。先读 `wowsmod help design`(分区表、发光规则、自检清单)。
+骨架见 `wowsmod help design`。下游与 theme/original 一致: 产出同格式的**拆解书**(`wowsmod design-book init <项目> --mode replicate`), 与用户确认"拆得对不对"并定稿后再执行。本模式只说各层的差异。
 
-## 1 参考拆解(写成文字, 不动文件)
-多张/多角度截图逐张记: 底色、块面色(亮度级差)、发光色(常偏白青, 不是饱和青)、发光在哪(舷侧/炮塔/炮管/上层建筑棱线/甲板边)、线走向(斜切/沿船长/环形)、各部件分区(见 design 分区表)。水线以下看不见的不做。
+- **层 1**: 必须拿到**视频**(封面只是一帧): `python scripts/ref/ref_frames.py --bv <BV号> --out <目录>` 或 `--video <文件>`; 看简介里的作者说明(灵感来源、"带模型/发光"、公开下载)。有公开 mod 包就拆结构: 换了哪些贴图(名字、分辨率)、新增哪些 .geometry/.visual/挂点、mfm 用了什么着色器 —— 这直接告诉你层 3–5 要做什么。`wowsmod design-template analysis` 记录, 结论汇总进拆解书 §1–§3。
+- **层 2**: 逐帧对照, 特别找: 只在视频某几秒出现的模型/特效、两舷不对称的图案、甲板/炮塔顶上的图(俯视帧)。
+- **层 3**: 参考帧里新增物件的位置用 render JSON 的 `frame` 换算世界坐标再 `model add/move`。
+- **层 4**: 图案按参考**描摹**进同框设计图(用参考帧做底稿, 不要自己发明条纹), 每个视角各烘一次 `bake-ref`。
+- **层 7**: 同角度三联图: 参考帧 | soft render | 港口截图。
 
-## 2 同角度对齐
-`wowsmod render <项目> --engine soft --view side --width 4096 --json -o base.png`
-JSON 的 `frame` 给世界→像素映射(`像素 = origin_px + Y*y_axis_px + Z*z_axis_px`)。在 base.png 上画世界网格, 量出水线(y≈0)、舷高、炮塔与炮管的 z/y 位置。
+**停止条件**: 拆解清单全部达标; 或 3 轮后剩余差距都标为"缺能力"并告知用户。
 
-## 3 设计图(同框、按世界坐标画)
-按参考在与 base.png 同尺寸的透明 PNG 上画: 块面用一种键色(如 #808080), 发光线/环用另一种(#00FFFF)。形状按参考的走向画, 不要用规则网格条纹。
-
-## 4 投影进 UV(贴合结构)
-- 分辨率: 设计图与 bake-ref 用 `--width 8192`(舷侧每米像素更多); 近景仍有锯齿就在 glow/recolor 加 `--feather 3`。
-- 舷侧: `wowsmod bake-ref <项目> --ref design.png --material "Hull$|Hull_skinned$" --like <Hull_a> --view side --width 4096 --mirror-x --key "#00FFFF:0.2=lines.png" --key "#808080:0.1=blocks.png" -o ref_uv.png`(左右舷 UV 不共用时必须 --mirror-x)
-- 上层建筑棱线: `wowsmod lineart <项目> --material DeckHouse --like <DeckHouse_a> --crease 70 --width 3 --box=x0,y0,z0,x1,y1,z1`(覆盖率 2–4% 为宜; >7% 太花)
-- 按世界位置选整块部件(如主炮炮管): `wowsmod lineart … --material FGM049 --fill --box=…`
-- 炮塔侧面图案: 同样 bake-ref, `--material FGM049`(所有同型炮塔共用 UV)
-
-## 5 分部件应用(每步一条命令, 都记进 edits/)
-底色 `tex recolor <_a> --to-color` → 块面 `tex recolor <_a> --mask blocks.png` → 清 `_mg` B(`tex channel … --channel b --set 0`)→ `glow --mask lines.png --mfm <部件>`。同一 _mg 多个遮罩要一次给齐(多个 --mask 取并集), 否则后一次 glow 会清掉前一次。
-
-## 6 对比与迭代
-同角度 `render --engine soft --yaw 35 --pitch 14` 与参考并排; 装进游戏进港用固定机位截图再并排。每轮列出差距(形状/亮度/缺失元素)只改一两项。
-停止条件(任一满足即停): 参考里列出的元素都已出现且位置大体一致; 或已迭代 3 轮; 或剩余差距需要工具做不到的能力(写进报告)。
+## 示例(仅示例)
+勃艮第 + 某"崩坏3角色风格"视频: 首次只用封面、跳过层 1–3、用程序线条 → 失败。抽帧后结论: 该参考**没有额外建模**; 关键是舷侧成组的收尖笔刷弧、炮塔顶羽毛纹、甲板平行短条、整段艏部发光白块, 以及青色曳光(全局特效)。同作者另一视频则有机械翼/光环/炮塔换壳 —— 有没有模型必须看帧判断, 不能猜。

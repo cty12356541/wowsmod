@@ -110,10 +110,18 @@ fn rel_slash(base: &Path, p: &Path) -> String {
     p.strip_prefix(base).unwrap_or(p).components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect::<Vec<_>>().join("/")
 }
 
+/// main 对执行类命令置位; 打开项目时检查设计书是否定稿(每进程只提示一次)
+pub static EXEC_CMD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static BOOK_HINTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 impl Project {
     pub fn open(root: &Path) -> Result<Project> {
         let t = std::fs::read_to_string(root.join("mod.toml")).with_context(|| format!("{} 不是 mod 项目(缺少 mod.toml; 先运行 wowsmod mod init)", root.display()))?;
         let cfg: ModToml = toml::from_str(&t).map_err(|e| anyhow!("解析 mod.toml: {e}"))?;
+        use std::sync::atomic::Ordering;
+        if EXEC_CMD.load(Ordering::Relaxed) && !BOOK_HINTED.swap(true, Ordering::Relaxed) {
+            crate::design::draft_hint(root);
+        }
         Ok(Project { root: root.to_path_buf(), cfg })
     }
     pub fn init(root: &Path, name: &str, ship: &str, mode: &str, build: &str) -> Result<Project> {
