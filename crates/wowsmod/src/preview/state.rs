@@ -732,8 +732,8 @@ fn load_edits(root: &Path) -> Result<BTreeMap<String, (String, Value)>> {
 
 fn group_steps(root: &Path, edits: &BTreeMap<String, (String, Value)>) -> Result<Vec<Step>> {
     let meta_path = root.join("edits/steps.json");
-    let groups: Vec<(String, String, Option<String>, Option<String>, Vec<String>)> = if meta_path.is_file() {
-        let j: Value = serde_json::from_slice(&std::fs::read(&meta_path)?)?;
+    let meta: Option<Value> = if meta_path.is_file() && !is_seed_steps(root) { serde_json::from_slice(&std::fs::read(&meta_path)?).ok() } else { None };
+    let mut groups: Vec<(String, String, Option<String>, Option<String>, Vec<String>)> = if let Some(j) = meta {
         j["steps"]
             .as_array()
             .cloned()
@@ -754,10 +754,17 @@ fn group_steps(root: &Path, edits: &BTreeMap<String, (String, Value)>) -> Result
             .keys()
             .map(|k| {
                 let (f, j) = &edits[k];
-                (format!("e{k}"), j["cmd"].as_str().unwrap_or(f.as_str()).to_string(), None, None, vec![k.clone()])
+                (format!("e{k}"), edit_title(f, j), None, None, vec![k.clone()])
             })
             .collect()
     };
+    // steps.json 与实际 edits 对不上时(引用了不存在的 edit / 有 edit 没被引用): 丢掉空步骤, 没被引用的 edit 各成一步
+    let covered: std::collections::HashSet<String> = groups.iter().flat_map(|g| g.4.iter().cloned()).collect();
+    groups.retain(|g| g.4.is_empty() && g.0 == "s0" || g.4.iter().any(|e| edits.contains_key(e)));
+    for k in edits.keys().filter(|k| !covered.contains(*k)) {
+        let (f, j) = &edits[k];
+        groups.push((format!("e{k}"), edit_title(f, j), None, None, vec![k.clone()]));
+    }
     let mut out = Vec::new();
     for (i, (id, title, up, note, eds)) in groups.into_iter().enumerate() {
         let ed: Vec<_> = eds.iter().filter_map(|e| edits.get(e).cloned()).collect();
@@ -775,6 +782,70 @@ fn group_steps(root: &Path, edits: &BTreeMap<String, (String, Value)>) -> Result
         out.push(Step { id, index: i, title, user_prompt: up, ai_note: note, state: "active".into(), time_unix: tu, time: iso_at(tu), edits: edits_v, files, textures: vec![], materials: vec![], parts: vec![] });
     }
     Ok(out)
+}
+
+/// edits/steps.json 是不是早期 preview 从 mock 种子(勃艮第"深海涂装")拷进来的; 是的话忽略, 按真实 edits 显示
+fn is_seed_steps(root: &Path) -> bool {
+    let p = root.join("edits/steps.json");
+    let Ok(d) = std::fs::read(&p) else { return false };
+    let mut seeds = vec![];
+    if let Ok(t) = std::fs::read_to_string(root.join("mod.toml")) {
+        if let Some(c) = regex::Regex::new(r#"(?m)^ship\s*=\s*"([^"]+)""#).unwrap().captures(&t) {
+            if let Some(s) = find_seed(&c[1]) {
+                seeds.push(s.join("steps.json"));
+            }
+        }
+    }
+    if seeds.iter().any(|s| std::fs::read(s).map(|x| x == d).unwrap_or(false)) {
+        return true;
+    }
+    // 种子特征: 引用了 028 等不存在的 edit, 且标题是 mock 故事
+    let t = String::from_utf8_lossy(&d);
+    t.contains("\"wowsmod-steps/1\"") && t.contains("整船换深海蓝") && !root.join("edits/028_glow.json").is_file()
+}
+
+/// 每个 edit 一步时的标题: 命令 + 主要参数(贴图/颜色/通道/强度)
+fn edit_title(file: &str, j: &Value) -> String {
+    let cmd = j["cmd"].as_str().unwrap_or(file);
+    let argv: Vec<String> = j["argv"].as_array().into_iter().flatten().filter_map(|a| a.as_str().map(|s| s.to_string())).collect();
+    let opt = |k: &str| argv.iter().position(|a| a == k).and_then(|i| argv.get(i + 1)).cloned();
+    let short = |n: &str| {
+        let stem = n.rsplit(['/', '\\']).next().unwrap_or(n).trim_end_matches(".dds").to_string();
+        let segs: Vec<&str> = stem.split('_').collect();
+        if segs.len() > 3 { segs[segs.len() - 2..].join("_") } else { stem }
+    };
+    let tex = argv.iter().find(|a| a.to_lowercase().ends_with(".dds") && !a.starts_with("--")).map(|s| short(s));
+    let verb = match cmd {
+        "import_sdk" => return "基线: 导入官方 SDK 模型".into(),
+        "tex_recolor" => "换色",
+        "tex_channel" => "改通道",
+        "tex_import" => "导入贴图",
+        "tex_rewrite" => "重写贴图",
+        "glow" => "发光",
+        "port_albedo" => "港口色换算",
+        c if c.starts_with("model") => "改模型",
+        c => c,
+    };
+    let mut parts = vec![verb.to_string()];
+    match cmd {
+        "glow" => {
+            if let Some(m) = opt("--mg") { parts.push(short(&m)); }
+            if let Some(c) = opt("--color") { parts.push(c); }
+            if let Some(p) = opt("--power") { parts.push(format!("强度 {p}")); }
+        }
+        "tex_channel" => {
+            if let Some(t) = tex { parts.push(t); }
+            if let Some(c) = opt("--channel") {
+                parts.push(match (opt("--set"), opt("--mul")) { (Some(v), _) => format!("{c}={v}"), (_, Some(m)) => format!("{c}×{m}"), _ => c });
+            }
+        }
+        _ => {
+            if let Some(t) = tex { parts.push(t); }
+            if let Some(c) = opt("--to-color") { parts.push(format!("→ {c}")); }
+            if let Some(h) = opt("--hue-shift") { parts.push(format!("色相 {h}°")); }
+        }
+    }
+    parts.join(" ")
 }
 
 fn command_line(argv: &[Value]) -> String {

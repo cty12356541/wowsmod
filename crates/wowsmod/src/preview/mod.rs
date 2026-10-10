@@ -133,19 +133,10 @@ pub fn browser_not_found_value(preview_url: Option<&str>) -> Value {
     })
 }
 
-pub fn ensure_steps_json(project: &std::path::Path, ship: &str) -> Result<()> {
-    let p = project.join("edits/steps.json");
-    if p.is_file() {
-        return Ok(());
-    }
-    // 若有种子(勃艮第 deepsea 类), 拷一份; 否则不强制
-    if let Some(seed) = state::find_seed(ship) {
-        let src = seed.join("steps.json");
-        if src.is_file() {
-            std::fs::create_dir_all(project.join("edits"))?;
-            std::fs::copy(&src, &p)?;
-        }
-    }
+/// 以前会把 mock 种子(勃艮第"深海涂装"故事)的 steps.json 拷进真实项目, 导致预览时间线显示的是 mock 步骤
+/// 而不是项目自己的改动(克利希娜项目即如此)。现在不再写项目: 没有 steps.json 时按 edits 每条一步显示;
+/// 已被拷进去的种子文件由 state::group_steps 识别并忽略。
+pub fn ensure_steps_json(_project: &std::path::Path, _ship: &str) -> Result<()> {
     Ok(())
 }
 

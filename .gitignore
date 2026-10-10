@@ -2,3 +2,4 @@
 /testdata/
 /out/
 *.glb
+/target_render/
