@@ -45,9 +45,9 @@ kernel32/ntdll/advapi32/bcryptprimitives/api-ms-win-core-synch, 无 vcruntime/uc
   (Cargo.toml 声明 MIT, 但仓库无 LICENSE 文件、且其算法来源于 ooz 的逆向实现, **许可证状态不确定**),
   因此做成可关闭的 cargo feature `oozextract`; 若将来需要替换为官方 Oodle SDK 或其他实现, 只需实现该 trait。
 
-### 2.2 纹理二次压缩(M1 验收中发现)
+### 2.2 贴图 BC7Prep(M1 验收中发现)
 
-见第 7 节。
+部分 BC7 贴图在 pkg 中是 Oodle Texture "BC7Prep" 重排形式, extract 默认还原为标准 BC7。见第 7 节。
 
 ## 3. geometry
 
@@ -111,15 +111,33 @@ kernel32/ntdll/advapi32/bcryptprimitives/api-ms-win-core-synch, 无 vcruntime/uc
 - "整船文件集" = 所有模型目录下的文件 + 同级 `textures/` 中以模型代号开头的贴图(例如 `battleship/textures/FSB025_*`)。
   这是按命名约定的归集, 不是从材质引用推出的, 可能漏掉共享贴图(例如 common/ 下的通用材质), 不确定。
 
-## 7. 纹理: .dd0–.dd2 与二次压缩
+## 7. 纹理: .dd0–.dd2 与 BC7Prep
 
 - M0 实验结论(保持): 改贴图必须连同 `.dd0/.dd1/.dd2` 一起提供(游戏按需加载高分辨率 mip 链), 只改 `.dds` 不生效或混用。
-- M1 新发现: 部分 BC7 法线贴图(`*_n.dd0/dd1` 等)在 DDS 头 `dwReserved1[2]`(文件偏移 40)= 1, 像素数据是二次压缩的
-  (例如 1024×1024 BC7 应为 1,048,576 字节, 实际 824,520 字节)。见 M1_REPORT 的 extract 一节。
+- M1 新发现: 部分 BC7 贴图(DX10 头, DXGI 格式 98 BC7_UNORM; 文件偏移 40 即 `dwReserved1[2]` = 1)在 pkg 中存放的是
+  **BC7Prep** 形式(RAD Oodle Texture 的"便于压缩的重排", 不是有损变换)。pkg 中的字节 crc32 与 idx 一致, 即这就是游戏原始数据;
+  pfsunpack 解包时会把它还原成标准 BC7 并把偏移 40 清零。首轮 extract 验收 429 个文件里 23 个不一致全是这种贴图。
+- 没有找到公开的 BC7Prep 规范或开源解码器(网络检索), 游戏目录里也没有 oo2tex 之类的 DLL。
+  `wowsmod-formats::bc7prep` 是用(原始, pfsunpack 输出)成对样本**黑盒逆向**得到的纯 Rust 实现:
+  - 载荷 = 48 字节头 `u32 version(=0x7bc), u32 flags, u32 counts[10]` + 按模式 0..9 依次的记录组 + `ceil(N/2)` 字节模式图
+    (每块一个 nibble, 低 nibble 在前)。模式 m 的第 k 个块对应模式 m 组的第 k 条记录。总块数 N = Σcounts, 输出 16N 字节。
+  - 模式 0..7: 每块 16 字节"规范化记录"(字段重新排列: 去掉模式位, 端点按通道/端点对齐到字节或 16/24 位边界,
+    分区号与 p-bit 挪到端点之后, 索引原样)。flags 第 m 位 = 1 时该模式的记录按字节拆成两个平面
+    (第一平面宽度: 模式 0/1/5/6 为 8, 模式 2/3/7 为 12, 模式 4 为 6)。
+  - 模式 4/5 的记录按"未旋转"的 RGBA 顺序存端点(旋转位单独存), 模式 5 的 7 位颜色端点存为 `v<<1`, 模式 4 的 6 位分量
+    存高 5 位 + 最低位单独放在 bit0/bit1。
+  - 模式 9 = 纯色块, 只存 RGBA8(4 字节), 还原为固定写法的模式 5 块: 旋转 0, 颜色索引全为 1, alpha 索引全为 0,
+    A0 = alpha, A1 = 0, 每个颜色分量 v 用 7 位端点 `(v>>1, v<128 ? (v+1)>>1 : (v-1)>>1)`(在 547,782 个纯色块上无一例外)。
+  - 每个字段的位映射见 `bc7prep.rs::unprep_block`。单测含正向变换的随机往返和纯色插值校验; 集成测试 `bc7prep_matches_pfsunpack`
+    用真实样本逐字节比较; `scripts/accept_textures.ps1` 大批量对比并统计覆盖到的模式/旋转组合。
+  - 未见过的情形明确报错而不是猜: version ≠ 0x7bc、模式 8 计数 > 0、flags 高位非 0。
+  - 不确定之处: 若某模式/旋转组合从未在真实数据中出现(见 M1_REPORT 的覆盖统计), 其映射是按同模式其他组合的规律推断的。
+- `extract` 默认还原(与 pfsunpack 一致), `--raw` 保留 pkg 原始字节。M4 往回打包时要么写标准 BC7 且偏移 40 = 0
+  (游戏是否接受未 prep 的贴图: 不确定, 需 M4 实测), 要么实现正向 BC7Prep。
 
 ## 8. M4 需要处理的问题(TODO)
 
 1. **SDK 占位文件崩溃**: 26.10 客户端 `extractSources` 导出的 .geometry/.dds/.splash 全是 35–44 字节的占位 XML,
    用占位文件 `registerShipMod` 会导致客户端崩溃(M0 exp2a)。M4 打包时必须用 pkg 中的真实文件填充(参考 m0\ingame\tools\fill_stubs.py)。
-2. **贴图需要 .dd0–.dd2**: 替换贴图必须同时生成 .dds + .dd0/.dd1/.dd2(以及 dwReserved1 标志与二次压缩的处理, 见第 7 节)。
+2. **贴图需要 .dd0–.dd2**: 替换贴图必须同时生成 .dds + .dd0/.dd1/.dd2; 并决定写标准 BC7(偏移 40 = 0)还是正向 BC7Prep(见第 7 节), 需实测游戏是否接受前者。
 3. 导回 geometry 时还原 `extras.winding_flipped` 的 primitive 绕序, 并重新计算 assets.bin 中渲染集包围盒是否需要同步(不确定)。

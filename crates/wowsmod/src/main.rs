@@ -77,6 +77,9 @@ enum Cmd {
         /// 线程数(默认 = CPU 数)
         #[arg(long)]
         threads: Option<usize>,
+        /// 保持 pkg 中的原始字节(不把 BC7Prep 贴图还原成标准 BC7) / keep raw bytes, skip BC7Prep decode
+        #[arg(long)]
+        raw: bool,
     },
     /// 导出 geometry 为 GLB(按 mapping id 正确配对 + 健康检查) / export geometry to GLB
     Export {
@@ -159,8 +162,8 @@ fn run(cli: Cli) -> Result<i32> {
     match &cli.cmd {
         Cmd::Doctor => cmd_doctor(&cli),
         Cmd::Find { pattern, ship, limit } => cmd_find(&cli, pattern, *ship, *limit),
-        Cmd::Extract { patterns, list, ship, out, no_verify, dry_run, threads } => {
-            cmd_extract(&cli, patterns, list.as_deref(), ship.as_deref(), out, *no_verify, *dry_run, *threads)
+        Cmd::Extract { patterns, list, ship, out, no_verify, dry_run, threads, raw } => {
+            cmd_extract(&cli, patterns, list.as_deref(), ship.as_deref(), out, *no_verify, *dry_run, *threads, *raw)
         }
         Cmd::Export { input, out, pairing, visual, assets_bin, lod, strict, keep_winding } => {
             cmd_export(&cli, input, out, *pairing, visual.as_deref(), assets_bin.as_deref(), lod, *strict, *keep_winding)
@@ -555,7 +558,8 @@ fn safe_join(base: &Path, vpath: &str) -> Result<PathBuf> {
     Ok(p)
 }
 
-fn cmd_extract(cli: &Cli, patterns: &[String], list: Option<&Path>, ship: Option<&str>, out: &Path, no_verify: bool, dry_run: bool, threads: Option<usize>) -> Result<i32> {
+#[allow(clippy::too_many_arguments)]
+fn cmd_extract(cli: &Cli, patterns: &[String], list: Option<&Path>, ship: Option<&str>, out: &Path, no_verify: bool, dry_run: bool, threads: Option<usize>, raw: bool) -> Result<i32> {
     let g = require_game(cli)?;
     let ix = load_index(&g)?;
     let mut sel: Vec<&Entry> = Vec::new();
@@ -640,10 +644,15 @@ fn cmd_extract(cli: &Cli, patterns: &[String], list: Option<&Path>, ship: Option
     let done = AtomicUsize::new(0);
     let bytes = AtomicU64::new(0);
     let errors: std::sync::Mutex<Vec<(String, String)>> = Default::default();
+    let bc7prep: std::sync::Mutex<Vec<String>> = Default::default();
     pool.install(|| {
         sel.par_iter().for_each(|e| {
             let r = (|| -> Result<u64> {
-                let data = reader.read(e).map_err(|x| anyhow!("{x}"))?;
+                let mut data = reader.read(e).map_err(|x| anyhow!("{x}"))?;
+                if !raw && wowsmod_formats::bc7prep::is_bc7prep_dds(&data) {
+                    data = wowsmod_formats::bc7prep::decode_dds(&data).map_err(|x| anyhow!("BC7Prep 还原失败(可加 --raw 保留原始字节) / BC7Prep decode failed: {x}"))?;
+                    bc7prep.lock().unwrap().push(e.path.clone());
+                }
                 let dst = safe_join(out, &e.path)?;
                 if let Some(parent) = dst.parent() {
                     std::fs::create_dir_all(parent).with_context(|| format!("创建目录 {}", parent.display()))?;
@@ -665,10 +674,13 @@ fn cmd_extract(cli: &Cli, patterns: &[String], list: Option<&Path>, ship: Option
         })
     });
     let errors = errors.into_inner().unwrap();
+    let mut bc7prep = bc7prep.into_inner().unwrap();
+    bc7prep.sort();
     let el = t.elapsed();
     let report = json!({
         "ok": errors.is_empty(), "out": out, "requested": sel.len(), "extracted": done.load(Ordering::Relaxed),
         "bytes": bytes.load(Ordering::Relaxed), "crc_verified": !no_verify, "elapsed_ms": el.as_millis(),
+        "raw": raw, "bc7prep_decoded": bc7prep.len(), "bc7prep_files": bc7prep,
         "errors": errors.iter().map(|(p, e)| json!({"path": p, "error": e})).collect::<Vec<_>>(),
     });
     if cli.json {
@@ -684,6 +696,9 @@ fn cmd_extract(cli: &Cli, patterns: &[String], list: Option<&Path>, ship: Option
             if no_verify { "" } else { ", crc32 全部校验通过" },
             out.display()
         );
+        if !bc7prep.is_empty() {
+            println!("  其中 {} 个 BC7Prep 贴图已还原为标准 BC7(与 pfsunpack 一致; 用 --raw 可保留 pkg 原始字节)", bc7prep.len());
+        }
         for (p, e) in errors.iter().take(20) {
             println!("  ✘ {p}: {e}");
         }

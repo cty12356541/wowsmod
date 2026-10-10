@@ -153,3 +153,25 @@ fn gameparams_ships() {
     assert!(r.hull_models[0].contains("FSB003_Richelieu_1944"));
     eprintln!("{} 条舰船", ships.len());
 }
+
+/// BC7Prep 逆变换: 真实贴图(pkg 原始字节)还原后与 pfsunpack 输出逐字节一致。
+/// 目录结构: <dir>/raw/<名> 与 <dir>/ref/<名>(fetch_samples.ps1 用 `wowsmod extract --raw` 与 pfsunpack 生成)。
+#[test]
+fn bc7prep_matches_pfsunpack() {
+    let Some(dir) = sample_path("WOWSMOD_BC7PREP_SAMPLES", "testdata/bc7prep") else { return };
+    let mut names: Vec<_> = std::fs::read_dir(dir.join("raw")).unwrap().filter_map(|e| e.ok().map(|e| e.file_name())).collect();
+    names.sort();
+    assert!(!names.is_empty(), "{} 下没有样本", dir.display());
+    let mut modes = [0usize; 10];
+    for n in &names {
+        let raw = std::fs::read(dir.join("raw").join(n)).unwrap();
+        let reff = std::fs::read(dir.join("ref").join(n)).unwrap();
+        assert!(bc7prep::is_bc7prep_dds(&raw), "不是 BC7Prep: {n:?}");
+        for (m, c) in modes.iter_mut().enumerate() {
+            *c += u32::from_le_bytes(raw[148 + 8 + 4 * m..148 + 12 + 4 * m].try_into().unwrap()) as usize;
+        }
+        let out = bc7prep::decode_dds(&raw).unwrap();
+        assert!(out == reff, "还原结果与 pfsunpack 不一致: {n:?}");
+    }
+    eprintln!("BC7Prep {} 个样本逐字节一致; 各模式块数 {:?}", names.len(), modes);
+}

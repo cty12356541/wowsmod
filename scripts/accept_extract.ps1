@@ -89,6 +89,7 @@ $summary = [ordered]@{
     total_files = $all.Count; total_identical = $ok
     mismatches = @($rows | Where-Object status -ne '一致' | Select-Object path, status)
     wowsmod_seconds = [Math]::Round($wmSec, 2); pfsunpack_seconds = [Math]::Round($pfsSec, 2)
+    bc7prep_decoded = $(if ($r.Json) { $r.Json.bc7prep_decoded } else { $null })
 }
 foreach ($s in $Ships) {
     $set = $shipSets[$s]

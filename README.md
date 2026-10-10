@@ -41,6 +41,8 @@ wowsmod geom "*.geometry" --roundtrip           # geometry 逐字节往返校验
 
 ### extract
 纯 Rust 读取 idx/pkg, 支持莱服 Oodle 多块容器(oozextract 后端), 多线程, 默认校验 idx 中的 crc32。
+部分 BC7 贴图在游戏中是 Oodle Texture "BC7Prep" 重排形式, extract 默认把它们还原成标准 BC7(与 pfsunpack 输出逐字节一致,
+普通 DDS 工具可直接打开); 加 `--raw` 则保留 pkg 中的原始字节。格式说明见 docs/DESIGN.md §7。
 输出保持游戏内相对路径; 拒绝 `..`/盘符等不安全路径。
 
 ### export
@@ -70,6 +72,7 @@ cargo test --release                           # 单元测试; 集成测试需�
 powershell -ExecutionPolicy Bypass -File scripts\fetch_samples.ps1      # 准备 testdata\(不入库)
 $env:WOWSMOD_REQUIRE_SAMPLES=1; cargo test --release                   # 含 18 样本往返、导出健康、pkg crc、GameParams
 powershell -ExecutionPolicy Bypass -File scripts\accept_extract.ps1     # 与 pfsunpack 逐字节对比(随机 ≥200 + 整船)
+powershell -ExecutionPolicy Bypass -File scripts\accept_textures.ps1    # 2000 个随机贴图对比 + BC7Prep 模式覆盖统计
 powershell -ExecutionPolicy Bypass -File scripts\accept_export.ps1      # 勃艮第/黎塞留/FGM049 导出健康 + naive 对照
 powershell -ExecutionPolicy Bypass -File scripts\accept_visual_xcheck.ps1  # SDK .visual 与 assets.bin 配对交叉验证
 powershell -ExecutionPolicy Bypass -File scripts\accept_roundtrip.ps1 -All # 18 样本 + 全部游戏 geometry 往返
