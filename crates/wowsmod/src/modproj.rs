@@ -300,6 +300,7 @@ impl<'a> GameLookup<'a> {
     }
 }
 
+#[derive(Clone)]
 pub struct InstallItem {
     pub rel: String,
     pub data: Vec<u8>,
@@ -387,9 +388,12 @@ pub fn plan_install(p: &Project, ix: &wowsmod_formats::index::GameIndex, reader:
         bail!("贴图分卷检查未通过:\n  {}", problems.join("\n  "));
     }
     // SDK 根加载器
-    if p.cfg.install.mode == "sdk" && !res_mods.join("PnFModsLoader.py").exists() && !items.contains_key("pnfmodsloader.py") {
+    // SDK 根加载器: 总是列入(origin=generated)。登记表里别的 mod 已装 → 共用; 用户自己放的 → 不接管
+    if p.cfg.install.mode == "sdk" && !items.contains_key("pnfmodsloader.py") {
         items.insert("pnfmodsloader.py".into(), InstallItem { rel: "PnFModsLoader.py".into(), data: Vec::new(), origin: "generated".into() });
-        notes.push("res_mods 里没有 PnFModsLoader.py, 将创建空文件(SDK 路线需要)".into());
+        if !res_mods.join("PnFModsLoader.py").exists() {
+            notes.push("res_mods 里没有 PnFModsLoader.py, 将创建空文件(SDK 路线需要)".into());
+        }
     }
     Ok((items.into_values().collect(), notes))
 }
@@ -398,6 +402,7 @@ fn manifest_path(p: &Project) -> PathBuf {
     p.root.join(".install").join("manifest.json")
 }
 
+#[allow(dead_code)] // M2 旧路径, 只留给测试; M4 起用 registry::install
 pub fn install(p: &Project, items: &[InstallItem], res_mods: &Path, build: &str, dry_run: bool) -> Result<Value> {
     let mp = manifest_path(p);
     if mp.exists() {
@@ -466,7 +471,7 @@ pub fn install(p: &Project, items: &[InstallItem], res_mods: &Path, build: &str,
         "by_origin": files.iter().fold(BTreeMap::<String, usize>::new(), |mut m, f| { *m.entry(f.origin.split(':').next().unwrap().to_string()).or_default() += 1; m })}))
 }
 
-fn write_manifest(p: &Project, res_mods: &Path, build: &str, files: &[ManifestFile], dirs: &[String]) -> Result<()> {
+pub fn write_manifest(p: &Project, res_mods: &Path, build: &str, files: &[ManifestFile], dirs: &[String]) -> Result<()> {
     let m = Manifest {
         mod_name: p.cfg.meta.name.clone(),
         res_mods: res_mods.display().to_string(),
@@ -603,4 +608,8 @@ mod tests {
         assert!(is_binary_stub("a/x.dds", b"<x.dd0 />\n"));
         assert!(!is_binary_stub("a/x.model", b"<x.model>...</x.model>"));
     }
+}
+
+pub fn rel_slash_pub(base: &Path, p: &Path) -> String {
+    rel_slash(base, p)
 }

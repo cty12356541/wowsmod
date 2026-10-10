@@ -53,5 +53,6 @@ pub mod uvmask;
 pub mod vertex;
 pub mod vertex_codec;
 pub mod visual;
+pub mod zipfile;
 
 pub use error::{Error, Result};

@@ -578,47 +578,6 @@ pub fn cmd_mod(cli: &Cli, c: &ModCmd) -> Result<i32> {
     }
 }
 
-pub fn cmd_install(cli: &Cli, dir: &Path, dev: bool, dry_run: bool) -> Result<i32> {
-    if !dev {
-        bail!("目前只支持开发安装: wowsmod install --dev <项目>(把产物直接放进 res_mods 并记录清单)");
-    }
-    let p = Project::open(dir)?;
-    let ctx = game_ctx(cli, true)?.unwrap();
-    if !p.cfg.meta.game_build.is_empty() && p.cfg.meta.game_build != ctx.install.build {
-        eprintln!("警告: 项目制作时的客户端构建 {} 与当前 {} 不同", p.cfg.meta.game_build, ctx.install.build);
-    }
-    let res_mods = ctx.install.res_mods.clone();
-    let (items, notes) = modproj::plan_install(&p, &ctx.index, &ctx.reader, &res_mods)?;
-    let r = modproj::install(&p, &items, &res_mods, &ctx.install.build, dry_run)?;
-    if cli.json {
-        let mut r = r;
-        r["ok"] = json!(true);
-        r["notes"] = json!(notes);
-        r["res_mods"] = json!(res_mods.display().to_string());
-        emit(cli, &r);
-    } else {
-        for n in &notes {
-            println!("{n}");
-        }
-        println!("{}安装到 {}: {r}", if dry_run { "(演练)" } else { "已" }, res_mods.display());
-    }
-    Ok(0)
-}
-
-pub fn cmd_uninstall(cli: &Cli, dir: &Path, dry_run: bool) -> Result<i32> {
-    let p = Project::open(dir)?;
-    let r = modproj::uninstall(&p, dry_run)?;
-    let complete = r["complete"].as_bool().unwrap_or(false);
-    if cli.json {
-        let mut r = r;
-        r["ok"] = json!(dry_run || complete);
-        emit(cli, &r);
-    } else {
-        println!("{}卸载: {r}", if dry_run { "(演练)" } else { "" });
-    }
-    Ok(if dry_run || complete { 0 } else { 2 })
-}
-
 /// 港口观感补偿(M2 实测标定): 渲染后线性值 ≈ a·(贴图线性值 − t)(按通道, 低端被压成 0)。
 /// 标定数据: 勃艮第船体侧板, 港口默认机位白天, 两组贴图 (40.9,74.3,112.9)→截图(3.1,61.4,117.7) 与 (59.6,73.9,88.6)→(27.0,58.4,86.0)。
 /// G 通道两组几乎同值, 斜率按 R/B 的平均起点估计。换船/换光照/换机位后只能当起点, 不确定。

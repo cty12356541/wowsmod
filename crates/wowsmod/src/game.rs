@@ -453,3 +453,21 @@ pub fn find_blender() -> Vec<BlenderInfo> {
     }
     out
 }
+
+/// 游戏客户端是否在运行(Windows: tasklist; 其他平台恒为 false)
+pub fn running() -> Vec<String> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let out = std::process::Command::new("tasklist").args(["/FO", "CSV", "/NH"]).creation_flags(0x0800_0000).output();
+        if let Ok(o) = out {
+            let s = String::from_utf8_lossy(&o.stdout).to_lowercase();
+            return ["korabli64.exe", "korabli.exe", "worldofwarships64.exe", "worldofwarships.exe"].iter().filter(|n| s.contains(&format!("\"{n}\""))).map(|s| s.to_string()).collect();
+        }
+        Vec::new()
+    }
+    #[cfg(not(windows))]
+    {
+        Vec::new()
+    }
+}

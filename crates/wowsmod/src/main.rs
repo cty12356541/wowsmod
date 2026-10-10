@@ -5,7 +5,9 @@
 mod game;
 mod m2cmd;
 mod m3cmd;
+mod m4cmd;
 mod modproj;
+mod registry;
 mod texcmd;
 
 use std::collections::HashMap;
@@ -161,24 +163,23 @@ enum Cmd {
     #[command(subcommand)]
     Mod(m2cmd::ModCmd),
     /// 把项目安装到 res_mods(--dev: 直接复制并记录清单; 自动补齐 SDK 占位与贴图分卷)
-    Install {
-        dir: PathBuf,
-        #[arg(long)]
-        dev: bool,
-        #[arg(long)]
-        dry_run: bool,
-    },
+    /// 安装 mod 项目或 .wsmod 包到 res_mods(登记每个文件的哈希/备份, 检查与已装 mod 的冲突, 失败自动回滚)
+    Install(m4cmd::InstallArgs),
     /// 整船装配: SDK visual + geometry + GameParams 挂点 → 带层级的 GLB 与装配表 JSON / assemble a whole ship
     Assemble(m3cmd::AssembleArgs),
     /// 模型写回: list / scale / move / rotate / replace / remove / add / rebuild / export-blender / import-blender / undo / replay
     #[command(subcommand)]
     Model(m3cmd::ModelCmd),
-    /// 按安装清单精确卸载(只删哈希一致的文件, 还原被覆盖的文件, 删除空的新建目录)
-    Uninstall {
-        dir: PathBuf,
-        #[arg(long)]
-        dry_run: bool,
-    },
+    /// 卸载: 只删哈希与安装时一致的文件, 还原被覆盖的原文件, 与其他 mod 共用的保留; 最后一个卸载后 res_mods 回到原样
+    Uninstall(m4cmd::UninstallArgs),
+    /// 列出已装的 mod(--verify 逐文件核对哈希与备份)
+    Installed(m4cmd::InstalledArgs),
+    /// 不安装, 只检查几个项目/包之间以及与已装 mod 的冲突
+    Conflicts(m4cmd::ConflictsArgs),
+    /// 游戏更新(bin 下出现新版本号目录)后, 把 mod 从旧 res_mods 迁到新的(按新版本重新补齐原版资源)
+    Migrate(m4cmd::MigrateArgs),
+    /// 打成可分发的 .wsmod 包(不含游戏原版资源与任何专有组件)
+    Pack(m4cmd::PackArgs),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum, Debug)]
@@ -232,8 +233,12 @@ fn run(cli: Cli) -> Result<i32> {
         Cmd::Glow(a) => m2cmd::cmd_glow(&cli, a),
         Cmd::PortAlbedo { screen, mean_offset } => m2cmd::cmd_port_albedo(&cli, screen, *mean_offset),
         Cmd::Mod(c) => m2cmd::cmd_mod(&cli, c),
-        Cmd::Install { dir, dev, dry_run } => m2cmd::cmd_install(&cli, dir, *dev, *dry_run),
-        Cmd::Uninstall { dir, dry_run } => m2cmd::cmd_uninstall(&cli, dir, *dry_run),
+        Cmd::Install(a) => m4cmd::cmd_install(&cli, a),
+        Cmd::Uninstall(a) => m4cmd::cmd_uninstall(&cli, a),
+        Cmd::Installed(a) => m4cmd::cmd_installed(&cli, a),
+        Cmd::Conflicts(a) => m4cmd::cmd_conflicts(&cli, a),
+        Cmd::Migrate(a) => m4cmd::cmd_migrate(&cli, a),
+        Cmd::Pack(a) => m4cmd::cmd_pack(&cli, a),
         Cmd::Assemble(a) => m3cmd::cmd_assemble(&cli, a),
         Cmd::Model(c) => m3cmd::cmd_model(&cli, c),
     }
