@@ -439,6 +439,9 @@ pub struct GlowArgs {
     /// 额外设置 .mfm 属性 name=Type:value(如 emissionAnimationMode=Int:1), 可重复
     #[arg(long = "mfm-set")]
     pub mfm_set: Vec<String>,
+    /// 不改 .visual 的材质标识(默认会把引用该 .mfm 的 SHIPMAT_PBS_* 改成 SHIPMAT_EMISSIVE_PBS_*, 否则引擎不用发光着色器)
+    #[arg(long)]
+    pub keep_identifier: bool,
     /// 输出目录(不用项目时)
     #[arg(short, long)]
     pub out: Option<PathBuf>,
@@ -501,7 +504,7 @@ pub fn cmd_glow(cli: &Cli, a: &GlowArgs) -> Result<i32> {
         }
         texcmd::preview(&b, &pv.join("mg_B.png"), 1024)?;
     }
-    let mfms = texcmd::edit_mfms(pj.as_ref(), &a.mfm, a.power.or(if a.mfm.is_empty() { None } else { Some(4.0) }), &a.mfm_set)?;
+    let mfms = texcmd::edit_mfms(pj.as_ref(), &a.mfm, a.power.or(if a.mfm.is_empty() { None } else { Some(4.0) }), &a.mfm_set, !a.keep_identifier)?;
     let mut warnings = Vec::new();
     if a.mfm.is_empty() {
         warnings.push("没有 --mfm: 只改了贴图。发光需要材质用 PBS_ship_emissive 着色器(SDK 路线可改明文 .mfm); 否则 B 通道只影响贴花混合, 不会发光".to_string());

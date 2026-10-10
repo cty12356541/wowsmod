@@ -1,7 +1,10 @@
 ﻿# M2 验收: 生成两个 mod 项目(只写 out\m2_projects, 不碰游戏目录)
 #  1) rt_loose  : DDS 读→写往返(loose 覆盖): _a/_mg 经 PNG 导出→重新编码, _n 去掉 BC7Prep 写成普通 BC7
 #  2) deepsea   : SDK 路线, 整船深海蓝(保留细节) + 烟囱发蓝光
-param([string]$Color = '#1E3F66', [string]$GlowColor = '#2E9BFF', [double]$Power = 4.0, [string]$DsName = 'deepsea2', [switch]$KeepCamoMask, [string[]]$MfmSet = @(), [switch]$Force)
+# -MfmSet 'emissionAnimationMode=Int:1;animEmissionPower=Float:30'  (多个用 ; 分隔: powershell -File 不能传数组, 逗号会被当成值的一部分)
+# -KeepCamoMask   保留 _mg.B 迷彩遮罩(船体显示游戏迷彩配色, 只有遮罩外的部分显示新颜色)
+# -RedControlPng  对照实验: 把船体 skinned 材质(烟囱顶盖等)的漫反射指向一张新的纯色贴图, 证明 .mfm 的属性被游戏读取
+param([string]$Color = '#1E3F66', [string]$GlowColor = '#2E9BFF', [double]$Power = 4.0, [string]$DsName = 'deepsea2', [switch]$KeepCamoMask, [string]$MfmSet = '', [string]$RedControlPng = '', [switch]$Force)
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 Set-Location (Split-Path $PSScriptRoot -Parent)
@@ -52,7 +55,17 @@ if (-not (Test-Path $ds)) {
   }
   # 烟囱发光: MidBack 的 DeckHouse_skinned 部件(rs3)
   Run (@('glow', '--project', $ds, '--mg', 'FSB025_Bourgogne_1945_DeckHouse_mg.dds', '--diffuse', 'FSB025_Bourgogne_1945_DeckHouse_a.dds', '--color', $GlowColor,
-        '--glb', "$glbDir\FSB025_Bourgogne_1945_MidBack.glb", '--material', 'DeckHouse_skinned', '--mfm', 'FSB025_Bourgogne_1945_DeckHouse_skinned', '--power', "$Power", '--preview', "$prev\glow") + ($MfmSet | ForEach-Object { '--mfm-set', $_ }))
+        '--glb', "$glbDir\FSB025_Bourgogne_1945_MidBack.glb", '--material', 'DeckHouse_skinned', '--mfm', 'FSB025_Bourgogne_1945_DeckHouse_skinned', '--power', "$Power", '--preview', "$prev\glow") + (($MfmSet -split ';' | Where-Object { $_.Trim() }) | ForEach-Object { '--mfm-set', $_.Trim() }))
+  if ($RedControlPng) {
+    $hs = Get-ChildItem "$ds\assets\res_mods\PnFMods\DeepSeaBourgogne" -Recurse -Filter 'FSB025_Bourgogne_1945_Hull_skinned.mfm' | Select-Object -First 1
+    $dst = Join-Path $hs.DirectoryName 'ctrl_red_a.dds'
+    Run @('--json', 'tex', 'import', $RedControlPng, '--like', "$tex/FSB025_Bourgogne_1945_Hull_a.dds", '-o', $dst, '--quality', 'high') | Out-Null
+    $t = [IO.File]::ReadAllText($hs.FullName)
+    $t2 = [regex]::Replace($t, '(<property>\s*diffuseMap\s*<Texture>\s*)([^<\s]+)(\s*</Texture>)', { param($m) $m.Groups[1].Value + 'PnFMods/DeepSeaBourgogne/FSB510_Bourgogne/ship/ctrl_red_a.dds' + $m.Groups[3].Value })
+    if ($t2 -eq $t) { throw '没找到 Hull_skinned.mfm 的 diffuseMap' }
+    [IO.File]::WriteAllText($hs.FullName, $t2, (New-Object Text.UTF8Encoding $false))
+    Write-Host "对照: $($hs.Name) diffuseMap → ctrl_red_a.dds"
+  }
   Run @('mask', '--glb', "$glbDir\FSB025_Bourgogne_1945_MidBack.glb", '--material', 'DeckHouse_skinned', '--like', "$tex/FSB025_Bourgogne_1945_DeckHouse_a.dds", '-o', "$prev\funnel_mask.png", '--overlay', "$prev\funnel_overlay.png")
 }
 Run @('mod', 'status', $rt)

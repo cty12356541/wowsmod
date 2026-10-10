@@ -360,7 +360,7 @@ pub fn outputs_json(pj: Option<&Project>, outs: &[(PathBuf, String)]) -> Value {
 }
 
 /// 改 .mfm(仅 SDK 明文 .mfm): 切换到 emissive 着色器并设置属性
-pub fn edit_mfms(pj: Option<&Project>, mfms: &[String], power: Option<f32>, sets: &[String]) -> Result<Vec<Value>> {
+pub fn edit_mfms(pj: Option<&Project>, mfms: &[String], power: Option<f32>, sets: &[String], identifiers: bool) -> Result<Vec<Value>> {
     let mut res = Vec::new();
     for m in mfms {
         let path = if Path::new(m).is_file() {
@@ -390,7 +390,28 @@ pub fn edit_mfms(pj: Option<&Project>, mfms: &[String], power: Option<f32>, sets
             n = mfm::set_property(&n, name.trim(), ty.trim(), val.trim())?;
         }
         std::fs::write(&path, &n)?;
-        res.push(json!({"mfm": pj.map(|j| j.rel(&path)).unwrap_or_else(|| path.display().to_string()), "fx_before": old_fx, "fx_after": new_fx, "properties": mfm::properties(&n).into_iter().filter(|(_, ty, _)| ty != "Texture").map(|(a, b, c)| json!([a, b, c])).collect::<Vec<_>>()}));
+        // .visual 的材质标识决定实际着色器(只改 fx 不生效), 同步改成 SHIPMAT_EMISSIVE_PBS_*
+        let mut idents = Vec::new();
+        if identifiers {
+            if let Some(pj) = pj {
+                let fname = path.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
+                for f in pj.files()? {
+                    let fs = f.to_string_lossy().replace('\\', "/");
+                    if !fs.to_lowercase().ends_with(".visual") || fs.contains("/ModsSDK.zip/") {
+                        continue;
+                    }
+                    let Ok(vt) = std::fs::read_to_string(&f) else { continue };
+                    let (nv, ch) = mfm::set_emissive_identifiers(&vt, &fname);
+                    if !ch.is_empty() {
+                        std::fs::write(&f, nv)?;
+                        for (a, b) in ch {
+                            idents.push(json!({"visual": pj.rel(&f), "from": a, "to": b}));
+                        }
+                    }
+                }
+            }
+        }
+        res.push(json!({"mfm": pj.map(|j| j.rel(&path)).unwrap_or_else(|| path.display().to_string()), "fx_before": old_fx, "fx_after": new_fx, "visual_identifiers": idents, "properties": mfm::properties(&n).into_iter().filter(|(_, ty, _)| ty != "Texture").map(|(a, b, c)| json!([a, b, c])).collect::<Vec<_>>()}));
     }
     Ok(res)
 }

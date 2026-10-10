@@ -45,6 +45,54 @@ pub fn emissive_variant(fx: &str) -> Option<String> {
 }
 
 /// 所有 `<property> 名字 <类型> 值 </类型> </property>` 条目: (名字, 类型, 值)
+/// .visual 里材质标识 `SHIPMAT_<类型>_<部件>` 决定引擎实际用哪类着色器(M2 港口实验):
+/// 只改 .mfm 的 fx 不生效, 要把引用该 .mfm 的 `<material>` 的 identifier 从 `SHIPMAT_PBS_X` 改成
+/// `SHIPMAT_EMISSIVE_PBS_X`(官方发光皮肤在 assets.bin 中用的就是这一族标识)。
+/// 返回 (新文本, [(旧标识, 新标识)])。只改 `<mfm>` 路径以 `mfm_file_name` 结尾(不分大小写)的材质块。
+pub fn set_emissive_identifiers(visual: &str, mfm_file_name: &str) -> (String, Vec<(String, String)>) {
+    let want = mfm_file_name.to_ascii_lowercase();
+    let mut out = String::with_capacity(visual.len() + 64);
+    let mut changes = Vec::new();
+    let mut rest = visual;
+    while let Some(i) = rest.find("<material>") {
+        let (head, tail) = rest.split_at(i);
+        out.push_str(head);
+        let end = match tail.find("</material>") {
+            Some(e) => e + "</material>".len(),
+            None => {
+                out.push_str(tail);
+                return (out, changes);
+            }
+        };
+        let block = &tail[..end];
+        let refs = block
+            .find("<mfm>")
+            .and_then(|a| block[a + 5..].find("</mfm>").map(|b| block[a + 5..a + 5 + b].trim().to_ascii_lowercase()))
+            .map(|m| m.replace('\\', "/"))
+            .unwrap_or_default();
+        let hit = refs.rsplit('/').next().map(|n| n == want).unwrap_or(false);
+        let mut nb = block.to_string();
+        if hit {
+            if let Some(a) = block.find("<identifier>") {
+                if let Some(b) = block[a..].find("</identifier>") {
+                    let inner = &block[a + 12..a + b];
+                    let id = inner.trim();
+                    if let Some(part) = id.strip_prefix("SHIPMAT_PBS_") {
+                        let new_id = format!("SHIPMAT_EMISSIVE_PBS_{part}");
+                        let new_inner = inner.replacen(id, &new_id, 1);
+                        nb = format!("{}{}{}", &block[..a + 12], new_inner, &block[a + b..]);
+                        changes.push((id.to_string(), new_id));
+                    }
+                }
+            }
+        }
+        out.push_str(&nb);
+        rest = &tail[end..];
+    }
+    out.push_str(rest);
+    (out, changes)
+}
+
 pub fn properties(text: &str) -> Vec<(String, String, String)> {
     let mut v = Vec::new();
     let mut rest = text;
@@ -196,5 +244,19 @@ mod tests {
         assert_eq!(decode_compile_info(&n).unwrap(), "{}");
         assert!(is_sdk_stub(b"<FSB025_x.dd0 />"));
         assert!(!is_sdk_stub(b"DDS \x7c"));
+    }
+}
+
+#[cfg(test)]
+mod ident_tests {
+    use super::*;
+    #[test]
+    fn emissive_identifier() {
+        let v = "<a>\r\n<material>\r\n\t<identifier>\tSHIPMAT_PBS_DeckHouse_skinned\t</identifier>\r\n\t<mfm>\tPnFMods/M/s/X_DeckHouse_skinned.mfm\t</mfm>\r\n</material>\r\n<material>\r\n\t<identifier>\tSHIPMAT_PBS_Hull\t</identifier>\r\n\t<mfm>\tPnFMods/M/s/X_Hull.mfm\t</mfm>\r\n</material></a>";
+        let (n, c) = set_emissive_identifiers(v, "X_DeckHouse_skinned.mfm");
+        assert_eq!(c, vec![("SHIPMAT_PBS_DeckHouse_skinned".to_string(), "SHIPMAT_EMISSIVE_PBS_DeckHouse_skinned".to_string())]);
+        assert!(n.contains("<identifier>\tSHIPMAT_EMISSIVE_PBS_DeckHouse_skinned\t</identifier>"));
+        assert!(n.contains("SHIPMAT_PBS_Hull\t"));
+        assert_eq!(n.len(), v.len() + "EMISSIVE_".len());
     }
 }
