@@ -148,6 +148,14 @@ enum Cmd {
     },
     /// 发光: 写 _mg 的 B 通道(发光遮罩/强度)、把发光区漫反射染色、切换 .mfm 到 emissive 着色器 / emissive edit
     Glow(m2cmd::GlowArgs),
+    /// 颜色换算: 想在港口里"看到"某颜色时贴图该用什么颜色(按勃艮第港口实测标定, 近似) / port colour compensation
+    PortAlbedo {
+        /// 希望在港口截图里看到的颜色 #RRGGBB
+        screen: String,
+        /// recolor 的 --to-color 是选区平均色; 船体侧板比选区平均亮约这么多(sRGB 0-255)
+        #[arg(long, default_value_t = 10.7)]
+        mean_offset: f32,
+    },
     /// mod 项目: init / import-sdk / status
     #[command(subcommand)]
     Mod(m2cmd::ModCmd),
@@ -216,6 +224,7 @@ fn run(cli: Cli) -> Result<i32> {
         Cmd::Tex(c) => m2cmd::cmd_tex(&cli, c),
         Cmd::Mask { mask, like, size, out, overlay, project } => m2cmd::cmd_mask(&cli, mask, like.as_deref(), size.as_deref(), out, overlay.as_deref(), project),
         Cmd::Glow(a) => m2cmd::cmd_glow(&cli, a),
+        Cmd::PortAlbedo { screen, mean_offset } => m2cmd::cmd_port_albedo(&cli, screen, *mean_offset),
         Cmd::Mod(c) => m2cmd::cmd_mod(&cli, c),
         Cmd::Install { dir, dev, dry_run } => m2cmd::cmd_install(&cli, dir, *dev, *dry_run),
         Cmd::Uninstall { dir, dry_run } => m2cmd::cmd_uninstall(&cli, dir, *dry_run),

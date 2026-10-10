@@ -3,13 +3,15 @@
 #  2) deepsea   : SDK 路线, 整船深海蓝(保留细节) + 烟囱发蓝光
 # -MfmSet 'emissionAnimationMode=Int:1;animEmissionPower=Float:30'  (多个用 ; 分隔: powershell -File 不能传数组, 逗号会被当成值的一部分)
 # -KeepCamoMask   保留 _mg.B 迷彩遮罩(船体显示游戏迷彩配色, 只有遮罩外的部分显示新颜色)
+# -ScreenColor    想在港口里看到的颜色(如 #1E3F66): 用 wowsmod port-albedo 换算出贴图该用的 -Color(勃艮第港口标定, 近似)
 # -RedControlPng  对照实验: 把船体 skinned 材质(烟囱顶盖等)的漫反射指向一张新的纯色贴图, 证明 .mfm 的属性被游戏读取
-param([string]$Color = '#1E3F66', [string]$GlowColor = '#2E9BFF', [double]$Power = 4.0, [string]$DsName = 'deepsea2', [switch]$KeepCamoMask, [string]$MfmSet = '', [string]$RedControlPng = '', [switch]$Force)
+param([string]$Color = '#1E3F66', [string]$GlowColor = '#2E9BFF', [double]$Power = 4.0, [string]$DsName = 'deepsea2', [switch]$KeepCamoMask, [string]$MfmSet = '', [string]$RedControlPng = '', [string]$ScreenColor = '', [switch]$Force)
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 Set-Location (Split-Path $PSScriptRoot -Parent)
 $W = '.\target\release\wowsmod.exe'
 $root = 'out\m2_projects'
+if ($ScreenColor) { $pa = & $W --json port-albedo $ScreenColor | ConvertFrom-Json; $Color = $pa.to_color; Write-Host "港口观感 $ScreenColor → 贴图 --to-color $Color" }
 $tex = 'content/gameplay/france/ship/battleship/textures'
 $glbDir = 'out\accept_export\bourgogne_lod0'
 function Run([string[]]$a) { & $W @a; if ($LASTEXITCODE -ne 0) { throw "wowsmod $($a -join ' ') 失败($LASTEXITCODE)" } }
