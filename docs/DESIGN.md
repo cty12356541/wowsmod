@@ -1,0 +1,125 @@
+# wowsmod 设计说明与格式发现(M1)
+
+本文档记录 M1 实现中依据的格式事实。每一条都注明证据来源; 没有验证过的写"不确定"。
+客户端版本: 莱服 Мир кораблей 26.10.0.0.8867689(`D:\Korabli`, bin\8867689)。
+
+## 1. 架构
+
+```
+crates/wowsmod-formats   纯库: idx / pkg / Oodle 容器 / geometry / assets.bin / GameParams / GLB / 健康检查
+crates/wowsmod           CLI(clap): doctor / find / extract / export / check / geom
+scripts/*.ps1            可重跑的验收脚本(输出到 out\, 不入库)
+testdata/                集成测试样本(不入库, scripts/fetch_samples.ps1 生成)
+```
+
+发布构建: MSVC 工具链 + `+crt-static`(`.cargo/config.toml`), `dumpbin /dependents` 只依赖
+kernel32/ntdll/advapi32/bcryptprimitives/api-ms-win-core-synch, 无 vcruntime/ucrt, 可单文件分发。
+
+## 2. idx / pkg
+
+- idx V40: 225 个 idx, 342,823 个文件条目(doctor 实测)。解析器移植自 wows-toolkit(MIT, landaire), 见 `idx.rs` 文件头署名。
+- 每个条目的 `compression_info`(cinfo) 只有两种取值(全量统计):
+  - `0x6` 且 `size == unpacked_size`: 原样存储(218,404 个);
+  - `0x7_0000_0006`: 莱服 Oodle 容器(124,419 个)。
+  - 旧版 deflate(size != unpacked 且非 7)在 26.10 里没有出现, 保留 miniz_oxide 兜底。
+- idx 里的 crc32 是**解压后**数据的 crc32(fakegame 125/125, 实机验收全部一致)。extract 默认校验。
+
+### 2.1 莱服 Oodle 容器(M1 修正)
+
+```
++0x00 u64 header_len = 0x30 + 4*nb
++0x08 u32 compressor   (Oodle 枚举: 8 Kraken, 9 Mermaid, 11 Selkie, 12 Hydra, 13 Leviathan)
++0x0C u32 = 1          (含义不确定)
++0x10 u64 unpacked_size
++0x18 u64 packed_size
++0x20 u32 block_count  (= ceil(unpacked / block_size))
++0x24 u32 block_size   (0x40000)
++0x28 .. 0x37          (未知, 观察到为 0; 不确定)
++0x38 nb × u32         每块压缩大小(之和 = packed_size)
++0x38+4*nb             压缩流, 条目总长 = 0x38 + 4*nb + packed_size
+```
+
+- **每块独立解码**到 `out[i*block_size ..]`。连续解码在 3 块以上时会失败(M0 只处理了单块条目)。
+- 解析时做全部一致性校验(块数、header_len、块大小之和、条目长度), 不符即报错, 不猜。
+- 替换点: `compression::OodleBackend` trait + `set_oodle_backend()`。默认后端是 crate `oozextract 0.5.5`
+  (Cargo.toml 声明 MIT, 但仓库无 LICENSE 文件、且其算法来源于 ooz 的逆向实现, **许可证状态不确定**),
+  因此做成可关闭的 cargo feature `oozextract`; 若将来需要替换为官方 Oodle SDK 或其他实现, 只需实现该 trait。
+
+### 2.2 纹理二次压缩(M1 验收中发现)
+
+见第 7 节。
+
+## 3. geometry
+
+布局见 `D:\WoWSModding\m0\...\MODELS.md`(M0)。M1 新增结论:
+
+- **往返逐字节一致**(18 个样本, 含 6 个带退化三角形的文件, 18/18): 解析→序列化, 以及
+  解码→重新编码→序列化 均与原文件一致。
+  - 顶点编码: meshopt-rs 自带编码器与游戏输出不一致; 移植 meshoptimizer 1.3 的 v0 顶点编码器
+    (含 "favor consistent bit selection" 平局规则)后逐字节一致(`vertex_codec.rs`, MIT 署名)。
+  - 索引编码 v1(meshopt-rs `experimental`): 编码器按 FIFO 状态轮换三角形顶点; 游戏数据解码出的顺序是编码器的不动点,
+    但退化三角形(如 219,219,220)再编码会被再次轮换 → 对不一致的三角形依次尝试另两种轮换作为输入, 直到解码 == 原顺序。
+  - 对任意新网格(非编码器产出), 某些三角形三种轮换都无法原样复现: 接受"轮换等价"(绕序不变), 并通过
+    `encode_indices_report` 报告个数。这种情况只会出现在 M2 导回新网格时, 不影响游戏原始数据。
+- 顶点格式步长(26.10): `xyznuvtpc`=24, `xyznuvrpc`=24, `xyznuvpc`=20, `xyznuviiiwwtpc`=32(单元测试)。
+- **法线是无符号 UNORM8**: `n = b/127.5 − 1`。平均长度 0.99; 按 wows-toolkit 的有符号 int8 解释得到 1.13–1.37(错误)。
+- **坐标/绕序**: 导出到 glTF 时 Z 取反, 同时三角形改为 (a, c, b)。证据: 不反转时 "面法线 · 顶点法线" 同向率 0.01%,
+  反转后 99.99%。wows-toolkit 的说法与此相反(错误)。
+- 少数模型整体绕序与法线相反(例如副炮 FGS024/FGS052: 同向率 0%, 有向体积为负, 而顶点法线大多朝外)。
+  原因不确定(可能依赖引擎侧的镜像变换或双面材质)。导出时**逐 primitive** 检测, 多数相反则整体翻转该 primitive,
+  并在 glTF `extras.winding_flipped = true` 记录, 供 M2 导回时还原; `--keep-winding` 可关闭。
+
+## 4. 配对(为什么 M0 的 GLB 破面)
+
+一个 geometry 有多个 vertices/indices mapping, **不能按数组下标两两配对**。正确做法:
+
+- mapping id = `murmur3_32("<Node>Shape.vertices" / "<Node>Shape.indices", seed 0)`。
+- 来源 1: SDK 文本 `.visual` 的 `<renderSet>`(node 名 → murmur3)。
+- 来源 2: `content/assets.bin`(位于 system_data_0001.pkg)的 VisualPrototype:
+  blob 2, 记录 0x40 字节, geometry selfId @+0x20, renderSet 数 @+0x30, 相对偏移 @+0x38;
+  RenderSet 0x50 字节: +0 vmap id, +4 imap id, +0x20 mfm selfId, +0x30 bboxMin, +0x40 bboxMax(f32×3)。
+- 每个 geometry 被多个 visual 引用(主 visual + lods/*_lod1..3; 整船根 geometry 只被 `_Full_lod4` 引用,
+  其主 visual 没有渲染集)。`--lod` 选择; 主 visual 没有渲染集时自动改用带渲染集的 visual 并给出警告。
+- **独立校验**: assets.bin 里每个渲染集自带包围盒, 与"被索引引用的顶点"的包围盒逐个比较
+  (相对误差 1e-3)。正确配对时全部一致(黎塞留 43/43、勃艮第见验收报告), 这是与健康检查无关的第二条证据。
+- 交叉验证: 勃艮第 SDK `.visual`(M0 实验中游戏生成)与 assets.bin 两条来源得到的 (vmap, imap, 材质) 集合一致,
+  见 `scripts/accept_visual_xcheck.ps1`。
+- 兜底: 都没有时用启发式(按索引最大值与顶点数匹配), 结果标记 ambiguous, `ok=false`。
+
+## 5. 健康检查(取代 tools/glb_check.py)
+
+- 越界(OOB): 索引 ≥ 该 primitive 顶点数。
+- 长边三角形(仅参考): 最长边 > 0.5 × primitive 包围盒 3D 对角线。真实游戏几何里本来就有(甲板长条、舭龙骨、钢索、整块甲板四边形)。
+- **尖刺**: 长边三角形, 且其"面法线 · 顶点法线之和"的符号与该 primitive 多数三角形相反,
+  且面法线与顶点法线**不**严格共线(|cos| < 0.95)。面积为 0 的三角形不计。
+  - 以多数为基准: 兼容整体反绕序的模型(副炮)。
+  - 共线但反向的长三角形只计入 `backface_long_triangles`(参考): 它位于顶点法线描述的平面内, 只是绕序反了;
+    FSB017 MidBack 的 C002_Razlom 贴花里有 1 个这样的原始三角形。
+  - 没有法线时退化为 glb_check 规则: 长边三角形占比 > 0.5% 视为尖刺。
+- 旧 glb_check.py 的缺陷: 用"最大轴长"而不是对角线, 且只检查 2 条边。
+- 灵敏度: naive(数组下标)配对时, 黎塞留 Bow 47,672 个越界三角形、89 个尖刺; 18 样本里所有多 mapping 文件都被判为不通过。
+
+## 6. GameParams(船只检索)
+
+- `content/GameParams_py3.data`: 整体字节反转 → zlib → Python pickle 协议 2。
+- 自写最小 pickle 读取器(`pickle.rs`, 不执行代码; 26.10 用到的操作码全部实现, 未知操作码报错)。
+- 顶层 `(dict 参数ID → GPData, set)`; 舰船 `typeinfo.type == "Ship"`, 共 1165 条。
+  船体模型取自 `*_Hull` 模块的 `model`; 其他挂点(HP_*)的 `model` 为炮塔/防空/雷达等。
+- 与 Python `pickle` 解出的结果逐条对比: 1165/1165 条的 index、level、船体模型、其他模型完全一致。
+- 例: 勃艮第 = 参数 `PFSB510_Bourgogne`, 船体模型 `FSB025_Bourgogne_1945`(不是 FSB510 目录); 黎塞留 = `PFSB108_Richelieu`, `FSB003_Richelieu_1944`。
+- 本地化名来自 `bin\<build>\res\texts\ru\LC_MESSAGES\global.mo` 的 `IDS_<参数代号去掉前缀 P>`。
+- "整船文件集" = 所有模型目录下的文件 + 同级 `textures/` 中以模型代号开头的贴图(例如 `battleship/textures/FSB025_*`)。
+  这是按命名约定的归集, 不是从材质引用推出的, 可能漏掉共享贴图(例如 common/ 下的通用材质), 不确定。
+
+## 7. 纹理: .dd0–.dd2 与二次压缩
+
+- M0 实验结论(保持): 改贴图必须连同 `.dd0/.dd1/.dd2` 一起提供(游戏按需加载高分辨率 mip 链), 只改 `.dds` 不生效或混用。
+- M1 新发现: 部分 BC7 法线贴图(`*_n.dd0/dd1` 等)在 DDS 头 `dwReserved1[2]`(文件偏移 40)= 1, 像素数据是二次压缩的
+  (例如 1024×1024 BC7 应为 1,048,576 字节, 实际 824,520 字节)。见 M1_REPORT 的 extract 一节。
+
+## 8. M4 需要处理的问题(TODO)
+
+1. **SDK 占位文件崩溃**: 26.10 客户端 `extractSources` 导出的 .geometry/.dds/.splash 全是 35–44 字节的占位 XML,
+   用占位文件 `registerShipMod` 会导致客户端崩溃(M0 exp2a)。M4 打包时必须用 pkg 中的真实文件填充(参考 m0\ingame\tools\fill_stubs.py)。
+2. **贴图需要 .dd0–.dd2**: 替换贴图必须同时生成 .dds + .dd0/.dd1/.dd2(以及 dwReserved1 标志与二次压缩的处理, 见第 7 节)。
+3. 导回 geometry 时还原 `extras.winding_flipped` 的 primitive 绕序, 并重新计算 assets.bin 中渲染集包围盒是否需要同步(不确定)。
