@@ -14,6 +14,7 @@
 //! - [`murmur3`]   : MurmurHash3 x86_32
 //! - [`mo`]        : gettext .mo 读取(船名本地化检索)
 //! - [`bc7prep`]   : 贴图 BC7Prep(Oodle Texture 重排)逆变换 → 标准 BC7
+//! - [`texture`]   : BC1–5/BC7 解码/编码、mip 生成、PNG 读写
 //! - [`dds`]       : DDS 头解析/写出 + 莱服 .dd0/.dd1/.dd2 分卷拆分与合并
 //!
 //! 部分实现参考 landaire/wows-toolkit (MIT, Copyright 2026 Lander Brandt),
@@ -36,6 +37,7 @@ pub mod murmur3;
 pub mod pairing;
 pub mod pickle;
 pub mod pkg;
+pub mod texture;
 pub mod util;
 pub mod vertex;
 pub mod vertex_codec;
