@@ -32,8 +32,16 @@ pub fn set_fx(text: &str, new_fx: &str) -> Result<String> {
 /// 着色器 fx 路径 → 对应的发光(emissive)变体。已是发光变体则原样返回。
 /// 依据: 客户端 shaders/std_effects/ 下存在 PBS_ship_emissive.fx 与 PBS_ship_emissive_skinned.fx 的编译产物(.fxo)。
 pub fn emissive_variant(fx: &str) -> Option<String> {
-    if fx.contains("PBS_ship_emissive") {
+    if fx.contains("PBS_ship_emissive") || fx.contains("ship_emissive_material") {
         return Some(fx.to_string());
+    }
+    // 新版材质系统(炮塔/指挥仪等常用): shaders/materials/pbs/ship_material[_skinned].fx,
+    // 客户端带 ship_emissive_material[_skinned].fxo(E2E 勃艮第炮塔实测)。
+    if let Some(p) = fx.strip_suffix("ship_material_skinned.fx") {
+        return Some(format!("{p}ship_emissive_material_skinned.fx"));
+    }
+    if let Some(p) = fx.strip_suffix("ship_material.fx") {
+        return Some(format!("{p}ship_emissive_material.fx"));
     }
     if let Some(p) = fx.strip_suffix("PBS_ship_skinned.fx") {
         return Some(format!("{p}PBS_ship_emissive_skinned.fx"));
@@ -77,8 +85,10 @@ pub fn set_emissive_identifiers(visual: &str, mfm_file_name: &str) -> (String, V
                 if let Some(b) = block[a..].find("</identifier>") {
                     let inner = &block[a + 12..a + b];
                     let id = inner.trim();
-                    if let Some(part) = id.strip_prefix("SHIPMAT_PBS_") {
-                        let new_id = format!("SHIPMAT_EMISSIVE_PBS_{part}");
+                    // 炮塔等 visual 用 TL2_ 前缀(TL2_SHIPMAT_PBS_Gun_skinned -> TL2_SHIPMAT_EMISSIVE_PBS_Gun_skinned, assets.bin 中存在)
+                    let (pre, rest_id) = match id.strip_prefix("TL2_") { Some(r) => ("TL2_", r), None => ("", id) };
+                    if let Some(part) = rest_id.strip_prefix("SHIPMAT_PBS_") {
+                        let new_id = format!("{pre}SHIPMAT_EMISSIVE_PBS_{part}");
                         let new_inner = inner.replacen(id, &new_id, 1);
                         nb = format!("{}{}{}", &block[..a + 12], new_inner, &block[a + b..]);
                         changes.push((id.to_string(), new_id));
@@ -222,6 +232,12 @@ mod tests {
         let e = emissive_variant(&fx(T).unwrap()).unwrap();
         assert_eq!(e, "shaders/std_effects/PBS_ship_emissive_skinned.fx");
         assert_eq!(emissive_variant("shaders/std_effects/PBS_ship.fx").unwrap(), "shaders/std_effects/PBS_ship_emissive.fx");
+        assert_eq!(emissive_variant("shaders/materials/pbs/ship_material_skinned.fx").unwrap(), "shaders/materials/pbs/ship_emissive_material_skinned.fx");
+        assert_eq!(emissive_variant("shaders/materials/pbs/ship_material.fx").unwrap(), "shaders/materials/pbs/ship_emissive_material.fx");
+        let v = "<material>\n<identifier>\tTL2_SHIPMAT_PBS_Gun_skinned\t</identifier>\n<mfm>\tx/FGM049_skinned.mfm\t</mfm>\n</material>";
+        let (n, c) = set_emissive_identifiers(v, "FGM049_skinned.mfm");
+        assert_eq!(c[0].1, "TL2_SHIPMAT_EMISSIVE_PBS_Gun_skinned");
+        assert!(n.contains("TL2_SHIPMAT_EMISSIVE_PBS_Gun_skinned"));
         let t = set_fx(T, &e).unwrap();
         assert_eq!(fx(&t).unwrap(), e);
         let t = set_property(&t, "emissivePower", "Float", "4.0000").unwrap();
