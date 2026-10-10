@@ -67,7 +67,12 @@ pub fn render_pngs(cli: &Cli, project: &std::path::Path, queries: &[(String, Str
     if cdp::find_browser(browser).is_none() {
         bail!("browser_not_found");
     }
+    let dbg = std::env::var("WOWSMOD_CDP_DEBUG").is_ok();
+    let t0 = std::time::Instant::now();
+    macro_rules! step { ($($a:tt)*) => { if dbg { eprintln!("[cdp {:.1}s] {}", t0.elapsed().as_secs_f32(), format!($($a)*)); } } }
+    step!("open state");
     let st = Arc::new(state::PreviewState::open(cli, project)?);
+    step!("state ok");
     let (port, server) = http::bind(0)?;
     let url = format!("http://127.0.0.1:{port}/");
     let st2 = Arc::clone(&st);
@@ -81,6 +86,7 @@ pub fn render_pngs(cli: &Cli, project: &std::path::Path, queries: &[(String, Str
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
+    step!("serve {url}");
     let r = match cdp::render_session(&url, queries, browser, size) {
         Ok(v) => Ok(v),
         Err(e) => {
@@ -94,13 +100,27 @@ pub fn render_pngs(cli: &Cli, project: &std::path::Path, queries: &[(String, Str
             }
         }
     };
+    step!("session done ok={}", r.is_ok());
     st.shutdown();
-    // 多次唤醒 accept 循环, 避免 join 卡死
-    for _ in 0..5 {
-        let _ = std::net::TcpStream::connect(format!("127.0.0.1:{port}"));
-        std::thread::sleep(std::time::Duration::from_millis(20));
+    // 唤醒 accept 循环: tiny_http 只在收到完整 HTTP 请求后才从 incoming_requests 返回,
+    // 光 connect 不发请求会让 join 永久卡住(E2E 实测: CDP 出图 12s 完成后卡死)。所以发真实请求。
+    for _ in 0..3 {
+        if let Ok(mut s) = std::net::TcpStream::connect(format!("127.0.0.1:{port}")) {
+            use std::io::Write;
+            let _ = s.set_write_timeout(Some(std::time::Duration::from_millis(500)));
+            let _ = s.write_all(b"GET /__wake HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(30));
     }
-    let _ = handle.join();
+    step!("joining server");
+    // 兜底: 最多等 3s, 仍未退出就放弃 join(线程随进程结束)
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = handle.join();
+        let _ = tx.send(());
+    });
+    let joined = rx.recv_timeout(std::time::Duration::from_secs(3)).is_ok();
+    step!("joined={joined}");
     r
 }
 

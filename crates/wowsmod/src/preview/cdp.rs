@@ -287,7 +287,9 @@ pub fn render_session(base_url: &str, queries: &[(String, String)], browser: Opt
     let exe = find_browser(browser).ok_or_else(|| anyhow!("browser_not_found"))?;
     let mut attempt_sw = false;
     loop {
+        if std::env::var("WOWSMOD_CDP_DEBUG").is_ok() { eprintln!("[cdp] launch {} sw={attempt_sw}", exe.display()); }
         let b = launch(&exe, attempt_sw)?;
+        if std::env::var("WOWSMOD_CDP_DEBUG").is_ok() { eprintln!("[cdp] ws {}", b.ws_url); }
         let result = (|| -> Result<Vec<(Vec<u8>, Value)>> {
             let mut c = Cdp::new(&b.ws_url)?;
             let tid = c.call("Target.createTarget", json!({"url": "about:blank"}), false, 30)?["targetId"].as_str().unwrap().to_string();
@@ -298,7 +300,9 @@ pub fn render_session(base_url: &str, queries: &[(String, String)], browser: Opt
             c.call("Emulation.setDeviceMetricsOverride", json!({"width": w, "height": h, "deviceScaleFactor": 1, "mobile": false}), true, 30)?;
             let url = format!("{}{}", base_url.trim_end_matches('/'), "/?render=wait");
             c.call("Page.navigate", json!({"url": url}), true, 60)?;
+            if std::env::var("WOWSMOD_CDP_DEBUG").is_ok() { eprintln!("[cdp] navigated, waiting WM_RENDER_READY"); }
             c.wait_console("WM_RENDER_READY", 60)?;
+            if std::env::var("WOWSMOD_CDP_DEBUG").is_ok() { eprintln!("[cdp] ready"); }
             let mut out = Vec::new();
             for (label, q) in queries {
                 let q2 = if q.contains("data=") { q.clone() } else if q.is_empty() { "data=true".into() } else { format!("{q}&data=true") };
