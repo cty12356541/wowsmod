@@ -157,6 +157,7 @@ pub fn agents_md(exe: &str) -> String {
 ## 规则
 - 只用 wowsmod 改,不要手动改游戏目录。所有修改写在项目目录里;只有 `install` 会写游戏,`uninstall` 可以完全还原。
 - 说明按需读取:`wowsmod help <主题>`。不要一次读完所有主题。
+- Oodle:默认构建不含 oozextract(GPL 移植风险,见 LICENSE_REPORT.md)。开发需要解压 pkg 时用 `cargo build --release --features oozextract`;发布优先本机 Oodle/用户 DLL,勿分发游戏 DLL。
 - 命令都加 `--json`,结果里的 `next` 是建议的下一步;出错信息也会给出下一步。
 - 不确定的事情要说“不确定”,不要猜路径或参数。用 `--dry-run` 或 `render` 先验证。
 - 游戏运行时不能 install。验证只在港口进行,不进战斗。

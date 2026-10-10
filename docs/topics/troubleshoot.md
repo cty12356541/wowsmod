@@ -12,3 +12,9 @@
 | 不确定某件事 | 不要猜,先用 `--dry-run` 或 `render` 验证,并如实说明不确定 |
 
 日志位置:游戏 `profile/python.log`;wowsmod 的每次编辑记录在项目的 `edits/` 下。
+
+
+## Oodle / 许可证
+- `doctor` 显示 Oodle 后端为「未编译」:默认未启用 `oozextract`(见 LICENSE_REPORT.md)。开发:`cargo build --release --features oozextract`。
+- 发布给用户的 exe 不要默认静态链接 oozextract;优先本机游戏已有的 Oodle 或用户自备 `oo2core*.dll`。
+- 不要把从游戏目录复制的 DLL 打进 .wsmod 包。

@@ -6,9 +6,10 @@ edition.workspace = true
 license.workspace = true
 
 [features]
-default = ["oozextract"]
-# Oodle 解压后端。oozextract 的许可证状态待定(见 docs/DESIGN.md 与 README 的"许可证"节),
-# 因此做成可关闭的 feature: `--no-default-features` 构建时 Oodle 条目会报"未编译 Oodle 后端"。
+default = []
+# Oodle 解压后端。默认关闭: oozextract 为 GPL(powzix/ooz) 的 Rust 移植(见 LICENSE_REPORT.md)。
+# 发布构建请用运行时后端或 `--features oozextract`(仅开发自担风险)。
+# 无任何 Oodle feature 时, Oodle 条目会报"未编译 Oodle 后端"。
 # 替换点: src/compression/mod.rs 中的 trait OodleBackend。
 oozextract = ["dep:oozextract"]
 

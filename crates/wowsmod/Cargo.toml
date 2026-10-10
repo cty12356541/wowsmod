@@ -10,8 +10,9 @@ name = "wowsmod"
 path = "src/main.rs"
 
 [features]
-default = ["oozextract"]
+default = []
 oozextract = ["wowsmod-formats/oozextract"]
+# 开发/对照用; 默认不启用。正式发布见 LICENSE_REPORT.md
 
 [dependencies]
 tiny_http = "0.12"
