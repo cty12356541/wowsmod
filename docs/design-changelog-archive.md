@@ -30,3 +30,5 @@
 | 10-11 r5 | 5 | 大面积微光只能靠 intensity 换算, 不直观 | 工具缺能力 | `glow --b-max` / `model import --b-max`: 满值处 B 上限 | 单测: b_max 40 → 满值 40、半值 20 |
 | 10-11 r5 | 1/2 | 翼+光环样例被评丑; 主 skill 混入了审美判断 | 分析不足(没有风格依据就加装饰) | 主 skill 只留通用底线(比例/不穿模/远近昼夜可读/发光适度); 审美放可选风格包 `styles/<包>/STYLE.md`(配色/密度/发光/模型尺度/自评/正反例, 例图只在本机); 设计书 §2 加「采用的风格包」; 样例包 anime-flat-itasha、cyber-neon | 两个包的数值都来自实测(流萤拆解、r2 覆盖率) |
 | 10-11 r5 | 3 | 会动的物件(环绕剑/自转标志)做不了 | 工具缺能力 | `model animate`(spin/orbit/float→.seq/.ssm/.model 挂钩) + `model anim-sample`; 装配/工作台按 .seq 采样播放 | 解析参考 seq 正常; 环绕半径/角速度采样正确; 港口待 Windows |
+
+| 10-11 r6 | 全部 | 说明是平铺的 24 个主题, 入口要一次看全表; 模式与层的内容重复; 没有复盘与审美评审环节 | 引导缺失 | 重组为技能树(root→workflow 模式/层→子主题; ref 命令参考; styles 可选子树), 每节点头部写上级/下级+何时加载; `wowsmod help --tree/--children/--check`, MCP 同步; 校验无孤儿/无死链/≤2000 字; 新增 workflow.review(陌生 AI 视角复盘+审美评审+追溯到节点)、map.preview(三方向粗样做法)、verify.port | 41 节点校验通过, 最大节点 1936 字 |

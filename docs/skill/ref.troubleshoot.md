@@ -23,5 +23,6 @@
 
 ## Windows PowerShell 与 --json
 PowerShell 管道会按 OEM 代码页弄坏 UTF-8 JSON。不要 `wowsmod --json ... | Out-File`。
-改用 `python e2e/scripts/wm.py <out.json|-> <参数...>`(设好 `WOWSMOD_HOME`, 按 UTF-8 收 stdout)。
-`wm.py` 的 cwd 跟随调用者, 相对路径的 `-o`/`--mesh` 才落在预期目录。
+用全局 `--json-out <文件>`(隐含 `--json`, 结果按 UTF-8 写文件, 失败也写错误 JSON)。以 `-` 开头的参数值写成 `--box=-2,…`。
+| 换色后出现粉/怪色斑 | 在已换过色的层上再 recolor 时用 `--chroma-detail 0`(原色斑会被放大成杂色) |
+| `--glb --box` 色带没出现 | `--exclude-hue` 把上一步刷的浅黄/米白也排除了: 收窄成只排木甲板(如 5:45) |

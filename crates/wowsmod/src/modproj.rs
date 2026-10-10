@@ -62,10 +62,10 @@ pub struct ModMeta {
     #[serde(default = "default_fmt")]
     pub format_version: u32,
     /// 真实舰长(米, 可选): 给了就在导入人物/道具时把 visual 单位换算成米
-    #[serde(default, skip_serializing_if = "is_zero_f32")]
-    pub ship_length_m: f32,
+    #[serde(default, skip_serializing_if = "is_zero_f64")]
+    pub ship_length_m: f64,
 }
-fn is_zero_f32(x: &f32) -> bool {
+fn is_zero_f64(x: &f64) -> bool {
     *x == 0.0
 }
 fn default_version() -> String {

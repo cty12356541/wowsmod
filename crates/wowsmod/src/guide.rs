@@ -400,7 +400,7 @@ pub fn after_help(key: &str) -> Option<String> {
         "find" | "extract" | "export" | "geom" | "check" => "相关主题: wowsmod help formats。改模请建项目: wowsmod help project",
         "mod" | "mod init" | "mod import-sdk" | "mod status" => "下一步: init → import-sdk → 编辑 → render → install。详见 wowsmod help project",
         "tex" | "tex recolor" | "tex channel" | "tex export" | "tex import" | "tex info" | "tex rewrite" | "port-albedo" | "mask" => "下一步: 编辑后 wowsmod render <项目> --compare。详见 wowsmod help recolor",
-        "glow" => "下一步: wowsmod render <项目> --compare。详见 wowsmod help glow(含勃艮第烟囱实测参数)",
+        "glow" => "下一步: wowsmod render <项目> --compare。详见 wowsmod help ref.glow",
         "model" | "assemble" => "下一步: 编辑后 wowsmod render <项目> --compare --view all; 撤销 model undo。详见 wowsmod help model / blender",
         "render" => "下一步: 满意则 wowsmod install <项目>。要连续出图先 wowsmod render --warm <项目> 预热(之后每张约 1 秒)。详见 wowsmod help render",
         "install" | "uninstall" | "installed" | "conflicts" => "下一步: install 后重启游戏进港查看; 撤销 wowsmod uninstall。详见 wowsmod help install",

@@ -13,3 +13,4 @@ wowsmod install <包.wsmod>                 # 校验每个文件的 sha256 后�
   - 任何可执行文件或脚本;
   - `.install/` 与撤销数据。
 - `--full` 会把补齐后的原版资源也打进包,仅供个人备份,不要分发。
+- **受限素材硬拦截**: mod.toml 有 `[license] no_redistribute = true`(导入受限模型时自动写入)时 `pack` 报错退出并列出原因; 只在本机 `install`。确需自用备份: `pack --allow-restricted`(README 写明【受限】, 不得公开分发)。去掉受限素材后才可删 `[license]` 段。

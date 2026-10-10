@@ -8,7 +8,7 @@
 
 ## 新建 SDK 项目
 ```
-wowsmod mod init <目录> --name <英文名> --ship FSB510_Bourgogne --mode sdk
+wowsmod mod init <目录> --name <英文名> --ship <SDK 船名> --mode sdk
 wowsmod mod import-sdk <目录>        # 本机导入过这条船时, 素材位置会自动沿用
 wowsmod mod status <目录>
 ```

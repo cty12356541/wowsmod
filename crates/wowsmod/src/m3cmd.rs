@@ -1067,7 +1067,7 @@ fn hull_length_units(root: &Path) -> Option<f64> {
 fn units_hint(root: &Path, p: &Project, rec: &Value) -> Value {
     let Some(len) = hull_length_units(root) else { return json!({"note": "算不出船体长度"}) };
     let h = rec["placement"]["fit_height"]["target_height"].as_f64().or_else(|| rec["geometry"]["fit_height"]["target_height"].as_f64());
-    let real = p.cfg.meta.ship_length_m as f64;
+    let real = p.cfg.meta.ship_length_m;
     let mut v = json!({"hull_length_units": (len * 1000.0).round() / 1000.0, "how": "米/单位 = 真实舰长(m) ÷ hull_length_units; 在 mod.toml [mod] ship_length_m 写上舰长即可自动换算"});
     if let Some(h) = h {
         v["object_height_units"] = json!(h);

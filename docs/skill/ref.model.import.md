@@ -10,5 +10,7 @@
 - 多材质导入: GLB 自带材质且没给 `--texture/--color` 时自动按材质拆(`--materials single` 关掉)。漫反射贴图×系数、`doubleSided`、alphaMode MASK(→`alphaTestEnable`+`alphaReference`=cutoff×255; BLEND 按阈值 128)、自发光(→`_mg` B 遮罩)都带上; 内容相同的贴图只写一份(`_shared*`), 支持 PNG/JPEG/BMP/TGA/DDS。
 - `--glow-mat <正则>` 指定材质整块发光, `--b-max 25–50` 大面积微光; `--double-sided` / `--alpha-test N` 对全部材质生效。
 - PMX: 骨骼/表情/物理/描边/toon 不转; 需要摆姿势时可选 Blender+mmd_tools(GPL, 自行安装): `scripts/model/pmx_to_glb_blender.py`。PMX 模型多有使用规约, 先确认授权。
+- 尺寸: 结果 `units` = 船体长(单位)、物件高(单位/占船长%)、写了 `ship_length_m` 时再给米。人物先按「想在港口看到的米数」反推 `--height`。
+- 许可: `pmx2glb`/`import` 会扫描模型目录(及上级)的使用规则(txt/md/html, UTF-8/GBK), 命中「禁止二次配布/再分发」等写 `<glb>.license.json` 并给项目打 `[license] no_redistribute`; `pack` 默认拒绝, 本地 `install` 不受影响。
 - 默认写进全部 LOD; 碰撞/装甲不变; 撤销 `model undo`。
-- 结果 JSON: `materials[]`、`textures_written`/`texture_reuses`、`warnings`、`placement.fit_height`; 先看 warnings。
+- 结果 JSON: `materials[]`、`warnings`、`placement.fit_height`、`units`、`license`; 先看 warnings。
