@@ -14,6 +14,7 @@
 //! - [`murmur3`]   : MurmurHash3 x86_32
 //! - [`mo`]        : gettext .mo 读取(船名本地化检索)
 //! - [`bc7prep`]   : 贴图 BC7Prep(Oodle Texture 重排)逆变换 → 标准 BC7
+//! - [`dds`]       : DDS 头解析/写出 + 莱服 .dd0/.dd1/.dd2 分卷拆分与合并
 //!
 //! 部分实现参考 landaire/wows-toolkit (MIT, Copyright 2026 Lander Brandt),
 //! 具体文件头部有注明。
@@ -21,6 +22,7 @@
 pub mod assets_bin;
 pub mod bc7prep;
 pub mod compression;
+pub mod dds;
 pub mod error;
 pub mod export;
 pub mod gameparams;
