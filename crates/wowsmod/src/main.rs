@@ -3,6 +3,7 @@
 //! 子命令: doctor / find / extract / export / check / geom / tex / mask / glow / mod / install / uninstall / assemble / model
 //! 所有子命令支持 `--json`(机器可读输出, 供 AI 代理调用)。
 mod ai;
+mod design;
 mod game;
 mod guide;
 mod m2cmd;
@@ -154,6 +155,10 @@ enum Cmd {
         #[arg(long)]
         project: Option<PathBuf>,
     },
+    /// 结构线稿遮罩: 按几何折边/部件轮廓/世界等值线/圆环/法线板缝在 UV 里生成贴合船体的线(复刻/设计用) / structure-fitted line mask
+    Lineart(design::LineartArgs),
+    /// 把同机位的设计图/参考图投影进材质 UV, 可按颜色抠遮罩 / project a reference/design image into UV
+    BakeRef(design::BakeRefArgs),
     /// 发光: 写 _mg 的 B 通道(发光遮罩/强度)、把发光区漫反射染色、切换 .mfm 到 emissive 着色器 / emissive edit
     Glow(m2cmd::GlowArgs),
     /// 颜色换算: 想在港口里"看到"某颜色时贴图该用什么颜色(按勃艮第港口实测标定, 近似) / port colour compensation
@@ -281,6 +286,8 @@ fn run(cli: Cli) -> Result<i32> {
         Cmd::Migrate(a) => m4cmd::cmd_migrate(&cli, a),
         Cmd::Pack(a) => m4cmd::cmd_pack(&cli, a),
         Cmd::Render(a) => render::cmd_render(&cli, a),
+        Cmd::Lineart(a) => design::cmd_lineart(&cli, a),
+        Cmd::BakeRef(a) => design::cmd_bake_ref(&cli, a),
         Cmd::Preview(a) => preview::cmd_preview(&cli, a),
         Cmd::Status(a) => ai::cmd_status(&cli, a),
         Cmd::Help { topic, search } => ai::cmd_help(&cli, topic.as_deref(), search.as_deref()),

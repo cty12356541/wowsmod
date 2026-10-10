@@ -80,20 +80,26 @@ pub struct RenderArgs {
     /// 对比基线
     #[arg(long)]
     pub base: Option<String>,
+    /// 软件引擎自定义机位: 水平角(度, 0=右舷正侧, 正值转向船艏方向; quarter≈39)。与 --pitch 一起覆盖 --view
+    #[arg(long)]
+    pub yaw: Option<f32>,
+    /// 软件引擎自定义机位: 俯角(度, 0=水平, quarter≈22)
+    #[arg(long)]
+    pub pitch: Option<f32>,
 }
 
 // ---------- 小向量 ----------
-type V3 = [f32; 3];
-fn sub(a: V3, b: V3) -> V3 {
+pub(crate) type V3 = [f32; 3];
+pub(crate) fn sub(a: V3, b: V3) -> V3 {
     [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
 }
-fn dot(a: V3, b: V3) -> f32 {
+pub(crate) fn dot(a: V3, b: V3) -> f32 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
-fn cross(a: V3, b: V3) -> V3 {
+pub(crate) fn cross(a: V3, b: V3) -> V3 {
     [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
 }
-fn norm(a: V3) -> V3 {
+pub(crate) fn norm(a: V3) -> V3 {
     let l = dot(a, a).sqrt();
     if l > 1e-12 {
         [a[0] / l, a[1] / l, a[2] / l]
@@ -101,8 +107,8 @@ fn norm(a: V3) -> V3 {
         [0.0, 1.0, 0.0]
     }
 }
-type M4 = [f32; 16]; // 列主序(glTF)
-const IDENT: M4 = [1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.];
+pub(crate) type M4 = [f32; 16]; // 列主序(glTF)
+pub(crate) const IDENT: M4 = [1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.];
 fn mul(a: &M4, b: &M4) -> M4 {
     let mut r = [0f32; 16];
     for c in 0..4 {
@@ -112,7 +118,7 @@ fn mul(a: &M4, b: &M4) -> M4 {
     }
     r
 }
-fn xform(m: &M4, p: V3) -> V3 {
+pub(crate) fn xform(m: &M4, p: V3) -> V3 {
     [m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12], m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13], m[2] * p[0] + m[6] * p[1] + m[10] * p[2] + m[14]]
 }
 fn node_local(n: &Value) -> M4 {
@@ -147,7 +153,7 @@ fn node_local(n: &Value) -> M4 {
 }
 
 /// mesh 索引 → 世界矩阵列表(同一 mesh 可被多个节点引用)
-fn mesh_instances(j: &Value) -> HashMap<usize, Vec<M4>> {
+pub(crate) fn mesh_instances(j: &Value) -> HashMap<usize, Vec<M4>> {
     let nodes = j["nodes"].as_array().cloned().unwrap_or_default();
     let mut has_parent = vec![false; nodes.len()];
     for n in &nodes {
@@ -243,7 +249,26 @@ pub struct Frame {
     pub img: Image,
 }
 
-fn view_basis(v: View) -> (V3, V3) {
+/// 自定义机位(yaw/pitch, 度) → 视线方向; 与内置视角同一约定(side = yaw 0, pitch 0)
+pub(crate) fn yaw_pitch_dir(yaw: f32, pitch: f32) -> V3 {
+    let (y, p) = (yaw.to_radians(), pitch.to_radians());
+    norm([-y.cos() * p.cos(), -p.sin(), y.sin() * p.cos()])
+}
+
+thread_local! {
+    static CUSTOM_DIR: std::cell::Cell<Option<V3>> = const { std::cell::Cell::new(None) };
+}
+/// 设置本线程软件光栅的自定义视线(None = 用 --view 的内置视角)
+pub(crate) fn set_custom_dir(d: Option<V3>) {
+    CUSTOM_DIR.with(|c| c.set(d));
+}
+
+pub(crate) fn view_basis(v: View) -> (V3, V3) {
+    if let Some(d) = CUSTOM_DIR.with(|c| c.get()) {
+        if v != View::Top {
+            return (d, [0., 1., 0.]);
+        }
+    }
     match v {
         View::Side | View::All => ([-1., 0., 0.], [0., 1., 0.]),
         View::Top => ([0., -1., 0.], [-1., 0., 0.]),
@@ -327,6 +352,58 @@ fn frame_bounds(scenes: &[&Scene], v: View) -> [f32; 4] {
                 b[2] = b[2].max(x);
                 b[3] = b[3].max(y);
             }
+        }
+    }
+    b
+}
+
+/// 与 [`rasterize`] 完全一致的投影(输出图像素坐标, 非超采样): 供 bake-ref 把世界坐标对到 render 图上
+pub(crate) struct Proj {
+    pub dir: V3,
+    right: V3,
+    up: V3,
+    bounds: [f32; 4],
+    scale: f32,
+    ox: f32,
+    oy: f32,
+    pub w: u32,
+    pub h: u32,
+}
+impl Proj {
+    pub fn new(v: View, bounds: [f32; 4], width: u32) -> Proj {
+        let ss = 2u32;
+        let (dir, uph) = view_basis(v);
+        let right = norm(cross(dir, uph));
+        let up = cross(right, dir);
+        let margin = 0.03;
+        let (bw, bh) = ((bounds[2] - bounds[0]).max(1e-3), (bounds[3] - bounds[1]).max(1e-3));
+        let w = width * ss;
+        let scale = (w as f32 * (1.0 - 2.0 * margin)) / bw;
+        let h = ((bh * scale) / (1.0 - 2.0 * margin)).ceil().clamp(64.0, (width * ss) as f32) as u32;
+        let ox = w as f32 * margin;
+        let oy = (h as f32 - bh * scale) / 2.0;
+        Proj { dir, right, up, bounds, scale, ox, oy, w: w / ss, h: h / ss }
+    }
+    /// 世界坐标 → (x, y, 深度; 越大越近), 输出图像素
+    pub fn px(&self, q: V3) -> V3 {
+        [(self.ox + (dot(q, self.right) - self.bounds[0]) * self.scale) / 2.0, (self.oy + (self.bounds[3] - dot(q, self.up)) * self.scale) / 2.0, -dot(q, self.dir)]
+    }
+}
+
+/// 世界坐标三角形列表的取景范围(与 frame_bounds 相同算法)
+pub(crate) fn bounds_of(tris: &[[V3; 3]], v: View) -> [f32; 4] {
+    let (dir, uph) = view_basis(v);
+    let right = norm(cross(dir, uph));
+    let up = cross(right, dir);
+    let mut b = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
+    for p in tris {
+        for q in p {
+            let x = dot(*q, right);
+            let y = dot(*q, up);
+            b[0] = b[0].min(x);
+            b[1] = b[1].min(y);
+            b[2] = b[2].max(x);
+            b[3] = b[3].max(y);
         }
     }
     b
@@ -469,7 +546,7 @@ fn side_by_side(a: &Image, b: &Image, gap: u32) -> Image {
     out
 }
 
-fn self_exe_json(cli: &Cli, args: &[String]) -> Result<Value> {
+pub(crate) fn self_exe_json(cli: &Cli, args: &[String]) -> Result<Value> {
     let exe = std::env::current_exe()?;
     let mut c = std::process::Command::new(exe);
     if let Some(g) = &cli.game {
@@ -549,7 +626,8 @@ pub fn render(cli: &Cli, a: &RenderArgs) -> Result<(Vec<u8>, Value)> {
     if !th.missing.is_empty() {
         notes.push(format!("项目有 {} 张贴图读不到(用灰色): {}", th.missing.len(), th.missing.iter().take(3).cloned().collect::<Vec<_>>().join("; ")));
     }
-    let views: Vec<View> = if a.view == View::All { vec![View::Side, View::Quarter, View::Top] } else { vec![a.view] };
+    set_custom_dir(if a.yaw.is_some() || a.pitch.is_some() { Some(yaw_pitch_dir(a.yaw.unwrap_or(0.0), a.pitch.unwrap_or(0.0))) } else { None });
+    let views: Vec<View> = if a.yaw.is_some() || a.pitch.is_some() { vec![View::Side] } else if a.view == View::All { vec![View::Side, View::Quarter, View::Top] } else { vec![a.view] };
     let mut rows = Vec::new();
     for v in &views {
         let mut sc: Vec<&Scene> = vec![&head];
