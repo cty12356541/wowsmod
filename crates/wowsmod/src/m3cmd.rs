@@ -817,7 +817,7 @@ fn transform(tx: &mut Tx, root: &Path, src: &GeomSrc, t: &Target, op: &M4, pivot
         v.set_node_local(hp, &new_local).map_err(|e| anyhow!("{e}"))?;
         tx.write_visual(&path, &v);
         return Ok(json!({"target": target_json(t), "visual": path.file_name().unwrap().to_string_lossy(), "old_local": m4_json(&n.local), "new_local": m4_json(&new_local),
-            "note": "只改了这个挂点的矩阵; 引擎是否采用挂点矩阵里的缩放以港口实测为准"}));
+            "note": if is_move { "只改了这个挂点的矩阵(平移); 部件随挂点移动" } else { "只改了这个挂点的矩阵; 引擎是否采用挂点矩阵里的缩放/旋转以港口实测为准" }}));
     }
     let units = units_for(root, t)?;
     let re = t.renderset.as_ref().map(|r| Regex::new(r)).transpose().map_err(|e| anyhow!("--renderset 正则: {e}"))?;

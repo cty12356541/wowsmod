@@ -8,7 +8,7 @@
 - [x] assets.bin 交叉核对挂点矩阵(勃艮第 115/115、黎塞留 154/154 逐位一致)
 - [x] GLB→.geometry 编码器(`geomedit`)+ visual 文本编辑(`visual`)+ 层级 GLB 读写(`scene`)
 - [x] `wowsmod model list/scale/move/rotate/replace/remove/add/rebuild/export-blender/import-blender/undo/replay`(box 上自测通过)
-- [ ] Windows 构建 + 全船 geometry 字节一致往返 + 等价重建自检
+- [x] Windows 构建 + 全船 geometry 字节一致往返(21/21)+ 等价重建自检(20/20 等价)
 - [ ] 港口实测:等价重建 / 缩放 / 移动 / 替换 / 删除 / 新网格 / Blender 往返
 - [ ] 对比图、DESIGN.md / PLAN.md 更新
 
@@ -35,3 +35,13 @@
 - 勃艮第 115 个挂点、黎塞留 154 个挂点:**全部找到完全相同的 16 个 float(最大差 0.0)**,均位于 assets.bin 约 91.5–93.4 MB 的同一区域(推测为 VisualPrototype 骨架矩阵数组)。
 - 结论:SDK 明文 visual 的挂点矩阵 = 游戏原型库数据。局限:按数值匹配,没有按结构解析出“哪个原型的哪个节点”(VisualPrototype 节点表结构 **不确定**,未解析)。
 
+
+## 断点续作记录(港口实测)
+
+- 辅助脚本 `scripts/ingame/m3_game.ps1`(配合 common.ps1):Assert-ResModsClean / Start-Port / Take-Views(v1 船尾斜视, v2 侧视, v3 拉远, v4 拉近) / Take-Extra(x14 船尾斜后方, x15 后主炮特写, x16 远景) / Session-Log / Run-Session / End-Session。
+- 截图原件:Windows `D:\WoWSModding\wowsmod\out\m3_ingame\<项目>\`;box 副本 `/workspace/m3/ingame/raw/`。
+- 已完成会话(每次结束都已卸载并核对 res_mods 只剩 readme.txt、SHA 一致):
+  - base(SDK 原样导入,改前基准):注册成功、26 个 Replace,无模组相关报错(只有已知的 paths.xml/IME/ModsSDK.zip 无主脚本/RewardSourceSystem)。
+  - rebuild(全部 geometry 用编码器等价重建):注册成功、26 Replace、无意外报错;v1–v4 肉眼与 base 无差别。
+  - combo(replay 合成: HP_FGM_3 缩放 1.5 + HP_FGS_8/9 上移 0.25 + FGS036→FGS053 替换 + 烟囱顶盖新网格):注册成功、无意外报错、无崩溃;x15 可见后主炮明显变大。
+- 待做:remove、blender、scalepart 会话;base 再进一次补拍 Take-Extra 机位;拼对比图。
