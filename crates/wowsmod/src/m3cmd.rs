@@ -741,7 +741,7 @@ pub enum ModelCmd {
         #[arg(long)]
         until: Option<f64>,
     },
-    /// PMX(MMD 模型)→ GLB: 纯 Rust; 每个材质一个 primitive, 贴图转 PNG 内嵌, 双面/透明标志带上; 骨骼/表情/物理不转换
+    /// PMX(MMD 模型)→ GLB: 纯 Rust; 每个材质一个 primitive, 贴图转 PNG 内嵌, 双面/透明标志带上; 骨骼/表情/物理不导出, 但可 --pose 静态摆姿势(arms-down[:度] / 骨^度 / 骨=rx,ry,rz)
     Pmx2glb {
         /// 输入 .pmx(贴图按 PMX 里的相对路径找)
         pmx: PathBuf,
