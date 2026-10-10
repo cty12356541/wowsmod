@@ -14,6 +14,23 @@ pub struct TriFilter {
     pub mesh: Option<Regex>,
     /// 三角形重心须落在的轴对齐盒(GLB/glTF 坐标: min, max)
     pub boxes: Vec<([f32; 3], [f32; 3])>,
+    /// true = 按像素裁剪(每个像素插值出 3D 位置再判盒, 边缘平直); false = 旧行为(三角形重心判盒, 大三角形会出锯齿块)
+    pub pixel_clip: bool,
+}
+
+type Boxes = [([f32; 3], [f32; 3])];
+fn in_boxes(b: &Boxes, c: [f32; 3]) -> bool {
+    b.is_empty() || b.iter().any(|(mn, mx)| (0..3).all(|k| c[k] >= mn[k] && c[k] <= mx[k]))
+}
+fn tri_overlaps(b: &Boxes, pos: &[[f32; 3]; 3]) -> bool {
+    b.is_empty()
+        || b.iter().any(|(mn, mx)| {
+            (0..3).all(|k| {
+                let lo = pos[0][k].min(pos[1][k]).min(pos[2][k]);
+                let hi = pos[0][k].max(pos[1][k]).max(pos[2][k]);
+                hi >= mn[k] && lo <= mx[k]
+            })
+        })
 }
 
 #[derive(Clone, Debug, Default, serde::Serialize)]
@@ -32,6 +49,11 @@ fn edge(a: [f32; 2], b: [f32; 2], p: [f32; 2]) -> f32 {
 
 /// 把一个 UV 三角形(像素坐标)画进 hit 缓冲(按 wrap 取模)。保守补偿: 极小三角形至少点亮重心所在像素。
 fn raster(hit: &mut [u8], w: u32, h: u32, t: [[f32; 2]; 3], val: u8) -> usize {
+    raster_clip(hit, w, h, t, val, None)
+}
+
+/// clip = Some((三角形 3D 顶点, 盒子)): 只点亮插值位置落在盒内的像素
+fn raster_clip(hit: &mut [u8], w: u32, h: u32, t: [[f32; 2]; 3], val: u8, clip: Option<(&[[f32; 3]; 3], &Boxes)>) -> usize {
     let mut p = t.map(|v| [v[0] * w as f32, v[1] * h as f32]);
     // 平移到第一个周期附近, 避免巨大负数
     let ox = (p[0][0].min(p[1][0]).min(p[2][0]) / w as f32).floor() * w as f32;
@@ -50,6 +72,12 @@ fn raster(hit: &mut [u8], w: u32, h: u32, t: [[f32; 2]; 3], val: u8) -> usize {
         return 0;
     }
     let mut n = 0;
+    let ok_at = |b: [f32; 3]| -> bool {
+        match clip {
+            None => true,
+            Some((pos, bx)) => in_boxes(bx, [0, 1, 2].map(|k| pos[0][k] * b[0] + pos[1][k] * b[1] + pos[2][k] * b[2])),
+        }
+    };
     let mut put = |x: i64, y: i64, hit: &mut [u8]| {
         let xx = x.rem_euclid(w as i64) as usize;
         let yy = y.rem_euclid(h as i64) as usize;
@@ -67,7 +95,7 @@ fn raster(hit: &mut [u8], w: u32, h: u32, t: [[f32; 2]; 3], val: u8) -> usize {
                 let e1 = edge(p[2], p[0], c);
                 let e2 = edge(p[0], p[1], c);
                 let inside = if area > 0.0 { e0 >= 0.0 && e1 >= 0.0 && e2 >= 0.0 } else { e0 <= 0.0 && e1 <= 0.0 && e2 <= 0.0 };
-                if inside {
+                if inside && ok_at([e0 / area, e1 / area, e2 / area]) {
                     put(x, y, hit);
                 }
             }
@@ -76,9 +104,15 @@ fn raster(hit: &mut [u8], w: u32, h: u32, t: [[f32; 2]; 3], val: u8) -> usize {
     // 重心 + 三个顶点所在像素(细长/极小三角形)
     let cx = (p[0][0] + p[1][0] + p[2][0]) / 3.0;
     let cy = (p[0][1] + p[1][1] + p[2][1]) / 3.0;
-    put(cx.floor() as i64, cy.floor() as i64, hit);
-    for v in p {
-        put(v[0].floor() as i64, v[1].floor() as i64, hit);
+    if ok_at([1.0 / 3.0; 3]) {
+        put(cx.floor() as i64, cy.floor() as i64, hit);
+    }
+    for (i, v) in p.iter().enumerate() {
+        let mut b = [0.0f32; 3];
+        b[i] = 1.0;
+        if ok_at(b) {
+            put(v[0].floor() as i64, v[1].floor() as i64, hit);
+        }
     }
     n
 }
@@ -112,10 +146,15 @@ pub fn mask_from_prims(prims: &[ReadPrim], f: &TriFilter, width: u32, height: u3
             }
             let pos = [p.positions[t[0] as usize], p.positions[t[1] as usize], p.positions[t[2] as usize]];
             let c = [0, 1, 2].map(|k| (pos[0][k] + pos[1][k] + pos[2][k]) / 3.0);
-            let in_box = f.boxes.is_empty() || f.boxes.iter().any(|(mn, mx)| (0..3).all(|k| c[k] >= mn[k] && c[k] <= mx[k]));
+            let clip = f.pixel_clip && !f.boxes.is_empty();
+            let in_box = if clip { tri_overlaps(&f.boxes, &pos) } else { in_boxes(&f.boxes, c) };
             if mat_ok && mesh_ok && in_box {
                 let tri_uv = [uv[t[0] as usize], uv[t[1] as usize], uv[t[2] as usize]];
-                raster(&mut hit, width, height, tri_uv, 255);
+                let n = raster_clip(&mut hit, width, height, tri_uv, 255, if clip { Some((&pos, &f.boxes[..])) } else { None });
+                if n == 0 && clip {
+                    not_sel.push(ti);
+                    continue;
+                }
                 st.triangles += 1;
                 any = true;
             } else {
@@ -188,5 +227,12 @@ mod tests {
         let ps2 = vec![quad("A", [1.0, 1.0], [1.25, 1.25], 0.0)];
         let (m2, _) = mask_from_prims(&ps2, &TriFilter::default(), 16, 16, 0);
         assert_eq!(m2.v[1 * 16 + 1], 1.0);
+        // 按像素裁剪: 盒子只含 x<0.5 的一半 → 大约左半边
+        let ps3 = vec![quad("A", [0.0, 0.0], [1.0, 1.0], 0.0)];
+        let f3 = TriFilter { boxes: vec![([-1.0, -1.0, -1.0], [0.5, 2.0, 1.0])], pixel_clip: true, ..Default::default() };
+        let (m3, st3) = mask_from_prims(&ps3, &f3, 16, 16, 0);
+        assert!(st3.pixels >= 120 && st3.pixels <= 144, "{}", st3.pixels);
+        assert_eq!(m3.v[2 * 16 + 1], 1.0);
+        assert_eq!(m3.v[2 * 16 + 14], 0.0);
     }
 }

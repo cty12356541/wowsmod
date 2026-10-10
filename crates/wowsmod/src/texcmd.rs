@@ -250,9 +250,12 @@ pub struct MaskArgs {
     /// 配合 --glb: 网格名正则(如 "^rs3$")
     #[arg(long)]
     pub mesh: Option<String>,
-    /// 配合 --glb: 三角形重心须落在的盒子 x0,y0,z0,x1,y1,z1(GLB 坐标), 可重复
+    /// 配合 --glb: 盒子 x0,y0,z0,x1,y1,z1(GLB 坐标), 可重复; 默认按像素裁剪(条带边缘平直)
     #[arg(long = "box", value_name = "X0,Y0,Z0,X1,Y1,Z1")]
     pub boxes: Vec<String>,
+    /// --box 改回按三角形重心整块选择(旧行为; 大三角形会出锯齿块)
+    #[arg(long)]
+    pub box_tri: bool,
     /// 由 GLB 生成时 UV 岛外扩像素(防 mip 漏边)
     #[arg(long, default_value_t = 4)]
     pub dilate: u32,
@@ -300,6 +303,7 @@ impl MaskArgs {
                 material: self.material.as_deref().map(|r| regex::Regex::new(&format!("(?i){r}"))).transpose().map_err(|e| anyhow!("--material 正则: {e}"))?,
                 mesh: self.mesh.as_deref().map(|r| regex::Regex::new(&format!("(?i){r}"))).transpose().map_err(|e| anyhow!("--mesh 正则: {e}"))?,
                 boxes: self.boxes.iter().map(|b| uvmask::parse_box(b).ok_or_else(|| anyhow!("--box 格式: x0,y0,z0,x1,y1,z1"))).collect::<Result<_>>()?,
+                pixel_clip: !self.box_tri,
             };
             let (gm, st) = uvmask::mask_from_prims(&prims, &f, w, h, self.dilate);
             if st.triangles == 0 {

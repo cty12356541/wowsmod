@@ -107,7 +107,7 @@ steps = [
   "tex channel {hull_mg} --project {proj} --channel b --set 0",
   # "bake-ref {proj} --ref design_b_side.png --material Hull --like {hull_a} --out {out}/uv_b.png --view side --mirror-x",
   # "tex composite {hull_a} --project {proj} --over {out}/uv_b.png",
-  # "model import --project {proj} --mesh figure.glb --like Stern_DeckHouse --section Stern --at 0,0.44,-7.6 --height 1.4",
+  # "model import --project {proj} --mesh figure.glb --like <挂接渲染集> --section <分段> --at <x,y,z> --height <单位>",
 ]
 
 [[direction]]
@@ -245,6 +245,11 @@ pub fn cmd(cli: &Cli, a: &PreviewArgs) -> Result<i32> {
     let txt = std::fs::read_to_string(&a.spec).with_context(|| format!("读 spec {}(没有就先 --init 生成示例)", a.spec.display()))?;
     let spec: Spec = toml::from_str(&txt).map_err(|e| anyhow!("解析 spec: {e}"))?;
     let spec_dir = std::fs::canonicalize(a.spec.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new(".")))?;
+    // Windows canonicalize 会带 \\?\ 前缀: 子命令和外部工具常不认, 去掉
+    let spec_dir = {
+        let t = spec_dir.to_string_lossy().to_string();
+        PathBuf::from(t.strip_prefix(r"\\?\").map(|x| x.to_string()).unwrap_or(t))
+    };
     let base = spec_dir.join(&spec.base);
     if !base.join("mod.toml").exists() {
         bail!("base {} 不是 mod 项目(缺 mod.toml)", base.display());
