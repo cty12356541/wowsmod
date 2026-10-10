@@ -2,7 +2,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use clap::Subcommand;
 use serde_json::{json, Value};
 
@@ -141,6 +141,38 @@ pub enum TexCmd {
         project: Option<PathBuf>,
         #[arg(long)]
         from_game: bool,
+        #[command(flatten)]
+        mask: MaskArgs,
+        #[arg(long)]
+        preview: Option<PathBuf>,
+        #[arg(long, default_value = "high")]
+        quality: String,
+    },
+    /// 把全彩图案(UV 空间 RGBA, 如 bake-ref 输出或外部绘制/AI 生成的 UV 图)按 alpha 合成进贴图, 保留底图的明暗细节(AO/板缝)
+    Composite {
+        tex: String,
+        /// UV 空间 RGBA PNG(与贴图同尺寸; 不同尺寸按最近邻缩放), 可重复, 按顺序叠加
+        #[arg(long = "over", required = true)]
+        over: Vec<PathBuf>,
+        /// 混合: normal(图案颜色 × 底图明暗) / multiply / screen
+        #[arg(long, default_value = "normal")]
+        blend: String,
+        /// 保留底图明暗细节的强度 0..1(normal 时生效)
+        #[arg(long, default_value_t = 0.35)]
+        keep_detail: f32,
+        /// 整体不透明度 0..1
+        #[arg(long, default_value_t = 1.0)]
+        opacity: f32,
+        /// 图案 alpha 低于该值视为透明(去掉 bake 边缘噪点)
+        #[arg(long, default_value_t = 0.02)]
+        alpha_floor: f32,
+        #[arg(short, long)]
+        out: Option<PathBuf>,
+        #[arg(long)]
+        project: Option<PathBuf>,
+        #[arg(long)]
+        from_game: bool,
+        /// 额外限定区域的遮罩(与图案 alpha 相乘)
         #[command(flatten)]
         mask: MaskArgs,
         #[arg(long)]
@@ -291,6 +323,67 @@ pub fn cmd_tex(cli: &Cli, c: &TexCmd) -> Result<i32> {
             let rec = json!({"source": t.label, "source_sha256": t.sha256, "mask": minfo, "selector": format!("{sel:?}"), "recolor": format!("{rc:?}"), "stats": st, "outputs": texcmd::outputs_json(pj.as_ref(), &outs)});
             let ep = if let Some(pj) = &pj { Some(pj.record_edit("tex_recolor", rec.clone())?) } else { None };
             report(cli, "已换色", &rec, ep.as_deref());
+            Ok(0)
+        }
+        TexCmd::Composite { tex, over, blend, keep_detail, opacity, alpha_floor, out, project, from_game, mask, preview, quality } => {
+            let pj = open_proj(project)?;
+            let ctx = game_ctx(cli, need_game_for(tex))?;
+            let t = texcmd::load_tex(tex, ctx.as_ref(), pj.as_ref(), *from_game)?;
+            let q = texcmd::quality(quality)?;
+            if !["normal", "multiply", "screen"].contains(&blend.as_str()) {
+                bail!("--blend 只能是 normal / multiply / screen");
+            }
+            let mut img = texture::decode_level(&t.dds, 0).map_err(|e| anyhow!("解码: {e}"))?;
+            let (w, h) = (img.width as usize, img.height as usize);
+            let (m, minfo) = mask.build(img.width, img.height)?;
+            // 底图亮度的中位数作为"平均明暗", 细节 = L / 中位数
+            let lum = |p: &[u8]| 0.2126 * p[0] as f32 + 0.7152 * p[1] as f32 + 0.0722 * p[2] as f32;
+            let mut ls: Vec<f32> = img.px.chunks_exact(4).step_by(7).map(lum).collect();
+            ls.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let med = ls.get(ls.len() / 2).copied().unwrap_or(128.0).max(8.0);
+            let mut covered = 0u64;
+            let mut infos = vec![];
+            for op in over {
+                let o = texture::read_png(&std::fs::read(op).with_context(|| format!("读取 {}", op.display()))?).map_err(|e| anyhow!("{}: {e}", op.display()))?;
+                infos.push(json!({"over": op.display().to_string(), "size": [o.width, o.height]}));
+                let (ow, oh) = (o.width as usize, o.height as usize);
+                for y in 0..h {
+                    let oy = (y * oh / h).min(oh - 1);
+                    for x in 0..w {
+                        let ox = (x * ow / w).min(ow - 1);
+                        let op_ = &o.px[(oy * ow + ox) * 4..(oy * ow + ox) * 4 + 4];
+                        let mut a = op_[3] as f32 / 255.0;
+                        if a < *alpha_floor {
+                            continue;
+                        }
+                        a *= opacity.clamp(0.0, 1.0) * m.as_ref().map(|m| m.v[y * w + x]).unwrap_or(1.0).clamp(0.0, 1.0);
+                        if a <= 0.0 {
+                            continue;
+                        }
+                        covered += 1;
+                        let i = (y * w + x) * 4;
+                        let base = [img.px[i] as f32, img.px[i + 1] as f32, img.px[i + 2] as f32];
+                        let f = (1.0 + keep_detail * (lum(&img.px[i..i + 4]) / med - 1.0)).clamp(0.3, 1.7);
+                        for c in 0..3 {
+                            let oc = op_[c] as f32;
+                            let v = match blend.as_str() {
+                                "multiply" => base[c] * oc / 255.0,
+                                "screen" => 255.0 - (255.0 - base[c]) * (255.0 - oc) / 255.0,
+                                _ => oc * f,
+                            };
+                            img.px[i + c] = (base[c] + (v - base[c]) * a).round().clamp(0.0, 255.0) as u8;
+                        }
+                    }
+                }
+            }
+            let dst = texcmd::resolve_dst(out.as_deref(), pj.as_ref(), &t)?;
+            if let Some(pv) = preview {
+                texcmd::preview(&img, pv, 2048)?;
+            }
+            let (outs, _) = texcmd::write_tex(&img, &t, &dst, q, None, None)?;
+            let rec = json!({"source": t.label, "source_sha256": t.sha256, "overs": infos, "blend": blend, "keep_detail": keep_detail, "opacity": opacity, "mask": minfo, "covered_px": covered, "coverage": covered as f64 / (w * h) as f64, "outputs": texcmd::outputs_json(pj.as_ref(), &outs)});
+            let ep = if let Some(pj) = &pj { Some(pj.record_edit("tex_composite", rec.clone())?) } else { None };
+            report(cli, "已合成图案", &rec, ep.as_deref());
             Ok(0)
         }
         TexCmd::Channel { tex, channel, set, mul, out, project, from_game, mask, preview, quality } => {

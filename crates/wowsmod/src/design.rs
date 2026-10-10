@@ -623,11 +623,17 @@ pub fn cmd_bake_ref(cli: &Cli, a: &BakeRefArgs) -> Result<i32> {
                 }
                 let c = bilinear(&refimg, x, y);
                 let o = i * 4;
+                // 参考图的 alpha 一并带进 UV(透明处不写); 多个面共用同一 UV 时保留 alpha 更高的那次,
+                // 这样只在一座炮塔上画的图案不会被另一座(透明处)覆盖
+                let ca = c[3];
+                if ca == 0 || ca < out.px[o + 3] {
+                    return;
+                }
                 if out.px[o + 3] == 0 {
                     seen += 1;
                 }
                 out.px[o..o + 3].copy_from_slice(&c[..3]);
-                out.px[o + 3] = 255;
+                out.px[o + 3] = ca;
             });
         }
     }
