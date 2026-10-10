@@ -42,8 +42,27 @@ pub enum Engine {
 
 #[derive(Args, Clone, Debug)]
 pub struct RenderArgs {
-    /// mod 项目目录
+    /// mod 项目目录。也可写动作: render warm|status|stop <项目>(常驻出图实例)
     pub project: PathBuf,
+    /// 动作写法时的项目目录(render status <项目>)
+    #[arg(hide = true)]
+    pub project2: Option<PathBuf>,
+    /// 预热: 后台启动常驻出图实例(本机服务 + 无头浏览器 + 已加载的模型/贴图), 之后 render 自动连它, 每张约 1 秒。
+    /// 冷启动(不预热)每张要几十秒。空闲 --idle 分钟后自动退出
+    #[arg(long)]
+    pub warm: bool,
+    /// 常驻实例空闲多少分钟后自动退出(默认 15; 0 = 不退出; 也可设环境变量 WOWSMOD_RENDER_IDLE_MIN)
+    #[arg(long, value_name = "MIN")]
+    pub idle: Option<u64>,
+    /// 单张出图超时(秒); 超时会自动重启浏览器重试一次
+    #[arg(long, default_value_t = 60)]
+    pub timeout: u64,
+    /// 不用常驻实例, 强制冷启动(一次性起服务 + 浏览器, 用完即关)
+    #[arg(long)]
+    pub cold: bool,
+    /// render status / stop 时: 列出 / 停止本机全部常驻实例
+    #[arg(long)]
+    pub all: bool,
     /// 视角(软件引擎) / 或与 --query 二选一
     #[arg(long, value_enum, default_value_t = View::Quarter)]
     pub view: View,
@@ -670,7 +689,7 @@ fn parse_size(s: &str) -> (u32, u32) {
     (w.clamp(64, 4096), h.clamp(64, 4096))
 }
 
-fn build_query(a: &RenderArgs) -> String {
+pub(crate) fn build_query(a: &RenderArgs) -> String {
     if let Some(q) = &a.query {
         return q.clone();
     }
@@ -709,8 +728,142 @@ fn render_browser(cli: &Cli, a: &RenderArgs) -> Result<(Vec<u8>, Value)> {
     }
 }
 
+fn emit_err(cli: &Cli, code: &str, msg: &str, project: &Path) -> i32 {
+    let next = crate::preview::warm::next_for(code, project);
+    let v = json!({"ok": false, "error": {"code": code, "message": msg}, "next": next});
+    crate::guide::stash(&v);
+    if cli.json {
+        emit(cli, &v);
+    } else {
+        eprintln!("错误 [{code}]: {msg}");
+        eprintln!("建议下一步:");
+        for n in &next {
+            eprintln!("  - {n}");
+        }
+    }
+    match code {
+        "bad_param" => 2,
+        "browser_not_found" => 3,
+        _ => 4,
+    }
+}
+
+fn err_code(msg: &str) -> &'static str {
+    for c in ["browser_not_found", "warm_start_failed", "render_timeout", "cdp_timeout", "warm_timeout", "page_crashed", "browser_crashed", "cdp_closed", "browser_exited", "bad_param", "render_failed", "warm_unreachable"] {
+        if msg.contains(c) {
+            return match c {
+                "cdp_timeout" | "warm_timeout" => "render_timeout",
+                "page_crashed" | "cdp_closed" | "browser_exited" => "browser_crashed",
+                "warm_unreachable" => "warm_start_failed",
+                x => x,
+            };
+        }
+    }
+    ""
+}
+
+fn warm_status_text(v: &Value) -> String {
+    if v["ready"] == true {
+        format!("常驻出图实例: 就绪(热)  pid {}  浏览器 pid {}  已出图 {} 张  空闲 {}s / 上限 {}s  预热耗时 {:.1}s",
+            v["pid"], v["browser_pid"], v["renders"], v["idle_s"], v["idle_limit_s"], v["warmup"]["total_s"].as_f64().unwrap_or(0.0))
+    } else if v["running"] == true {
+        format!("常驻出图实例: 预热中(pid {}), 稍后再看 render status", v["pid"])
+    } else {
+        format!("常驻出图实例: 未运行({})。要出图先预热: wowsmod render --warm <项目>", v["reason"].as_str().unwrap_or(""))
+    }
+}
+
+fn cmd_warm(cli: &Cli, project: &Path, a: &RenderArgs) -> Result<i32> {
+    let idle = crate::preview::warm::idle_minutes(a.idle);
+    let t0 = std::time::Instant::now();
+    match crate::preview::warm::ensure_started(cli, project, idle, a.browser.as_deref(), true, std::time::Duration::from_secs(240)) {
+        Ok(mut v) => {
+            v["ok"] = json!(true);
+            v["seconds"] = json!(t0.elapsed().as_secs_f32());
+            v["next"] = json!([format!("wowsmod render {} --compare (每张约 1 秒)", project.display()), format!("wowsmod render status {}", project.display()), format!("wowsmod render stop {}", project.display())]);
+            crate::guide::stash(&v);
+            if cli.json {
+                emit(cli, &v);
+            } else {
+                let already = v["spawned"] != true;
+                println!("{}", if already { "已经是热的(常驻实例在运行)。" } else { "预热完成。" });
+                println!("{}", warm_status_text(&v));
+                println!("之后 wowsmod render {} … 会自动连这个实例; 空闲 {idle} 分钟自动退出; 停止: wowsmod render stop {}", project.display(), project.display());
+            }
+            Ok(0)
+        }
+        Err(e) => {
+            let m = format!("{e:#}");
+            let c = err_code(&m);
+            Ok(emit_err(cli, if c.is_empty() { "warm_start_failed" } else { c }, &m, project))
+        }
+    }
+}
+
 pub fn cmd_render(cli: &Cli, a: &RenderArgs) -> Result<i32> {
-    let r = render(cli, a);
+    use crate::preview::warm;
+    // 动作写法: render warm|status|stop|serve [项目]
+    let word = a.project.to_str().unwrap_or("").to_string();
+    let is_action = matches!(word.as_str(), "warm" | "status" | "stop" | "serve") && !a.project.join("mod.toml").is_file();
+    if is_action {
+        let proj = a.project2.clone();
+        let need = || proj.clone().ok_or_else(|| anyhow!("用法: wowsmod render {word} <项目>"));
+        match word.as_str() {
+            "serve" => return warm::serve(cli, &need()?, warm::idle_minutes(a.idle), a.browser.as_deref()),
+            "warm" => return cmd_warm(cli, &need()?, a),
+            "status" => {
+                let v = match (&proj, a.all) {
+                    (Some(p), false) => warm::status(p),
+                    _ => json!({"instances": warm::status_all()}),
+                };
+                crate::guide::stash(&v);
+                if cli.json {
+                    emit(cli, &v);
+                } else if let Some(list) = v["instances"].as_array() {
+                    if list.is_empty() {
+                        println!("本机没有常驻出图实例。预热: wowsmod render --warm <项目>");
+                    }
+                    for x in list {
+                        println!("{}  {}", x["project"].as_str().unwrap_or(""), warm_status_text(x));
+                    }
+                } else {
+                    println!("{}", warm_status_text(&v));
+                }
+                return Ok(0);
+            }
+            _ => {
+                let v = match (&proj, a.all) {
+                    (Some(p), false) => warm::stop(p),
+                    _ => {
+                        let list: Vec<Value> = warm::status_all().iter().filter_map(|x| x["project"].as_str().map(|p| warm::stop(Path::new(p)))).collect();
+                        json!({"ok": true, "stopped": list})
+                    }
+                };
+                crate::guide::stash(&v);
+                if cli.json { emit(cli, &v); } else { println!("{}", if v["stopped"] == false { "没有常驻实例".to_string() } else { format!("已停止 {}", v) }); }
+                return Ok(0);
+            }
+        }
+    }
+    if a.warm {
+        return cmd_warm(cli, &a.project, a);
+    }
+    let use_warm = a.engine == Engine::Browser && a.texture.is_none() && !a.cold && warm::status(&a.project)["ready"] == true;
+    let t0 = std::time::Instant::now();
+    let r = if use_warm {
+        let q = build_query(a);
+        warm::render_with_heal(cli, &a.project, &q, a.timeout, warm::idle_minutes(a.idle), a.browser.as_deref())
+            .map(|(png, m)| (png, json!({"kind": "browser", "engine": "browser", "warm": true, "query": q, "meta": m["meta"], "timing": m["timing"], "warm_restarted": m["warm_restarted"], "size": [m["meta"]["width"], m["meta"]["height"]]})))
+    } else {
+        render(cli, a)
+    };
+    if let Err(e) = &r {
+        let m = format!("{e:#}");
+        let c = err_code(&m);
+        if a.engine == Engine::Browser && !c.is_empty() && c != "browser_not_found" {
+            return Ok(emit_err(cli, c, &m, &a.project));
+        }
+    }
     if let Err(e) = &r {
         if format!("{e:#}").contains("browser_not_found") {
             let url_hint = format!("(可先 wowsmod preview {} 手动查看)", a.project.display());
@@ -723,6 +876,11 @@ pub fn cmd_render(cli: &Cli, a: &RenderArgs) -> Result<i32> {
         }
     }
     let (png, mut v) = r?;
+    v["seconds"] = json!(t0.elapsed().as_secs_f32());
+    if a.engine == Engine::Browser && a.texture.is_none() && !use_warm {
+        v["warm"] = json!(false);
+        v["hint"] = json!(format!("冷启动 {:.0} 秒(起服务+浏览器+加载模型)。下次先 wowsmod render --warm {} 预热, 之后每张约 1 秒", t0.elapsed().as_secs_f32(), a.project.display()));
+    }
     let out = a.out.clone().unwrap_or_else(|| {
         let n = match &a.texture {
             Some(t) => format!("tex_{}.png", t.trim_end_matches(".dds")),
@@ -745,6 +903,12 @@ pub fn cmd_render(cli: &Cli, a: &RenderArgs) -> Result<i32> {
         emit(cli, &v);
     } else {
         println!("{}", abs.display());
+        if v["warm"] == true {
+            println!("  (常驻实例, {:.2}s)", v["seconds"].as_f64().unwrap_or(0.0));
+        }
+        if let Some(h) = v["hint"].as_str() {
+            println!("  提示: {h}");
+        }
         if let Some(notes) = v["notes"].as_array() {
             for n in notes { println!("  注: {}", n.as_str().unwrap_or("")); }
         }

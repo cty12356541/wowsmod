@@ -6,6 +6,7 @@ use std::io::{BufRead, Write};
 use anyhow::Result;
 use serde_json::{json, Value};
 
+use crate::preview::warm;
 use crate::{ai, guide, render, Cli};
 
 const PROTOCOLS: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05"];
@@ -76,8 +77,10 @@ fn entry_tools() -> Vec<Value> {
         json!({"name": "wowsmod_status", "description": "第一步: 游戏位置/版本、已装 mod、本机 SDK 素材、项目状态。", "inputSchema": {"type": "object", "properties": {"project": {"type": "string", "description": "mod 项目目录(可选)"}}}}),
         json!({"name": "wowsmod_help", "description": "按需读取说明主题(不传 topic 列出主题; start 是任务路由)。", "inputSchema": {"type": "object", "properties": {"topic": {"type": "string"}, "search": {"type": "string", "description": "全文搜索"}}}}),
         json!({"name": "wowsmod_run", "description": "执行任意 wowsmod 命令(自动 --json), 如 [\"tex\",\"recolor\",\"X_a.dds\",\"--project\",\"p\",\"--to-color\",\"#123456\"]。结果含 next(建议下一步)。参数见 <命令> --help。", "inputSchema": {"type": "object", "properties": {"args": {"type": "array", "items": {"type": "string"}}}, "required": ["args"]}}),
-        json!({"name": "wowsmod_render", "description": "出图并直接返回 PNG: 整船(可 compare 上原版/下当前)或单张贴图(texture)。软件渲染近似。", "inputSchema": {"type": "object", "properties": {
-            "project": {"type": "string"}, "view": {"type": "string", "enum": ["side", "top", "quarter", "all"]}, "compare": {"type": "boolean"}, "texture": {"type": "string"}, "width": {"type": "integer", "description": "默认 1200"}}, "required": ["project"]}}),
+        json!({"name": "wowsmod_render", "description": "出图并直接返回 PNG: 整船 WebGL(compare=分屏 原版|当前; query 可给完整参数, 见 help render)或单张贴图(texture, 左原版右当前)。走常驻出图实例: 首次调用会先预热(约 20~60 秒), 之后每张约 1 秒; wowsmod_status 带 project 时会在后台提前预热。", "inputSchema": {"type": "object", "properties": {
+            "project": {"type": "string"}, "view": {"type": "string", "enum": ["side", "top", "quarter", "all"]}, "compare": {"type": "boolean"}, "texture": {"type": "string"},
+            "query": {"type": "string", "description": "原样查询串, 如 view=fq&compare=split&base=base&w=1600&h=900&env=dark"}, "rev": {"type": "string"}, "base": {"type": "string"},
+            "width": {"type": "integer", "description": "默认 1600"}, "height": {"type": "integer", "description": "默认 900"}, "timeout": {"type": "integer", "description": "单张超时秒, 默认 60"}}, "required": ["project"]}}),
         json!({"name": "wowsmod_expand", "description": format!("按组展开带参数说明的专用工具(展开后工具列表会更新; 不展开也可用 wowsmod_run)。组: {}", groups.join("; ")), "inputSchema": {"type": "object", "properties": {"group": {"type": "string", "enum": GROUPS.iter().map(|g| g.0).collect::<Vec<_>>()}}, "required": ["group"]}}),
     ]
 }
@@ -184,6 +187,17 @@ fn call(cli: &Cli, name: &str, a: &Value, expanded: &mut BTreeSet<String>, chang
             let n = guide::next("status", &v);
             let mut v = v;
             v["next"] = json!(n);
+            if let Some(p) = a["project"].as_str() {
+                // 后台预热常驻出图实例(不等待), 之后 wowsmod_render 每张约 1 秒
+                let pp = std::path::PathBuf::from(p);
+                if pp.join("mod.toml").is_file() {
+                    v["render_warm"] = warm::status(&pp);
+                    if v["render_warm"]["running"] != true {
+                        let _ = warm::ensure_started(cli, &pp, warm::idle_minutes(None), None, false, std::time::Duration::from_secs(1));
+                        v["render_warm"] = json!({"running": true, "ready": false, "state": "starting", "note": "已在后台预热, 约 20~60 秒后 wowsmod_render 每张约 1 秒"});
+                    }
+                }
+            }
             text(serde_json::to_string_pretty(&v).unwrap_or_default(), false)
         }
         "wowsmod_help" => {
@@ -214,20 +228,43 @@ fn call(cli: &Cli, name: &str, a: &Value, expanded: &mut BTreeSet<String>, chang
                 "all" => render::View::All,
                 _ => render::View::Quarter,
             };
-            let ra = render::RenderArgs { project: p.into(), view, compare: a["compare"].as_bool().unwrap_or(false), texture: a["texture"].as_str().map(|s| s.to_string()), out: None,
+            let dir = std::path::Path::new(p).join(".render");
+            let _ = std::fs::create_dir_all(&dir);
+            let f = dir.join("mcp_last.png");
+            // 不在 MCP 进程内渲染(任何挂起都会拖死整个 MCP): 贴图走子进程, 整船走常驻出图实例
+            if let Some(t) = a["texture"].as_str() {
+                let (ok, s) = run_self(cli, &["render".into(), p.into(), "--engine".into(), "soft".into(), "--texture".into(), t.into(), "-o".into(), f.display().to_string()]);
+                return match (ok, std::fs::read(&f)) {
+                    (true, Ok(png)) => json!({"content": [{"type": "image", "data": wowsmod_formats::mfm::b64_encode(&png), "mimeType": "image/png"}, {"type": "text", "text": s}], "isError": false}),
+                    _ => text(s, true),
+                };
+            }
+            let ra = render::RenderArgs { project: p.into(), project2: None, warm: false, idle: None, timeout: a["timeout"].as_u64().unwrap_or(60), cold: false, all: false,
+                view, compare: a["compare"].as_bool().unwrap_or(false), texture: None, out: None,
                 width: a["width"].as_u64().unwrap_or(1200) as u32, size: format!("{}x{}", a["width"].as_u64().unwrap_or(1600), a["height"].as_u64().unwrap_or(900)),
                 engine: render::Engine::Browser, browser: None, query: a["query"].as_str().map(|s| s.to_string()), sheet: false, rev: a["rev"].as_str().unwrap_or("head").into(), base: a["base"].as_str().map(|s| s.to_string()), yaw: a["yaw"].as_f64().map(|x| x as f32), pitch: a["pitch"].as_f64().map(|x| x as f32) };
-            match render::render(cli, &ra) {
+            let q = render::build_query(&ra);
+            let pp = std::path::Path::new(p);
+            let idle = warm::idle_minutes(None);
+            let t0 = std::time::Instant::now();
+            let r = warm::ensure_started(cli, pp, idle, None, true, std::time::Duration::from_secs(240))
+                .and_then(|w| warm::render_with_heal(cli, pp, &q, ra.timeout, idle, None).map(|(png, m)| (png, json!({"engine": "browser", "warm": true, "query": q, "meta": m["meta"], "timing": m["timing"], "warmed_now": w["spawned"]}))));
+            match r {
                 Ok((png, mut info)) => {
-                    let dir = std::path::Path::new(p).join(".render");
-                    let _ = std::fs::create_dir_all(&dir);
-                    let f = dir.join("mcp_last.png");
+                    info["seconds"] = json!(t0.elapsed().as_secs_f32());
                     let _ = std::fs::write(&f, &png);
                     info["out"] = json!(f.display().to_string());
                     info["next"] = json!(["满意: wowsmod_run [\"install\", 项目]; 不满意: 调整后再 render"]);
                     json!({"content": [{"type": "image", "data": wowsmod_formats::mfm::b64_encode(&png), "mimeType": "image/png"}, {"type": "text", "text": serde_json::to_string_pretty(&info).unwrap_or_default()}], "isError": false})
                 }
-                Err(e) => text(format!("{e:#}\n下一步: wowsmod_help {{\"topic\":\"render\"}}"), true),
+                Err(e) => {
+                    let m = format!("{e:#}");
+                    if m.contains("browser_not_found") {
+                        return text(format!("{}\n(没有图片; 可用 wowsmod_render 的 texture 参数看单张贴图, 或 wowsmod_run [\"render\", 项目, \"--engine\", \"soft\"])", crate::preview::browser_not_found_value(None)), false);
+                    }
+                    let code = m.split(':').next().unwrap_or("render_failed").to_string();
+                    text(format!("[{code}] {m}\n下一步: {}\n或 wowsmod_help {{\"topic\":\"render\"}}", warm::next_for(&code, pp).join(" / ")), true)
+                }
             }
         }
         "wowsmod_expand" => {
@@ -261,6 +298,13 @@ fn call(cli: &Cli, name: &str, a: &Value, expanded: &mut BTreeSet<String>, chang
 }
 
 pub fn serve(cli: &Cli) -> Result<i32> {
+    // 启动即后台预热: WOWSMOD_PROJECT 或当前目录是 mod 项目时
+    let auto = std::env::var("WOWSMOD_PROJECT").ok().map(std::path::PathBuf::from).or_else(|| std::env::current_dir().ok().filter(|d| d.join("mod.toml").is_file()));
+    if let Some(p) = auto {
+        if p.join("mod.toml").is_file() && warm::status(&p)["running"] != true {
+            let _ = warm::ensure_started(cli, &p, warm::idle_minutes(None), None, false, std::time::Duration::from_secs(1));
+        }
+    }
     let stdin = std::io::stdin();
     let mut out = std::io::stdout().lock();
     let mut expanded: BTreeSet<String> = BTreeSet::new();

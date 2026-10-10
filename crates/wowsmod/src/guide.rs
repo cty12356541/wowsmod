@@ -177,7 +177,7 @@ pub fn next(key: &str, v: &Value) -> Vec<String> {
             }
         }
         "assemble" => vec!["看图: wowsmod render <项目> --compare".into()],
-        "render" => vec![s("满意: wowsmod install {p} 后重启游戏进港查看(只看港口)"), "不满意: 调整后再 render".into()],
+        "render" => vec![s("满意: wowsmod install {p} 后重启游戏进港查看(只看港口)"), "不满意: 调整后再 render".into(), s("要连续出图: 先 wowsmod render --warm {p} 预热, 之后每张约 1 秒")],
         "install" => {
             if ok {
                 let t = project_arg().map(|x| q(&x)).unwrap_or_else(|| v["mod"].as_str().unwrap_or("<mod>").to_string());
@@ -258,7 +258,7 @@ pub fn after_help(key: &str) -> Option<String> {
         "tex" | "tex recolor" | "tex channel" | "tex export" | "tex import" | "tex info" | "tex rewrite" | "port-albedo" | "mask" => "下一步: 编辑后 wowsmod render <项目> --compare。详见 wowsmod help recolor",
         "glow" => "下一步: wowsmod render <项目> --compare。详见 wowsmod help glow(含勃艮第烟囱实测参数)",
         "model" | "assemble" => "下一步: 编辑后 wowsmod render <项目> --compare --view all; 撤销 model undo。详见 wowsmod help model / blender",
-        "render" => "下一步: 满意则 wowsmod install <项目>。详见 wowsmod help render",
+        "render" => "下一步: 满意则 wowsmod install <项目>。要连续出图先 wowsmod render --warm <项目> 预热(之后每张约 1 秒)。详见 wowsmod help render",
         "install" | "uninstall" | "installed" | "conflicts" => "下一步: install 后重启游戏进港查看; 撤销 wowsmod uninstall。详见 wowsmod help install",
         "migrate" => "详见 wowsmod help migrate",
         "pack" => "详见 wowsmod help pack",

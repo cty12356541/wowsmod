@@ -30,16 +30,32 @@ pub fn bind(port: u16) -> Result<(u16, Server)> {
     Err(anyhow!("端口 {port}..{} 都被占用", port + 19))
 }
 
+/// 常驻出图实例的控制端点钩子(/__wm/*): 返回 None 表示不处理
+pub type Ctl = Arc<dyn Fn(&Method, &str, &mut Request) -> Option<Response<std::io::Cursor<Vec<u8>>>> + Send + Sync>;
+
 pub fn serve(server: Server, st: Arc<PreviewState>) -> Result<()> {
+    serve_with(server, st, None)
+}
+
+pub fn serve_with(server: Server, st: Arc<PreviewState>, ctl: Option<Ctl>) -> Result<()> {
     // 多线程处理: 前端会并行拉 geometry + 多张贴图
     for mut req in server.incoming_requests() {
         if st.is_shutdown() {
             break;
         }
         let st = Arc::clone(&st);
+        let ctl = ctl.clone();
         std::thread::spawn(move || {
             let method = req.method().clone();
             let url = req.url().to_string();
+            if let Some(c) = &ctl {
+                if url.starts_with("/__wm/") {
+                    if let Some(r) = c(&method, &url, &mut req) {
+                        let _ = req.respond(r);
+                        return;
+                    }
+                }
+            }
             if method == Method::Options {
                 let mut r = Response::from_data(Vec::<u8>::new()).with_status_code(204);
                 r.add_header(Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap());
@@ -263,7 +279,7 @@ fn req_json_ct(req: &Request) -> bool {
 fn json_ok(v: &Value) -> Response<std::io::Cursor<Vec<u8>>> {
     json_resp(200, v)
 }
-fn json_resp(code: u16, v: &Value) -> Response<std::io::Cursor<Vec<u8>>> {
+pub(crate) fn json_resp(code: u16, v: &Value) -> Response<std::io::Cursor<Vec<u8>>> {
     let b = serde_json::to_vec(v).unwrap_or_default();
     let mut r = Response::from_data(b).with_status_code(StatusCode(code));
     r.add_header(Header::from_bytes(&b"Content-Type"[..], &b"application/json; charset=utf-8"[..]).unwrap());

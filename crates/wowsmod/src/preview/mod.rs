@@ -3,6 +3,7 @@
 pub mod cdp;
 pub mod http;
 pub mod state;
+pub mod warm;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -91,7 +92,9 @@ pub fn render_pngs(cli: &Cli, project: &std::path::Path, queries: &[(String, Str
         Ok(v) => Ok(v),
         Err(e) => {
             let msg = format!("{e:#}");
-            if msg.contains("browser_not_found") {
+            // 超时/参数错/页面报错时回退 cdp.py 只会再等一轮, 直接报错; 只有协议层面的问题才回退
+            let no_fallback = ["browser_not_found", "render_timeout", "cdp_timeout", "bad_param", "render_failed", "page_crashed"];
+            if no_fallback.iter().any(|k| msg.contains(k)) {
                 Err(e)
             } else {
                 // 原生 CDP 失败时回退到验收用的 cdp.py

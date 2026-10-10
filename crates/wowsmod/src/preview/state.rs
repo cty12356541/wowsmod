@@ -38,6 +38,14 @@ pub struct PreviewState {
     pub jobs: Mutex<HashMap<String, Value>>,
     sse: Mutex<Vec<std::sync::mpsc::Sender<Value>>>,
     png_cache: Mutex<HashMap<(String, u32, String), Vec<u8>>>,
+    /// 常驻出图增量重载: 项目文件 路径 → (大小, mtime, 是否占位, hash16); 没变的文件不再读
+    file_memo: Mutex<HashMap<PathBuf, (u64, u128, bool, String)>>,
+    /// 游戏内贴图 vpath → hash16(会话内游戏文件不变)
+    game_memo: Mutex<HashMap<String, String>>,
+    /// 本次 rebuild 的项目文件名索引(小写文件名 → 路径), 替代逐贴图全目录遍历
+    name_index: Mutex<Option<HashMap<String, Vec<PathBuf>>>>,
+    /// GameParams 里的等级/国家/类型 + 本地化船名(后台线程加载, 按游戏版本缓存在临时目录)
+    ship_meta: std::sync::Arc<RwLock<Value>>,
 }
 
 #[derive(Clone)]
@@ -81,6 +89,8 @@ enum BlobSrc {
 struct Geom {
     hash: String,
     bytes: Vec<u8>,
+    /// 缓存文件 (大小, mtime): 变了才重读
+    stamp: Option<(u64, u128)>,
 }
 
 impl PreviewState {
@@ -113,10 +123,48 @@ impl PreviewState {
             jobs: Mutex::new(HashMap::new()),
             sse: Mutex::new(Vec::new()),
             png_cache: Mutex::new(HashMap::new()),
+            file_memo: Mutex::new(HashMap::new()),
+            game_memo: Mutex::new(HashMap::new()),
+            name_index: Mutex::new(None),
+            ship_meta: std::sync::Arc::new(RwLock::new(Value::Null)),
         };
+        st.load_ship_meta();
         st.rebuild()?;
         st.refresh_install();
         Ok(st)
+    }
+
+    /// 等级/国家/类型/本地化名: 先查缓存(%TEMP%/wowsmod_shipmeta_<build>_<ship>.json), 否则读 GameParams 后台解析
+    fn load_ship_meta(&self) {
+        let Some(ctx) = &self.ctx else { return };
+        let ship = self.ship.clone();
+        let cache = std::env::temp_dir().join(format!("wowsmod_shipmeta_{}_{}.json", ctx.install.build, ship));
+        if let Some(v) = std::fs::read(&cache).ok().and_then(|d| serde_json::from_slice::<Value>(&d).ok()) {
+            *self.ship_meta.write().unwrap() = v;
+            return;
+        }
+        let Some(raw) = ctx.index.get("content/GameParams_py3.data").and_then(|e| ctx.reader.read(e).ok()) else { return };
+        let texts = ctx.install.idx_dir.parent().map(|p| p.join("res").join("texts")).unwrap_or_default();
+        let meta = std::sync::Arc::clone(&self.ship_meta);
+        std::thread::spawn(move || {
+            let code = ship.split('_').next().unwrap_or(&ship).to_string();
+            let Ok(ships) = wowsmod_formats::gameparams::ships_from_raw(&raw) else { return };
+            let Some(sp) = ships.iter().find(|s| s.name == format!("P{ship}") || s.index == format!("P{code}")) else { return };
+            let mut local = None;
+            if let Ok(rd) = std::fs::read_dir(&texts) {
+                let mut dirs: Vec<PathBuf> = rd.flatten().map(|e| e.path()).collect();
+                dirs.sort_by_key(|d| !d.file_name().map(|n| n.to_string_lossy().starts_with("zh")).unwrap_or(false));
+                for d in dirs {
+                    if let Some(m) = std::fs::read(d.join("LC_MESSAGES").join("global.mo")).ok().and_then(|b| wowsmod_formats::mo::parse_mo(&b).ok()) {
+                        local = m.get(&format!("IDS_P{code}")).cloned();
+                        break;
+                    }
+                }
+            }
+            let v = json!({"level": if sp.level > 0 { json!(sp.level) } else { Value::Null }, "nation": sp.nation, "species": sp.species, "name_local": local, "param": sp.name});
+            let _ = std::fs::write(&cache, serde_json::to_vec(&v).unwrap_or_default());
+            *meta.write().unwrap() = v;
+        });
     }
 
     pub fn shutdown(&self) {
@@ -153,7 +201,49 @@ impl PreviewState {
         self.etag.load(Ordering::SeqCst)
     }
 
+    /// 常驻出图: 项目改动后增量重载(只重读大小/mtime 变了的文件; 贴图按内容哈希, 前端只拉新哈希)
+    pub fn reload(&self) -> Result<Value> {
+        let t0 = std::time::Instant::now();
+        let before: std::collections::HashSet<String> = self.blobs.read().unwrap().keys().cloned().collect();
+        let geom_before = self.geom.read().unwrap().as_ref().map(|g| g.hash.clone());
+        self.rebuild()?;
+        self.refresh_install();
+        let after: Vec<String> = self.blobs.read().unwrap().keys().cloned().collect();
+        let new_blobs = after.iter().filter(|h| !before.contains(*h)).count();
+        let geom_after = self.geom.read().unwrap().as_ref().map(|g| g.hash.clone());
+        self.bump("steps", json!({}));
+        Ok(json!({"new_textures": new_blobs, "textures": after.len(), "geometry_changed": geom_before != geom_after, "head": self.head_id(), "seconds": t0.elapsed().as_secs_f32()}))
+    }
+
+    /// 项目内容指纹(文件路径+大小+mtime), 用来判断要不要增量重载。跳过 renders/.render/.wowsmod(缓存的 geometry.glb 除外)
+    pub fn fingerprint(&self) -> u64 {
+        project_fingerprint(&self.project.root)
+    }
+
+    fn file_info(&self, p: &Path) -> Option<(bool, String)> {
+        let md = std::fs::metadata(p).ok()?;
+        let key = (md.len(), mtime_ns(&md));
+        if let Some((sz, mt, stub, h)) = self.file_memo.lock().unwrap().get(p) {
+            if (*sz, *mt) == key {
+                return Some((*stub, h.clone()));
+            }
+        }
+        let d = std::fs::read(p).ok()?;
+        let stub = mfm::is_sdk_stub(&d);
+        let h = hash16(&d);
+        self.file_memo.lock().unwrap().insert(p.to_path_buf(), (key.0, key.1, stub, h.clone()));
+        Some((stub, h))
+    }
+
     fn rebuild(&self) -> Result<()> {
+        // 文件名索引(一次遍历)
+        let mut idx: HashMap<String, Vec<PathBuf>> = HashMap::new();
+        for f in self.project.files().unwrap_or_default() {
+            if let Some(n) = f.file_name() {
+                idx.entry(n.to_string_lossy().to_lowercase()).or_default().push(f);
+            }
+        }
+        *self.name_index.lock().unwrap() = Some(idx);
         let edits = load_edits(&self.project.root)?;
         let steps = group_steps(&self.project.root, &edits)?;
         // base materials from SDK copy
@@ -191,6 +281,14 @@ impl PreviewState {
         *self.steps.write().unwrap() = steps;
         self.ensure_geometry()?;
         self.ensure_sim_parts()?;
+        // 步骤标题里的贴图名 → 部件中文名
+        {
+            let parts_doc = self.parts.read().unwrap().clone();
+            let mut steps = self.steps.write().unwrap();
+            for st in steps.iter_mut() {
+                st.title = resolve_part_tokens(&st.title, parts_doc.as_ref());
+            }
+        }
         // parts changed
         if let Some(parts) = self.parts.read().unwrap().clone() {
             let plist = parts["parts"].as_array().cloned().unwrap_or_default();
@@ -275,24 +373,24 @@ impl PreviewState {
         if head {
             let under = self.project.assets().join(rel_in_mfm);
             if under.is_file() {
-                if let Ok(d) = std::fs::read(&under) {
-                    if !mfm::is_sdk_stub(&d) {
-                        let h = hash16(&d);
+                if let Some((stub, h)) = self.file_info(&under) {
+                    if !stub {
                         blobs.insert(h.clone(), BlobSrc::Project(under));
                         return (Some(h), false, None, None);
                     }
                 }
             }
             // by name unique non-stub
-            if let Ok(hits) = self.project.find_by_name(&format!("{name}.dds")) {
-                let real: Vec<_> = hits.into_iter().filter(|p| std::fs::read(p).map(|d| !mfm::is_sdk_stub(&d)).unwrap_or(false)).collect();
-                if real.len() == 1 {
-                    if let Ok(d) = std::fs::read(&real[0]) {
-                        let h = hash16(&d);
-                        blobs.insert(h.clone(), BlobSrc::Project(real[0].clone()));
-                        return (Some(h), false, None, None);
-                    }
-                }
+            let fname = format!("{name}.dds").to_lowercase();
+            let hits: Vec<PathBuf> = match self.name_index.lock().unwrap().as_ref() {
+                Some(ix) => ix.get(&fname).cloned().unwrap_or_default(),
+                None => self.project.find_by_name(&fname).unwrap_or_default(),
+            };
+            let real: Vec<(PathBuf, String)> = hits.into_iter().filter_map(|p| self.file_info(&p).filter(|(stub, _)| !stub).map(|(_, h)| (p, h))).collect();
+            if real.len() == 1 {
+                let (p, h) = real.into_iter().next().unwrap();
+                blobs.insert(h.clone(), BlobSrc::Project(p));
+                return (Some(h), false, None, None);
             }
         }
         // 2) game by file name
@@ -300,9 +398,14 @@ impl PreviewState {
             let hits: Vec<_> = ctx.index.entries.iter().filter(|e| e.path.rsplit('/').next().map(|x| x.eq_ignore_ascii_case(&format!("{name}.dds"))).unwrap_or(false)).collect();
             if hits.len() == 1 {
                 let vp = hits[0].path.clone();
+                if let Some(h) = self.game_memo.lock().unwrap().get(&vp).cloned() {
+                    blobs.insert(h.clone(), BlobSrc::Game(vp));
+                    return (Some(h), false, None, None);
+                }
                 // hash of game dds header file (not volumes) — use path-stable: read and hash
                 if let Ok(d) = ctx.reader.read(hits[0]) {
                     let h = hash16(&d);
+                    self.game_memo.lock().unwrap().insert(vp.clone(), h.clone());
                     blobs.insert(h.clone(), BlobSrc::Game(vp));
                     return (Some(h), false, None, None);
                 }
@@ -315,12 +418,16 @@ impl PreviewState {
     }
 
     fn ensure_geometry(&self) -> Result<()> {
-        if self.geom.read().unwrap().is_some() {
-            return Ok(());
-        }
         let cache = self.project.root.join(".wowsmod/cache");
-        std::fs::create_dir_all(&cache)?;
         let cached = cache.join("geometry.glb");
+        let stamp_now = std::fs::metadata(&cached).ok().map(|m| (m.len(), mtime_ns(&m)));
+        if let Some(g) = self.geom.read().unwrap().as_ref() {
+            // 缓存文件没变(或本来就不是从缓存文件来的)就复用
+            if g.stamp.is_none() || g.stamp == stamp_now {
+                return Ok(());
+            }
+        }
+        std::fs::create_dir_all(&cache)?;
         let bytes = if cached.is_file() {
             std::fs::read(&cached)?
         } else if let Some(seed) = find_seed(&self.ship) {
@@ -335,7 +442,8 @@ impl PreviewState {
             self.build_geometry_fallback(&cached)?
         };
         let hash = hash16(&bytes);
-        *self.geom.write().unwrap() = Some(Geom { hash, bytes });
+        let stamp = std::fs::metadata(&cached).ok().map(|m| (m.len(), mtime_ns(&m)));
+        *self.geom.write().unwrap() = Some(Geom { hash, bytes, stamp });
         Ok(())
     }
 
@@ -397,6 +505,7 @@ impl PreviewState {
 
     pub fn project_view(&self) -> Value {
         let running = game::running();
+        let meta = self.ship_meta.read().unwrap().clone();
         let (ver, build, path) = match &self.game {
             Some(g) => (g.client_version.clone().unwrap_or_default(), g.build.clone(), g.root.display().to_string()),
             None => (String::new(), String::new(), String::new()),
@@ -412,8 +521,8 @@ impl PreviewState {
             "ship": {
                 "code": self.ship, "param": format!("P{}", self.ship.trim_start_matches('P')),
                 "index": format!("P{}", self.ship.trim_start_matches('P').split('_').next().unwrap_or("")),
-                "hull_model": self.hull_model, "name": {"zh": self.ship.clone(), "en": self.ship.clone(), "ru": self.ship.clone()},
-                "level": null, "nation": null, "species": null
+                "hull_model": self.hull_model, "name": {"zh": meta["name_local"].as_str().unwrap_or(&self.ship), "en": self.ship.clone(), "ru": meta["name_local"].as_str().unwrap_or(&self.ship)},
+                "level": meta["level"], "nation": meta["nation"], "species": meta["species"]
             },
             "game": {"client": "Мир кораблей", "version": ver, "build": build, "path": path, "running": !running.is_empty()},
             "install": self.install.read().unwrap().clone(),
@@ -632,6 +741,42 @@ pub fn find_seed(ship: &str) -> Option<PathBuf> {
     None
 }
 
+fn mtime_ns(m: &std::fs::Metadata) -> u128 {
+    m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_nanos()).unwrap_or(0)
+}
+
+/// 项目内容指纹: 路径+大小+mtime。跳过出图输出与 .wowsmod(其中 cache/geometry.glb 单独计入)
+pub fn project_fingerprint(root: &Path) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    let skip = ["renders", ".render", ".wowsmod", ".git", "target"];
+    let mut st = vec![root.to_path_buf()];
+    let mut items: Vec<(String, u64, u128)> = Vec::new();
+    while let Some(d) = st.pop() {
+        if let Ok(rd) = std::fs::read_dir(&d) {
+            for e in rd.flatten() {
+                let p = e.path();
+                let Ok(ft) = e.file_type() else { continue };
+                if ft.is_dir() {
+                    if d == root && skip.iter().any(|s| e.file_name().to_string_lossy() == *s) {
+                        continue;
+                    }
+                    st.push(p);
+                } else if let Ok(md) = e.metadata() {
+                    items.push((p.to_string_lossy().into_owned(), md.len(), mtime_ns(&md)));
+                }
+            }
+        }
+    }
+    let g = root.join(".wowsmod/cache/geometry.glb");
+    if let Ok(md) = std::fs::metadata(&g) {
+        items.push((g.to_string_lossy().into_owned(), md.len(), mtime_ns(&md)));
+    }
+    items.sort();
+    items.hash(&mut h);
+    h.finish()
+}
+
 fn hash16(d: &[u8]) -> String {
     let h = Sha256::digest(d);
     h.iter().take(8).map(|b| format!("{b:02x}")).collect()
@@ -814,7 +959,10 @@ fn edit_title(file: &str, j: &Value) -> String {
         let segs: Vec<&str> = stem.split('_').collect();
         if segs.len() > 3 { segs[segs.len() - 2..].join("_") } else { stem }
     };
-    let tex = argv.iter().find(|a| a.to_lowercase().ends_with(".dds") && !a.starts_with("--")).map(|s| short(s));
+    let _ = short;
+    // 贴图名先写成 ⟦全名⟧, rebuild 拿到部件表后换成部件中文名(resolve_part_tokens)
+    let token = |n: &str| format!("⟦{}⟧", n.rsplit(['/', '\\']).next().unwrap_or(n).trim_end_matches(".dds"));
+    let tex = argv.iter().find(|a| a.to_lowercase().ends_with(".dds") && !a.starts_with("--")).map(|s| token(s));
     let verb = match cmd {
         "import_sdk" => return "基线: 导入官方 SDK 模型".into(),
         "tex_recolor" => "换色",
@@ -829,7 +977,7 @@ fn edit_title(file: &str, j: &Value) -> String {
     let mut parts = vec![verb.to_string()];
     match cmd {
         "glow" => {
-            if let Some(m) = opt("--mg") { parts.push(short(&m)); }
+            if let Some(m) = opt("--mg") { parts.push(token(&m)); }
             if let Some(c) = opt("--color") { parts.push(c); }
             if let Some(p) = opt("--power") { parts.push(format!("强度 {p}")); }
         }
@@ -846,6 +994,77 @@ fn edit_title(file: &str, j: &Value) -> String {
         }
     }
     parts.join(" ")
+}
+
+const GROUP_ZH: &[(&str, &str)] = &[("hull", "船体"), ("main", "主炮"), ("secondary", "副炮"), ("aa", "防空炮"), ("director", "火控指挥仪"), ("radar", "雷达")];
+
+/// 贴图名(去掉 .dds) → 部件中文名: 先按部件表(哪些部件的材质用这个贴图), 再按名字关键字, 都不行就用缩写
+fn part_label(stem: &str, parts_doc: Option<&Value>) -> String {
+    let segs: Vec<String> = stem.split('_').map(|x| x.to_lowercase()).collect();
+    let kw = [("deckhouse", "上层建筑"), ("hull", "船体"), ("barrel", "炮管"), ("funnel", "烟囱"), ("mast", "桅杆"), ("bridge", "舰桥"), ("misc", "杂项"), ("bow", "舰艏"), ("stern", "舰艉")];
+    let kwl = kw.iter().find(|(k, _)| segs.iter().any(|s| s == k)).map(|x| x.1);
+    // 去掉通道后缀(_a/_mg/_n/_ao/_anim)得到材质名前缀
+    let mut base = stem.to_lowercase();
+    for suf in ["_anim", "_mg", "_ao", "_a", "_n"] {
+        if let Some(b) = base.strip_suffix(suf) {
+            base = b.to_string();
+            break;
+        }
+    }
+    let mut groups: Vec<&str> = vec![];
+    if let Some(doc) = parts_doc {
+        for p in doc["parts"].as_array().into_iter().flatten() {
+            let hit = p["materials"].as_array().into_iter().flatten().filter_map(|m| m.as_str()).any(|m| {
+                let m = m.to_lowercase();
+                let m = m.trim_end_matches(".mfm");
+                m == base || m.strip_prefix(&base).map(|r| r.starts_with('_')).unwrap_or(false)
+            });
+            if hit {
+                let g = p["group"].as_str().unwrap_or("");
+                if let Some((_, zh)) = GROUP_ZH.iter().find(|(k, _)| *k == g) {
+                    if !groups.contains(zh) {
+                        groups.push(zh);
+                    }
+                }
+            }
+        }
+    }
+    if groups.is_empty() || groups == ["船体"] {
+        if let Some(k) = kwl {
+            return k.to_string();
+        }
+        if !groups.is_empty() {
+            return "船体".into();
+        }
+        let s: Vec<&str> = stem.split('_').collect();
+        return if s.len() > 3 { s[s.len() - 3..].join("_") } else { stem.to_string() };
+    }
+    groups.retain(|g| *g != "船体");
+    let mut l = groups.iter().take(2).cloned().collect::<Vec<_>>().join("/");
+    if kwl == Some("炮管") {
+        l.push_str("炮管");
+    }
+    l
+}
+
+fn resolve_part_tokens(title: &str, parts_doc: Option<&Value>) -> String {
+    let mut out = String::new();
+    let mut rest = title;
+    while let Some(a) = rest.find('⟦') {
+        out.push_str(&rest[..a]);
+        let after = &rest[a + '⟦'.len_utf8()..];
+        match after.find('⟧') {
+            Some(b) => {
+                out.push_str(&part_label(&after[..b], parts_doc));
+                rest = &after[b + '⟧'.len_utf8()..];
+            }
+            None => {
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 fn command_line(argv: &[Value]) -> String {

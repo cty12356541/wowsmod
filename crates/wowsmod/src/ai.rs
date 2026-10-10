@@ -176,6 +176,7 @@ pub fn agents_md(exe: &str) -> String {
    - 游戏更新后迁移:migrate
    - 报错:troubleshoot
 3. 改完后执行 `wowsmod render <项目> --compare` 看图,再执行 `wowsmod install <项目>`,然后请用户重启游戏进港确认。
+   要出图先预热:`wowsmod render --warm <项目>` 启动常驻出图实例(之后每张约 1 秒,`wowsmod render status` 查看,空闲 15 分钟自动退出)。
 
 ## MCP
 如果已连接 `wowsmod mcp`,用它的 5 个入口工具(status / help / run / render / expand),流程同上。
