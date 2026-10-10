@@ -139,7 +139,7 @@ kernel32/ntdll/advapi32/bcryptprimitives/api-ms-win-core-synch, 无 vcruntime/uc
   - 未见过的情形明确报错而不是猜: version ≠ 0x7bc、模式 8 计数 > 0、flags 含 0..7 与 16 以外的位。
   - 不确定之处: 若某模式/旋转组合从未在真实数据中出现(见 M1_REPORT 的覆盖统计), 其映射是按同模式其他组合的规律推断的。
 - `extract` 默认还原(与 pfsunpack 一致), `--raw` 保留 pkg 原始字节。M4 往回打包时要么写标准 BC7 且偏移 40 = 0
-  (游戏是否接受未 prep 的贴图: 不确定, 需 M4 实测), 要么实现正向 BC7Prep。
+  (游戏是否接受未 prep 的贴图: **M2 已实测接受**, 见第 9 节), 要么实现正向 BC7Prep(不需要)。
 
 ## 8. M4 需要处理的问题(TODO)
 
@@ -147,3 +147,32 @@ kernel32/ntdll/advapi32/bcryptprimitives/api-ms-win-core-synch, 无 vcruntime/uc
    用占位文件 `registerShipMod` 会导致客户端崩溃(M0 exp2a)。M4 打包时必须用 pkg 中的真实文件填充(参考 m0\ingame\tools\fill_stubs.py)。
 2. **贴图需要 .dd0–.dd2**: 替换贴图必须同时生成 .dds + .dd0/.dd1/.dd2; 并决定写标准 BC7(偏移 40 = 0)还是正向 BC7Prep(见第 7 节), 需实测游戏是否接受前者。
 3. 导回 geometry 时还原 `extras.winding_flipped` 的 primitive 绕序, 并重新计算 assets.bin 中渲染集包围盒是否需要同步(不确定)。
+
+## 9. M2: 贴图写回、换色、发光、项目与安装
+
+### 9.1 分卷与编码
+- `.ddN` = 第 N 级单 mip 的独立 DDS; `.dds` = 从第 K 级起的完整链, 头部 reserved1[0]=K, reserved1[1]='QHDD', 偏移 40 = 1 表示 BC7Prep。
+  全量 24,040/24,042 组合并→拆分逐字节还原; K 基本符合"最大边 > 512 的 mip 各成一卷", 但写回时一律**沿用原贴图的 K**。
+- 编码: block_compression 0.10(MIT)纯 CPU, BC1/3/4/5/7; mip 用盒式滤波(`_a` 在 sRGB 线性化后平均, 其余线性)。
+- 游戏接受普通 DXT1 与普通 BC7(偏移 40 = 0, 不做 BC7Prep), 见 M2_REPORT 第 4 节。
+
+### 9.2 换色(recolor)
+- OKLab 空间: 选区(遮罩 × 饱和度/亮度/色相软选择)的加权平均色移到目标色, 每个像素保留与均值的亮度差(detail)和部分色度差(chroma_detail)。
+- 遮罩来源: PNG、UV 矩形、GLB(按材质/网格正则/包围盒选三角形光栅化到 UV, 带保守像素与膨胀)。
+
+### 9.3 _mg 通道(M2 结论)
+- R = 光泽度, G = 金属度, **B = 迷彩/涂装遮罩**: B 高的区域显示 camouflages.xml 配色而不是 `_a`。
+  只改 `_a` 时船体侧面不变色就是这个原因; `tex channel --channel b --set 0` 清零后 `_a` 才显示。是否兼作贴花遮罩: 不确定。
+- 在 `PBS_ship_emissive*.fx` 中, 发光 = B² × 漫反射色 × g_emissionTint(按实例由引擎给) × emissivePower(+ 动画项)。
+  勃艮第港口实测: 换 fx 并把 power 提到 30 也看不到发光, 推测 g_emissionTint 在普通外观下为 0(不确定)。所以"发光区"与"迷彩区"共用 B, 互相冲突。
+
+### 9.4 mod 项目格式(format_version 1)
+```
+mod.toml          [mod] name/version/description/game_build/ship/format_version; [install] mode = loose | sdk
+edits/NNN_<cmd>.json   每条编辑命令: argv、时间、工具版本、输入 sha256、遮罩/统计、输出文件
+assets/res_mods/...    改后的资源(sdk 模式在 PnFMods/<Mod>/ 下, 允许保留 SDK 占位文件)
+.install/         manifest.json(已安装清单)、backup/、history/ —— 不入版本库
+```
+### 9.5 install --dev / uninstall
+- 安装时自动: 占位文件从游戏包补齐(同名多份优先 content/gameplay/)、BC7 去 prep、补齐 .ddN(并检查 K 与原版一致)、sdk 模式补 PnFModsLoader.py。
+- 已存在的文件先备份; 清单逐条写入、写后校验。卸载只删哈希一致的文件, 还原备份, 删除自己创建的空目录。

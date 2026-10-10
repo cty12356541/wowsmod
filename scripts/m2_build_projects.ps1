@@ -1,7 +1,7 @@
 ﻿# M2 验收: 生成两个 mod 项目(只写 out\m2_projects, 不碰游戏目录)
 #  1) rt_loose  : DDS 读→写往返(loose 覆盖): _a/_mg 经 PNG 导出→重新编码, _n 去掉 BC7Prep 写成普通 BC7
 #  2) deepsea   : SDK 路线, 整船深海蓝(保留细节) + 烟囱发蓝光
-param([string]$Color = '#1E3F66', [string]$GlowColor = '#2E9BFF', [double]$Power = 4.0, [string]$DsName = 'deepsea2', [switch]$KeepCamoMask, [switch]$Force)
+param([string]$Color = '#1E3F66', [string]$GlowColor = '#2E9BFF', [double]$Power = 4.0, [string]$DsName = 'deepsea2', [switch]$KeepCamoMask, [string[]]$MfmSet = @(), [switch]$Force)
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 Set-Location (Split-Path $PSScriptRoot -Parent)
@@ -51,8 +51,8 @@ if (-not (Test-Path $ds)) {
     }
   }
   # 烟囱发光: MidBack 的 DeckHouse_skinned 部件(rs3)
-  Run @('glow', '--project', $ds, '--mg', 'FSB025_Bourgogne_1945_DeckHouse_mg.dds', '--diffuse', 'FSB025_Bourgogne_1945_DeckHouse_a.dds', '--color', $GlowColor,
-        '--glb', "$glbDir\FSB025_Bourgogne_1945_MidBack.glb", '--material', 'DeckHouse_skinned', '--mfm', 'FSB025_Bourgogne_1945_DeckHouse_skinned', '--power', "$Power", '--preview', "$prev\glow")
+  Run (@('glow', '--project', $ds, '--mg', 'FSB025_Bourgogne_1945_DeckHouse_mg.dds', '--diffuse', 'FSB025_Bourgogne_1945_DeckHouse_a.dds', '--color', $GlowColor,
+        '--glb', "$glbDir\FSB025_Bourgogne_1945_MidBack.glb", '--material', 'DeckHouse_skinned', '--mfm', 'FSB025_Bourgogne_1945_DeckHouse_skinned', '--power', "$Power", '--preview', "$prev\glow") + ($MfmSet | ForEach-Object { '--mfm-set', $_ }))
   Run @('mask', '--glb', "$glbDir\FSB025_Bourgogne_1945_MidBack.glb", '--material', 'DeckHouse_skinned', '--like', "$tex/FSB025_Bourgogne_1945_DeckHouse_a.dds", '-o', "$prev\funnel_mask.png", '--overlay', "$prev\funnel_overlay.png")
 }
 Run @('mod', 'status', $rt)
