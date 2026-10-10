@@ -4,7 +4,8 @@
 //!   SHIPMAT_EMISSIVE_* 材质按 _mg 的 B 通道叠加发光; 正交投影 + 面法线 Lambert + 2x 超采样。
 //!   --compare 时上半是原版(项目里的 SDK 副本 + 游戏原版贴图), 下半是项目当前状态。
 //! - 贴图: --texture <名> 原版 | 项目 左右并排。
-//! - --engine preview(M5 React 预览的 WebGL 无头渲染, API.md §11)只留了接口, 尚未接通。
+//! - --engine browser(默认): 系统 Edge/Chrome 无头 + CDP 调前端 WebGL(API.md §11)。
+//! - --engine soft: 内置软件光栅兜底。
 //! 近似: 没有法线贴图/AO/PBR/迷彩/海面光照, 颜色只适合比较"改没改、改成什么色", 港口实际观感以进港截图为准。
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -33,34 +34,52 @@ pub enum View {
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum, Debug)]
 pub enum Engine {
-    /// 内置软件光栅(默认, 不需要游戏运行/GPU)
+    /// 系统 Edge/Chrome 无头 + CDP 调前端 WebGL(默认, API.md §11)
+    Browser,
+    /// 内置软件光栅(无浏览器时的兜底, 近似)
     Soft,
-    /// M5 React 预览的 WebGL 无头渲染(接口保留, 尚未接通)
-    Preview,
 }
 
 #[derive(Args, Clone, Debug)]
 pub struct RenderArgs {
     /// mod 项目目录
     pub project: PathBuf,
-    /// 视角
+    /// 视角(软件引擎) / 或与 --query 二选一
     #[arg(long, value_enum, default_value_t = View::Quarter)]
     pub view: View,
-    /// 上下对比: 上=原版, 下=项目当前
+    /// 上下对比(软件) / CDP 时等价 compare=split&base=base
     #[arg(long)]
     pub compare: bool,
-    /// 只看一张贴图(文件名, 如 FSB025_Bourgogne_1945_Hull_a.dds): 左=原版, 右=项目
+    /// 只看一张贴图(软件引擎)
     #[arg(long, value_name = "NAME")]
     pub texture: Option<String>,
-    /// 输出 PNG(默认 <项目>/.render/<视角>.png)
+    /// 输出 PNG(默认 <项目>/renders/…)
     #[arg(short, long)]
     pub out: Option<PathBuf>,
-    /// 输出宽度(像素)
+    /// 宽度(软件) / 与 --size 二选一
     #[arg(long, default_value_t = 1600)]
     pub width: u32,
+    /// 尺寸 WxH(CDP, 默认 1600x900)
+    #[arg(long, default_value = "1600x900")]
+    pub size: String,
     /// 渲染引擎
-    #[arg(long, value_enum, default_value_t = Engine::Soft)]
+    #[arg(long, value_enum, default_value_t = Engine::Browser)]
     pub engine: Engine,
+    /// 浏览器可执行文件(默认自动查找 Edge/Chrome)
+    #[arg(long)]
+    pub browser: Option<PathBuf>,
+    /// 原样查询串(CDP): view=fq&compare=split&base=base …
+    #[arg(long)]
+    pub query: Option<String>,
+    /// 联系表
+    #[arg(long)]
+    pub sheet: bool,
+    /// 版本(CDP) head/base/sN
+    #[arg(long, default_value = "head")]
+    pub rev: String,
+    /// 对比基线
+    #[arg(long)]
+    pub base: Option<String>,
 }
 
 // ---------- 小向量 ----------
@@ -181,12 +200,14 @@ struct TexCache<'a> {
 }
 
 impl TexCache<'_> {
+    /// name: 贴图文件名或本地路径(项目里同名文件有多个时用 .mfm 给出的确切路径)
     fn get(&mut self, name: &str) -> Option<std::sync::Arc<Image>> {
         if let Some(v) = self.imgs.get(name) {
             return v.clone();
         }
         let r = (|| -> Result<Image> {
-            let t = texcmd::load_tex(name, Some(self.ctx), self.proj, self.proj.is_none())?;
+            let local = Path::new(name).is_file();
+            let t = if local { texcmd::load_tex(name, Some(self.ctx), None, false)? } else { texcmd::load_tex(name, Some(self.ctx), self.proj, self.proj.is_none())? };
             let lv = (0..t.dds.header.levels()).find(|l| t.dds.header.level_dims(*l).0 <= 1024).unwrap_or(t.dds.header.levels() - 1);
             texture::decode_level(&t.dds, lv).map_err(|e| anyhow!("{e}"))
         })();
@@ -252,7 +273,15 @@ fn load_scene(glb_path: &Path, assets_root: &Path, tc: &mut TexCache) -> Result<
         } else {
             let text = std::fs::read_to_string(assets_root.join(&mfm_rel)).unwrap_or_default();
             let props = mfm::properties(&text);
-            let tex_of = |n: &str| props.iter().find(|(k, _, _)| k == n).map(|(_, _, v)| v.rsplit('/').next().unwrap_or(v).to_string());
+            // 项目内确切文件(非占位)优先, 否则按文件名(项目同名/游戏原版)
+            let proj_mode = tc.proj.is_some();
+            let tex_of = |n: &str| {
+                props.iter().find(|(k, _, _)| k == n).map(|(_, _, v)| {
+                    let f = assets_root.join(v);
+                    let real = proj_mode && std::fs::read(&f).map(|d| !mfm::is_sdk_stub(&d)).unwrap_or(false);
+                    if real { f.display().to_string() } else { v.rsplit('/').next().unwrap_or(v).to_string() }
+                })
+            };
             let fxs = mfm::fx(&text).unwrap_or_default();
             let emissive = ident.contains("EMISSIVE") || fxs.contains("emissive");
             let albedo = tex_of("diffuseMap").and_then(|n| tc.get(&n));
@@ -457,8 +486,8 @@ fn self_exe_json(cli: &Cli, args: &[String]) -> Result<Value> {
 
 /// 渲染; 返回 (PNG 字节, 说明 JSON)
 pub fn render(cli: &Cli, a: &RenderArgs) -> Result<(Vec<u8>, Value)> {
-    if a.engine == Engine::Preview {
-        bail!("--engine preview 尚未接通: 需要 M5 预览后端(见 /workspace/preview_app/API.md §11 ?render=wait 无头渲染约定)。下一步: 先用默认 --engine soft");
+    if a.engine == Engine::Browser {
+        return render_browser(cli, a);
     }
     let p = Project::open(&a.project)?;
     let ctx = game_ctx(cli, true)?.unwrap();
@@ -469,7 +498,13 @@ pub fn render(cli: &Cli, a: &RenderArgs) -> Result<(Vec<u8>, Value)> {
         let mut tb = TexCache { ctx: &ctx, proj: None, imgs: HashMap::new(), missing: vec![] };
         let base = tb.get(t).ok_or_else(|| anyhow!("读不到原版贴图 {t}: {:?}", tb.missing))?;
         let mut th = TexCache { ctx: &ctx, proj: Some(&p), imgs: HashMap::new(), missing: vec![] };
-        let head = th.get(t).ok_or_else(|| anyhow!("读不到项目贴图 {t}: {:?}", th.missing))?;
+        let real: Vec<PathBuf> = p.find_by_name(t)?.into_iter().filter(|f| std::fs::read(f).map(|d| !mfm::is_sdk_stub(&d)).unwrap_or(false)).collect();
+        let spec = match real.len() {
+            0 => t.clone(),
+            1 => real[0].display().to_string(),
+            n => bail!("项目里有 {n} 个已修改的 {t}: {:?}; 请给出其中一个的路径", real),
+        };
+        let head = th.get(&spec).ok_or_else(|| anyhow!("读不到项目贴图 {t}: {:?}", th.missing))?;
         let half = (width / 2).max(64);
         let fit = |i: &Image| -> Image {
             let mut x = i.clone();
@@ -534,30 +569,91 @@ pub fn render(cli: &Cli, a: &RenderArgs) -> Result<(Vec<u8>, Value)> {
         "triangles": head.tris_world.len(), "materials": head.mats.len(), "emissive_materials": head.mats.iter().filter(|m| m.emissive).count(), "seconds": t0.elapsed().as_secs_f32(), "notes": notes})))
 }
 
+fn parse_size(s: &str) -> (u32, u32) {
+    let mut it = s.split(|c| c == 'x' || c == 'X' || c == ',');
+    let w = it.next().and_then(|x| x.parse().ok()).unwrap_or(1600);
+    let h = it.next().and_then(|x| x.parse().ok()).unwrap_or(900);
+    (w.clamp(64, 4096), h.clamp(64, 4096))
+}
+
+fn build_query(a: &RenderArgs) -> String {
+    if let Some(q) = &a.query {
+        return q.clone();
+    }
+    let view = match a.view {
+        View::Side => "side",
+        View::Top => "top",
+        View::Quarter | View::All => "fq",
+    };
+    let mut q = format!("view={view}&rev={}", a.rev);
+    if a.sheet {
+        q.push_str("&sheet=1&views=side,fq,rq,top&revs=base,head");
+    } else if a.compare || a.base.is_some() {
+        q.push_str(&format!("&compare=split&base={}", a.base.as_deref().unwrap_or("base")));
+    }
+    let (w, h) = parse_size(&a.size);
+    q.push_str(&format!("&w={w}&h={h}"));
+    q
+}
+
+fn render_browser(cli: &Cli, a: &RenderArgs) -> Result<(Vec<u8>, Value)> {
+    let q = build_query(a);
+    let (w, h) = parse_size(&a.size);
+    match crate::preview::render_pngs(cli, &a.project, &[("main".into(), q.clone())], a.browser.as_deref(), (w, h)) {
+        Ok(mut v) => {
+            let (png, meta) = v.remove(0);
+            Ok((png, json!({"kind": "browser", "engine": "browser", "query": q, "meta": meta, "size": [meta["width"], meta["height"]]})))
+        }
+        Err(e) => {
+            let msg = format!("{e:#}");
+            if msg.contains("browser_not_found") {
+                Err(anyhow!(crate::preview::BrowserMissing))
+            } else {
+                Err(e)
+            }
+        }
+    }
+}
+
 pub fn cmd_render(cli: &Cli, a: &RenderArgs) -> Result<i32> {
-    let (png, mut v) = render(cli, a)?;
+    let r = render(cli, a);
+    if let Err(e) = &r {
+        if format!("{e:#}").contains("browser_not_found") {
+            let url_hint = format!("(可先 wowsmod preview {} 手动查看)", a.project.display());
+            let v = crate::preview::browser_not_found_value(Some(&url_hint));
+            crate::guide::stash(&v);
+            if cli.json { emit(cli, &v); } else {
+                eprintln!("错误: 找不到 Edge/Chrome。用 --browser 指定, 或 --engine soft 用软件光栅。{}", url_hint);
+            }
+            return Ok(3);
+        }
+    }
+    let (png, mut v) = r?;
     let out = a.out.clone().unwrap_or_else(|| {
         let n = match &a.texture {
             Some(t) => format!("tex_{}.png", t.trim_end_matches(".dds")),
+            None if a.engine == Engine::Browser => {
+                let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+                format!("{ts}_{}.png", format!("{:?}", a.view).to_lowercase())
+            }
             None => format!("{}{}.png", format!("{:?}", a.view).to_lowercase(), if a.compare { "_compare" } else { "" }),
         };
-        a.project.join(".render").join(n)
+        let dir = if a.engine == Engine::Browser { a.project.join("renders") } else { a.project.join(".render") };
+        dir.join(n)
     });
-    if let Some(d) = out.parent() {
-        std::fs::create_dir_all(d)?;
-    }
+    if let Some(d) = out.parent() { std::fs::create_dir_all(d)?; }
     std::fs::write(&out, &png)?;
+    let abs = std::fs::canonicalize(&out).unwrap_or(out.clone());
     v["ok"] = json!(true);
-    v["out"] = json!(out.display().to_string());
+    v["out"] = json!(abs.display().to_string().trim_start_matches(r"\\?\"));
     crate::guide::stash(&v);
     if cli.json {
         emit(cli, &v);
     } else {
-        println!("已出图: {} ({}x{}) {}", out.display(), v["size"][0], v["size"][1], v["layout"].as_str().unwrap_or(""));
-        for n in v["notes"].as_array().into_iter().flatten() {
-            println!("  注: {}", n.as_str().unwrap_or(""));
+        println!("{}", abs.display());
+        if let Some(notes) = v["notes"].as_array() {
+            for n in notes { println!("  注: {}", n.as_str().unwrap_or("")); }
         }
-        crate::guide::stash(&v);
     }
     Ok(0)
 }

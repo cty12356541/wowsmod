@@ -1,11 +1,14 @@
 # render: 出图看效果
 
 ```
-wowsmod render <项目> --compare               # 上=原版, 下=当前; 默认 3/4 视角
-wowsmod render <项目> --view all --compare    # side/quarter/top 三个视角
-wowsmod render <项目> --texture FSB025_Bourgogne_1945_Hull_a.dds   # 单张贴图: 左原版, 右当前
+wowsmod render <项目> --compare                 # 默认: Edge/Chrome 无头 WebGL, 分屏对比 base|head
+wowsmod render <项目> --query "view=fq&compare=split&base=base&w=1600&h=900"
+wowsmod render <项目> --sheet                   # 四视角 × base/head 联系表
+wowsmod render <项目> --engine soft --compare   # 无浏览器时的软件光栅兜底
+wowsmod preview <项目>                          # 启动本机预览页(可交互)
 ```
-- 输出 PNG 默认在 `<项目>/.render/`,`--json` 结果里有 `out` 路径。MCP 的 `wowsmod_render` 会直接返回图片。
-- 内置软件光栅,不需要启动游戏,也不需要 GPU。只渲染漫反射贴图和发光(发光区会提亮),没有法线、AO、PBR、迷彩和海面环境光。颜色只能用来判断“改没改、大致改成什么”,真实观感以进港截图为准。
-- 3D 出图需要 SDK 项目。`--compare` 还需要项目里有 SDK 原版副本(import-sdk 时会一起拷入)。
-- `--engine preview`(M5 React 预览的 WebGL 无头渲染)目前只留了接口,还没接通。
+- 默认引擎是系统 Edge/Chrome(API.md §11): 内嵌与 `preview` 相同的服务, 用 CDP 调 `window.__render`。
+- 找不到浏览器: 退出码 3、`browser_not_found`, 提示安装或用 `--browser` / `--engine soft`。
+- 输出默认写到 `<项目>/renders/`。`--json` 含绝对路径 `out` 与 meta。
+- MCP 的 `wowsmod_render` 直接返回 PNG 图片内容; 找不到浏览器时返回文本说明(不算错误)。
+- 软件光栅(`--engine soft`)只有漫反射+发光近似, 用于没浏览器的环境。真实观感以 WebGL 出图和进港截图为准。

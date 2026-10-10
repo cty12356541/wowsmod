@@ -1,0 +1,880 @@
+{
+ "ship": {
+  "maxSpeed_kn": 32.0,
+  "speedCoef": 1.0,
+  "rudderTime_s": 16.57,
+  "turningRadius_m": 910.0,
+  "maxRudderAngle_deg": 30.0,
+  "size_m": [
+   265.0,
+   35.5,
+   36.4
+  ],
+  "draft_m": 11,
+  "tonnage_t": 54000.0,
+  "rollEffect": 81.0,
+  "forwardEngineUpTime_s": 60.0,
+  "backwardEngineUpTime_s": 30.0,
+  "backwardPowerCoef": 4.0
+ },
+ "mounts": {
+  "HP_FGM_1": {
+   "group": "main",
+   "model": "FGM049_380mm_45_Mle_1935",
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ],
+   "muzzles": 4,
+   "numBarrels": 4,
+   "barrelDiameter": 0.38,
+   "rotationSpeed": [
+    5.0,
+    5.5
+   ],
+   "horizSector": [
+    -150.0,
+    150.0
+   ],
+   "vertSector": [
+    -2.0,
+    35.0
+   ],
+   "deadZone": [],
+   "pitchDeadZones": [],
+   "shotDelay": 28.0,
+   "smallGun": null,
+   "maxDist": 24800.0
+  },
+  "HP_FGM_2": {
+   "group": "main",
+   "model": "FGM049_380mm_45_Mle_1935",
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ],
+   "muzzles": 4,
+   "numBarrels": 4,
+   "barrelDiameter": 0.38,
+   "rotationSpeed": [
+    5.0,
+    5.5
+   ],
+   "horizSector": [
+    -150.0,
+    150.0
+   ],
+   "vertSector": [
+    -2.0,
+    35.0
+   ],
+   "deadZone": [],
+   "pitchDeadZones": [],
+   "shotDelay": 28.0,
+   "smallGun": null,
+   "maxDist": 24800.0
+  },
+  "HP_FGM_3": {
+   "group": "main",
+   "model": "FGM049_380mm_45_Mle_1935",
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ],
+   "muzzles": 4,
+   "numBarrels": 4,
+   "barrelDiameter": 0.38,
+   "rotationSpeed": [
+    5.0,
+    5.5
+   ],
+   "horizSector": [
+    -143.0,
+    143.0
+   ],
+   "vertSector": [
+    -2.0,
+    35.0
+   ],
+   "deadZone": [],
+   "pitchDeadZones": [],
+   "shotDelay": 28.0,
+   "smallGun": null,
+   "maxDist": 24800.0
+  },
+  "HP_FGS_1": {
+   "group": "secondary",
+   "model": "FGS053_152_55_Mle_1950",
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ],
+   "muzzles": 3,
+   "numBarrels": 3,
+   "barrelDiameter": 0.152,
+   "rotationSpeed": [
+    60.0,
+    1.0
+   ],
+   "horizSector": [
+    -137.0,
+    137.0
+   ],
+   "vertSector": [
+    -1.0,
+    75.0
+   ],
+   "deadZone": [],
+   "pitchDeadZones": [],
+   "shotDelay": 8.0,
+   "smallGun": true,
+   "maxDist": 8300.0
+  },
+  "HP_FGS_2": {
+   "group": "secondary",
+   "model": "FGS036_127mm_54_5_1948",
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ],
+   "muzzles": 2,
+   "numBarrels": 2,
+   "barrelDiameter": 0.127,
+   "rotationSpeed": [
+    60.0,
+    1.0
+   ],
+   "horizSector": [
+    -150.0,
+    0.0
+   ],
+   "vertSector": [
+    -1.0,
+    80.0
+   ],
+   "deadZone": [],
+   "pitchDeadZones": [],
+   "shotDelay": 4.0,
+   "smallGun": true,
+   "maxDist": 8300.0
+  },
+  "HP_FGS_3": {
+   "group": "secondary",
+   "model": "FGS036_127mm_54_5_1948",
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ],
+   "muzzles": 2,
+   "numBarrels": 2,
+   "barrelDiameter": 0.127,
+   "rotationSpeed": [
+    60.0,
+    1.0
+   ],
+   "horizSector": [
+    0.0,
+    150.0
+   ],
+   "vertSector": [
+    -1.0,
+    80.0
+   ],
+   "deadZone": [],
+   "pitchDeadZones": [],
+   "shotDelay": 4.0,
+   "smallGun": true,
+   "maxDist": 8300.0
+  },
+  "HP_FGS_4": {
+   "group": "secondary",
+   "model": "FGS036_127mm_54_5_1948",
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ],
+   "muzzles": 2,
+   "numBarrels": 2,
+   "barrelDiameter": 0.127,
+   "rotationSpeed": [
+    60.0,
+    1.0
+   ],
+   "horizSector": [
+    -155.0,
+    0.0
+   ],
+   "vertSector": [
+    0.0,
+    80.0
+   ],
+   "deadZone": [
+    [
+     -22.0,
+     0.0
+    ]
+   ],
+   "pitchDeadZones": [],
+   "shotDelay": 4.0,
+   "smallGun": true,
+   "maxDist": 8300.0
+  },
+  "HP_FGS_5": {
+   "group": "secondary",
+   "model": "FGS036_127mm_54_5_1948",
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ],
+   "muzzles": 2,
+   "numBarrels": 2,
+   "barrelDiameter": 0.127,
+   "rotationSpeed": [
+    60.0,
+    1.0
+   ],
+   "horizSector": [
+    0.0,
+    155.0
+   ],
+   "vertSector": [
+    0.0,
+    80.0
+   ],
+   "deadZone": [
+    [
+     0.0,
+     22.0
+    ]
+   ],
+   "pitchDeadZones": [],
+   "shotDelay": 4.0,
+   "smallGun": true,
+   "maxDist": 8300.0
+  },
+  "HP_FGS_6": {
+   "group": "secondary",
+   "model": "FGS036_127mm_54_5_1948",
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ],
+   "muzzles": 2,
+   "numBarrels": 2,
+   "barrelDiameter": 0.127,
+   "rotationSpeed": [
+    60.0,
+    1.0
+   ],
+   "horizSector": [
+    0.0,
+    155.0
+   ],
+   "vertSector": [
+    0.0,
+    80.0
+   ],
+   "deadZone": [
+    [
+     0.0,
+     22.0
+    ]
+   ],
+   "pitchDeadZones": [],
+   "shotDelay": 4.0,
+   "smallGun": true,
+   "maxDist": 8300.0
+  },
+  "HP_FGS_7": {
+   "group": "secondary",
+   "model": "FGS036_127mm_54_5_1948",
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ],
+   "muzzles": 2,
+   "numBarrels": 2,
+   "barrelDiameter": 0.127,
+   "rotationSpeed": [
+    60.0,
+    1.0
+   ],
+   "horizSector": [
+    -155.0,
+    0.0
+   ],
+   "vertSector": [
+    0.0,
+    80.0
+   ],
+   "deadZone": [
+    [
+     -22.0,
+     0.0
+    ]
+   ],
+   "pitchDeadZones": [],
+   "shotDelay": 4.0,
+   "smallGun": true,
+   "maxDist": 8300.0
+  },
+  "HP_FGS_8": {
+   "group": "secondary",
+   "model": "FGS036_127mm_54_5_1948",
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ],
+   "muzzles": 2,
+   "numBarrels": 2,
+   "barrelDiameter": 0.127,
+   "rotationSpeed": [
+    60.0,
+    1.0
+   ],
+   "horizSector": [
+    0.0,
+    150.0
+   ],
+   "vertSector": [
+    0.0,
+    80.0
+   ],
+   "deadZone": [],
+   "pitchDeadZones": [],
+   "shotDelay": 4.0,
+   "smallGun": true,
+   "maxDist": 8300.0
+  },
+  "HP_FGS_9": {
+   "group": "secondary",
+   "model": "FGS036_127mm_54_5_1948",
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ],
+   "muzzles": 2,
+   "numBarrels": 2,
+   "barrelDiameter": 0.127,
+   "rotationSpeed": [
+    60.0,
+    1.0
+   ],
+   "horizSector": [
+    -150.0,
+    0.0
+   ],
+   "vertSector": [
+    0.0,
+    80.0
+   ],
+   "deadZone": [],
+   "pitchDeadZones": [],
+   "shotDelay": 4.0,
+   "smallGun": true,
+   "maxDist": 8300.0
+  },
+  "HP_FGS_10": {
+   "group": "secondary",
+   "model": "FGS053_152_55_Mle_1950",
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ],
+   "muzzles": 3,
+   "numBarrels": 3,
+   "barrelDiameter": 0.152,
+   "rotationSpeed": [
+    60.0,
+    1.0
+   ],
+   "horizSector": [
+    -146.0,
+    146.0
+   ],
+   "vertSector": [
+    -1.0,
+    75.0
+   ],
+   "deadZone": [],
+   "pitchDeadZones": [],
+   "shotDelay": 8.0,
+   "smallGun": true,
+   "maxDist": 8300.0
+  },
+  "HP_FGS_11": {
+   "group": "secondary",
+   "model": "FGS053_152_55_Mle_1950",
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ],
+   "muzzles": 3,
+   "numBarrels": 3,
+   "barrelDiameter": 0.152,
+   "rotationSpeed": [
+    60.0,
+    1.0
+   ],
+   "horizSector": [
+    -142.0,
+    142.0
+   ],
+   "vertSector": [
+    -1.0,
+    75.0
+   ],
+   "deadZone": [],
+   "pitchDeadZones": [],
+   "shotDelay": 8.0,
+   "smallGun": true,
+   "maxDist": 8300.0
+  },
+  "HP_FGA_1": {
+   "group": "aa",
+   "model": "FGA041_20mm_Oerlikon_MK20_Twin",
+   "bones": [],
+   "muzzles": 0,
+   "numBarrels": 2,
+   "barrelDiameter": 0.02,
+   "rotationSpeed": null,
+   "horizSector": null,
+   "vertSector": null,
+   "deadZone": [],
+   "pitchDeadZones": [],
+   "shotDelay": 5.0,
+   "smallGun": null,
+   "maxDist": null
+  },
+  "HP_FGA_2": {
+   "group": "aa",
+   "model": "FGA041_20mm_Oerlikon_MK20_Twin",
+   "bones": [],
+   "muzzles": 0,
+   "numBarrels": 2,
+   "barrelDiameter": 0.02,
+   "rotationSpeed": null,
+   "horizSector": null,
+   "vertSector": null,
+   "deadZone": [],
+   "pitchDeadZones": [],
+   "shotDelay": 5.0,
+   "smallGun": null,
+   "maxDist": null
+  },
+  "HP_FGA_3": {
+   "group": "aa",
+   "model": "FGA041_20mm_Oerlikon_MK20_Twin",
+   "bones": [],
+   "muzzles": 0,
+   "numBarrels": 2,
+   "barrelDiameter": 0.02,
+   "rotationSpeed": null,
+   "horizSector": null,
+   "vertSector": null,
+   "deadZone": [],
+   "pitchDeadZones": [],
+   "shotDelay": 5.0,
+   "smallGun": null,
+   "maxDist": null
+  },
+  "HP_FGA_4": {
+   "group": "aa",
+   "model": "FGA041_20mm_Oerlikon_MK20_Twin",
+   "bones": [],
+   "muzzles": 0,
+   "numBarrels": 2,
+   "barrelDiameter": 0.02,
+   "rotationSpeed": null,
+   "horizSector": null,
+   "vertSector": null,
+   "deadZone": [],
+   "pitchDeadZones": [],
+   "shotDelay": 5.0,
+   "smallGun": null,
+   "maxDist": null
+  },
+  "HP_FGA_5": {
+   "group": "aa",
+   "model": "FGA056_57mm_60_2_25",
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ],
+   "muzzles": 2,
+   "numBarrels": 2,
+   "barrelDiameter": 0.057,
+   "rotationSpeed": null,
+   "horizSector": null,
+   "vertSector": null,
+   "deadZone": [],
+   "pitchDeadZones": [],
+   "shotDelay": 5.0,
+   "smallGun": null,
+   "maxDist": null
+  },
+  "HP_FGA_6": {
+   "group": "aa",
+   "model": "FGA056_57mm_60_2_25",
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ],
+   "muzzles": 2,
+   "numBarrels": 2,
+   "barrelDiameter": 0.057,
+   "rotationSpeed": null,
+   "horizSector": null,
+   "vertSector": null,
+   "deadZone": [],
+   "pitchDeadZones": [],
+   "shotDelay": 5.0,
+   "smallGun": null,
+   "maxDist": null
+  },
+  "HP_FGA_7": {
+   "group": "aa",
+   "model": "FGA014_20mm_Oerlikon_MK4",
+   "bones": [],
+   "muzzles": 0,
+   "numBarrels": 1,
+   "barrelDiameter": 0.02,
+   "rotationSpeed": null,
+   "horizSector": null,
+   "vertSector": null,
+   "deadZone": [],
+   "pitchDeadZones": [],
+   "shotDelay": 5.0,
+   "smallGun": null,
+   "maxDist": null
+  },
+  "HP_FGA_8": {
+   "group": "aa",
+   "model": "FGA014_20mm_Oerlikon_MK4",
+   "bones": [],
+   "muzzles": 0,
+   "numBarrels": 1,
+   "barrelDiameter": 0.02,
+   "rotationSpeed": null,
+   "horizSector": null,
+   "vertSector": null,
+   "deadZone": [],
+   "pitchDeadZones": [],
+   "shotDelay": 5.0,
+   "smallGun": null,
+   "maxDist": null
+  },
+  "HP_FGA_9": {
+   "group": "aa",
+   "model": "FGA014_20mm_Oerlikon_MK4",
+   "bones": [],
+   "muzzles": 0,
+   "numBarrels": 1,
+   "barrelDiameter": 0.02,
+   "rotationSpeed": null,
+   "horizSector": null,
+   "vertSector": null,
+   "deadZone": [],
+   "pitchDeadZones": [],
+   "shotDelay": 5.0,
+   "smallGun": null,
+   "maxDist": null
+  },
+  "HP_FGA_10": {
+   "group": "aa",
+   "model": "FGA014_20mm_Oerlikon_MK4",
+   "bones": [],
+   "muzzles": 0,
+   "numBarrels": 1,
+   "barrelDiameter": 0.02,
+   "rotationSpeed": null,
+   "horizSector": null,
+   "vertSector": null,
+   "deadZone": [],
+   "pitchDeadZones": [],
+   "shotDelay": 5.0,
+   "smallGun": null,
+   "maxDist": null
+  },
+  "HP_FGA_11": {
+   "group": "aa",
+   "model": "FGA056_57mm_60_2_25",
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ],
+   "muzzles": 2,
+   "numBarrels": 2,
+   "barrelDiameter": 0.057,
+   "rotationSpeed": null,
+   "horizSector": null,
+   "vertSector": null,
+   "deadZone": [],
+   "pitchDeadZones": [],
+   "shotDelay": 5.0,
+   "smallGun": null,
+   "maxDist": null
+  },
+  "HP_FGA_12": {
+   "group": "aa",
+   "model": "FGA056_57mm_60_2_25",
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ],
+   "muzzles": 2,
+   "numBarrels": 2,
+   "barrelDiameter": 0.057,
+   "rotationSpeed": null,
+   "horizSector": null,
+   "vertSector": null,
+   "deadZone": [],
+   "pitchDeadZones": [],
+   "shotDelay": 5.0,
+   "smallGun": null,
+   "maxDist": null
+  },
+  "HP_FGA_13": {
+   "group": "aa",
+   "model": "FGA056_57mm_60_2_25",
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ],
+   "muzzles": 2,
+   "numBarrels": 2,
+   "barrelDiameter": 0.057,
+   "rotationSpeed": null,
+   "horizSector": null,
+   "vertSector": null,
+   "deadZone": [],
+   "pitchDeadZones": [],
+   "shotDelay": 5.0,
+   "smallGun": null,
+   "maxDist": null
+  },
+  "HP_FGA_14": {
+   "group": "aa",
+   "model": "FGA056_57mm_60_2_25",
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ],
+   "muzzles": 2,
+   "numBarrels": 2,
+   "barrelDiameter": 0.057,
+   "rotationSpeed": null,
+   "horizSector": null,
+   "vertSector": null,
+   "deadZone": [],
+   "pitchDeadZones": [],
+   "shotDelay": 5.0,
+   "smallGun": null,
+   "maxDist": null
+  },
+  "HP_FGA_15": {
+   "group": "aa",
+   "model": "FGA056_57mm_60_2_25",
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ],
+   "muzzles": 2,
+   "numBarrels": 2,
+   "barrelDiameter": 0.057,
+   "rotationSpeed": null,
+   "horizSector": null,
+   "vertSector": null,
+   "deadZone": [],
+   "pitchDeadZones": [],
+   "shotDelay": 5.0,
+   "smallGun": null,
+   "maxDist": null
+  },
+  "HP_FGA_16": {
+   "group": "aa",
+   "model": "FGA056_57mm_60_2_25",
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ],
+   "muzzles": 2,
+   "numBarrels": 2,
+   "barrelDiameter": 0.057,
+   "rotationSpeed": null,
+   "horizSector": null,
+   "vertSector": null,
+   "deadZone": [],
+   "pitchDeadZones": [],
+   "shotDelay": 5.0,
+   "smallGun": null,
+   "maxDist": null
+  },
+  "HP_FGA_17": {
+   "group": "aa",
+   "model": "FGA056_57mm_60_2_25",
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ],
+   "muzzles": 2,
+   "numBarrels": 2,
+   "barrelDiameter": 0.057,
+   "rotationSpeed": null,
+   "horizSector": null,
+   "vertSector": null,
+   "deadZone": [],
+   "pitchDeadZones": [],
+   "shotDelay": 5.0,
+   "smallGun": null,
+   "maxDist": null
+  },
+  "HP_FGA_18": {
+   "group": "aa",
+   "model": "FGA056_57mm_60_2_25",
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ],
+   "muzzles": 2,
+   "numBarrels": 2,
+   "barrelDiameter": 0.057,
+   "rotationSpeed": null,
+   "horizSector": null,
+   "vertSector": null,
+   "deadZone": [],
+   "pitchDeadZones": [],
+   "shotDelay": 5.0,
+   "smallGun": null,
+   "maxDist": null
+  },
+  "HP_FGA_19": {
+   "group": "aa",
+   "model": "FGA056_57mm_60_2_25",
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ],
+   "muzzles": 2,
+   "numBarrels": 2,
+   "barrelDiameter": 0.057,
+   "rotationSpeed": null,
+   "horizSector": null,
+   "vertSector": null,
+   "deadZone": [],
+   "pitchDeadZones": [],
+   "shotDelay": 5.0,
+   "smallGun": null,
+   "maxDist": null
+  },
+  "HP_FGA_20": {
+   "group": "aa",
+   "model": "FGA056_57mm_60_2_25",
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ],
+   "muzzles": 2,
+   "numBarrels": 2,
+   "barrelDiameter": 0.057,
+   "rotationSpeed": null,
+   "horizSector": null,
+   "vertSector": null,
+   "deadZone": [],
+   "pitchDeadZones": [],
+   "shotDelay": 5.0,
+   "smallGun": null,
+   "maxDist": null
+  },
+  "HP_FGA_21": {
+   "group": "aa",
+   "model": "FGA041_20mm_Oerlikon_MK20_Twin",
+   "bones": [],
+   "muzzles": 0,
+   "numBarrels": 2,
+   "barrelDiameter": 0.02,
+   "rotationSpeed": null,
+   "horizSector": null,
+   "vertSector": null,
+   "deadZone": [],
+   "pitchDeadZones": [],
+   "shotDelay": 5.0,
+   "smallGun": null,
+   "maxDist": null
+  },
+  "HP_FGA_22": {
+   "group": "aa",
+   "model": "FGA041_20mm_Oerlikon_MK20_Twin",
+   "bones": [],
+   "muzzles": 0,
+   "numBarrels": 2,
+   "barrelDiameter": 0.02,
+   "rotationSpeed": null,
+   "horizSector": null,
+   "vertSector": null,
+   "deadZone": [],
+   "pitchDeadZones": [],
+   "shotDelay": 5.0,
+   "smallGun": null,
+   "maxDist": null
+  },
+  "HP_FGA_23": {
+   "group": "aa",
+   "model": "FGA041_20mm_Oerlikon_MK20_Twin",
+   "bones": [],
+   "muzzles": 0,
+   "numBarrels": 2,
+   "barrelDiameter": 0.02,
+   "rotationSpeed": null,
+   "horizSector": null,
+   "vertSector": null,
+   "deadZone": [],
+   "pitchDeadZones": [],
+   "shotDelay": 5.0,
+   "smallGun": null,
+   "maxDist": null
+  },
+  "HP_FGA_24": {
+   "group": "aa",
+   "model": "FGA041_20mm_Oerlikon_MK20_Twin",
+   "bones": [],
+   "muzzles": 0,
+   "numBarrels": 2,
+   "barrelDiameter": 0.02,
+   "rotationSpeed": null,
+   "horizSector": null,
+   "vertSector": null,
+   "deadZone": [],
+   "pitchDeadZones": [],
+   "shotDelay": 5.0,
+   "smallGun": null,
+   "maxDist": null
+  }
+ }
+}

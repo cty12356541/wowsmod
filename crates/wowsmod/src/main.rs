@@ -9,6 +9,7 @@ mod m2cmd;
 mod m3cmd;
 mod m4cmd;
 mod mcp;
+mod preview;
 mod modproj;
 mod registry;
 mod render;
@@ -183,8 +184,10 @@ enum Cmd {
     Migrate(m4cmd::MigrateArgs),
     /// 打成可分发的 .wsmod 包(不含游戏原版资源与任何专有组件)
     Pack(m4cmd::PackArgs),
-    /// 出图看效果: 整船软件渲染(可与原版上下对比)或单张贴图对比 / render a preview image
+    /// 出图看效果: 默认 Edge/Chrome 无头 WebGL(API.md §11); --engine soft 为软件光栅
     Render(render::RenderArgs),
+    /// 启动本机预览服务(嵌入前端 + /api/v1), 默认打开浏览器 / local preview server
+    Preview(preview::PreviewArgs),
     /// 总览: 游戏、已装 mod、本机 SDK 素材、项目状态(AI 的第一步) / overview
     Status(ai::StatusArgs),
     /// 分主题说明(按需阅读): wowsmod help [主题] [--search 词] / topic help
@@ -278,6 +281,7 @@ fn run(cli: Cli) -> Result<i32> {
         Cmd::Migrate(a) => m4cmd::cmd_migrate(&cli, a),
         Cmd::Pack(a) => m4cmd::cmd_pack(&cli, a),
         Cmd::Render(a) => render::cmd_render(&cli, a),
+        Cmd::Preview(a) => preview::cmd_preview(&cli, a),
         Cmd::Status(a) => ai::cmd_status(&cli, a),
         Cmd::Help { topic, search } => ai::cmd_help(&cli, topic.as_deref(), search.as_deref()),
         Cmd::Mcp => mcp::serve(&cli),
@@ -834,13 +838,13 @@ enum Source<'a> {
 }
 
 #[allow(dead_code)]
-struct GameCtx {
+pub(crate) struct GameCtx {
     install: game::GameInstall,
     index: GameIndex,
     reader: PkgReader,
 }
 
-fn game_ctx(cli: &Cli, need: bool) -> Result<Option<GameCtx>> {
+pub(crate) fn game_ctx(cli: &Cli, need: bool) -> Result<Option<GameCtx>> {
     match require_game(cli) {
         Ok(g) => {
             let index = load_index(&g)?;

@@ -215,7 +215,8 @@ fn call(cli: &Cli, name: &str, a: &Value, expanded: &mut BTreeSet<String>, chang
                 _ => render::View::Quarter,
             };
             let ra = render::RenderArgs { project: p.into(), view, compare: a["compare"].as_bool().unwrap_or(false), texture: a["texture"].as_str().map(|s| s.to_string()), out: None,
-                width: a["width"].as_u64().unwrap_or(1200) as u32, engine: render::Engine::Soft };
+                width: a["width"].as_u64().unwrap_or(1200) as u32, size: format!("{}x{}", a["width"].as_u64().unwrap_or(1600), a["height"].as_u64().unwrap_or(900)),
+                engine: render::Engine::Browser, browser: None, query: a["query"].as_str().map(|s| s.to_string()), sheet: false, rev: a["rev"].as_str().unwrap_or("head").into(), base: a["base"].as_str().map(|s| s.to_string()) };
             match render::render(cli, &ra) {
                 Ok((png, mut info)) => {
                     let dir = std::path::Path::new(p).join(".render");
