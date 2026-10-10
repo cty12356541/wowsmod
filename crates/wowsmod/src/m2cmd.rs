@@ -167,8 +167,8 @@ pub enum ModCmd {
     /// 导入 contentSdk.extractSources 的产物并改名为本项目(可同时拷入 ModsSDK.zip/<船> 子集)
     ImportSdk {
         dir: PathBuf,
-        /// extractSources 产物目录(PnFMods/<旧名>/ 或其中的 <船>/)
-        src: PathBuf,
+        /// extractSources 产物目录(PnFMods/<旧名>/ 或其中的 <船>/); 省略则用本机上次为同一条船导入时记下的位置
+        src: Option<PathBuf>,
         /// res_mods/PnFMods/ModsSDK.zip/<船> 目录(官方 SDK 明文源)
         #[arg(long)]
         sdk_dir: Option<PathBuf>,
@@ -540,7 +540,18 @@ pub fn cmd_mod(cli: &Cli, c: &ModCmd) -> Result<i32> {
             if p.cfg.install.mode != "sdk" {
                 bail!("项目 mode 不是 sdk");
             }
-            let r = modproj::import_sdk(&p, src, sdk_dir.as_deref())?;
+            let ship = p.cfg.meta.ship.clone();
+            let known = crate::m4cmd::sdk_source(&ship);
+            let src = match (src, &known) {
+                (Some(s), _) => s.clone(),
+                (None, Some(k)) => PathBuf::from(k["src"].as_str().unwrap_or("")),
+                (None, None) => bail!("本机还没有 {ship} 的 extractSources 产物记录。下一步: 看 `wowsmod help project` 的“首次准备”, 然后 wowsmod mod import-sdk {} <产物目录> --sdk-dir <ModsSDK.zip/{ship} 目录>", dir.display()),
+            };
+            let sdk_dir: Option<PathBuf> = sdk_dir.clone().or_else(|| known.as_ref().and_then(|k| k["sdk_dir"].as_str()).map(PathBuf::from));
+            let mut r = modproj::import_sdk(&p, &src, sdk_dir.as_deref())?;
+            crate::m4cmd::remember_sdk_source(&ship, &src, sdk_dir.as_deref());
+            r["src"] = json!(src.display().to_string());
+            r["sdk_dir"] = json!(sdk_dir.as_ref().map(|d| d.display().to_string()));
             let ep = p.record_edit("import_sdk", r.clone())?;
             if cli.json {
                 let mut r = r;
@@ -568,6 +579,7 @@ pub fn cmd_mod(cli: &Cli, c: &ModCmd) -> Result<i32> {
             edits.sort();
             let installed = p.root.join(".install/manifest.json").exists();
             let j = json!({"ok": true, "mod": p.cfg.meta.name, "mode": p.cfg.install.mode, "ship": p.cfg.meta.ship, "files": files.len(), "bytes": bytes, "sdk_stubs": stubs, "edits": edits, "installed": installed});
+            crate::guide::stash(&j);
             if cli.json {
                 emit(cli, &j);
             } else {
@@ -602,6 +614,7 @@ pub fn cmd_port_albedo(cli: &Cli, screen: &str, mean_offset: f32) -> Result<i32>
     let hex = format!("#{:02X}{:02X}{:02X}", to[0], to[1], to[2]);
     let j = json!({"ok": true, "screen": screen, "surface_albedo": alb, "to_color": hex, "mean_offset": mean_offset,
         "model": {"slope": PORT_SLOPE, "toe": PORT_TOE, "note": "勃艮第船体侧板/港口默认机位白天 两点标定, 其他船/光照下是近似值"}});
+    crate::guide::stash(&j);
     if cli.json { emit(cli, &j); } else { println!("港口里想看到 {screen}: 贴图表面色约 ({:.0},{:.0},{:.0}), recolor --to-color {hex}", alb[0], alb[1], alb[2]); }
     Ok(0)
 }

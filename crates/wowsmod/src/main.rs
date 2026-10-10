@@ -2,12 +2,16 @@
 //!
 //! 子命令: doctor / find / extract / export / check / geom / tex / mask / glow / mod / install / uninstall / assemble / model
 //! 所有子命令支持 `--json`(机器可读输出, 供 AI 代理调用)。
+mod ai;
 mod game;
+mod guide;
 mod m2cmd;
 mod m3cmd;
 mod m4cmd;
+mod mcp;
 mod modproj;
 mod registry;
+mod render;
 mod texcmd;
 
 use std::collections::HashMap;
@@ -33,7 +37,7 @@ use wowsmod_formats::{
 };
 
 #[derive(Parser)]
-#[command(name = "wowsmod", version, about = "莱服《战舰世界》AI 改模工具箱 / Lesta WoWS modding toolkit", long_about = None)]
+#[command(name = "wowsmod", version, about = "莱服《战舰世界》AI 改模工具箱 / Lesta WoWS modding toolkit", long_about = None, disable_help_subcommand = true)]
 struct Cli {
     /// 游戏根目录(含 res_packages 与 bin), 不指定则自动查找 / game root (auto-detected if omitted)
     #[arg(long, global = true, value_name = "DIR")]
@@ -179,6 +183,23 @@ enum Cmd {
     Migrate(m4cmd::MigrateArgs),
     /// 打成可分发的 .wsmod 包(不含游戏原版资源与任何专有组件)
     Pack(m4cmd::PackArgs),
+    /// 出图看效果: 整船软件渲染(可与原版上下对比)或单张贴图对比 / render a preview image
+    Render(render::RenderArgs),
+    /// 总览: 游戏、已装 mod、本机 SDK 素材、项目状态(AI 的第一步) / overview
+    Status(ai::StatusArgs),
+    /// 分主题说明(按需阅读): wowsmod help [主题] [--search 词] / topic help
+    Help {
+        /// 主题名(省略则列出全部); 也可写命令名
+        topic: Option<String>,
+        /// 在全部主题里搜索
+        #[arg(long)]
+        search: Option<String>,
+    },
+    /// MCP 服务器(stdio): 给 Cursor / Claude Code 等 AI 工具调用 / MCP server
+    Mcp,
+    /// AI 工具接入: ai init <目录> 写 AGENTS.md 与各工具的规则副本、MCP 配置
+    #[command(subcommand)]
+    Ai(ai::AiCmd),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum, Debug)]
@@ -196,18 +217,36 @@ enum PairingMode {
 }
 
 fn main() {
-    let cli = Cli::parse();
+    use clap::{CommandFactory, FromArgMatches};
+    let m = guide::decorate(Cli::command()).get_matches();
+    let cli = match Cli::from_arg_matches(&m) {
+        Ok(c) => c,
+        Err(e) => e.exit(),
+    };
     let json_mode = cli.json;
+    let key = guide::cmd_key();
     match run(cli) {
-        Ok(code) => std::process::exit(code),
+        Ok(code) => {
+            if !json_mode {
+                guide::print_next_human(code);
+            }
+            std::process::exit(code)
+        }
         Err(e) => {
+            let chain: Vec<String> = e.chain().map(|c| c.to_string()).collect();
+            let hint = guide::error_hint(&key, &chain.join(" | "));
             if json_mode {
-                let chain: Vec<String> = e.chain().map(|c| c.to_string()).collect();
-                println!("{}", serde_json::to_string_pretty(&json!({"ok": false, "error": chain})).unwrap());
+                println!("{}", serde_json::to_string_pretty(&json!({"ok": false, "error": chain, "next": hint})).unwrap());
             } else {
                 eprintln!("错误 / Error: {e}");
                 for c in e.chain().skip(1) {
                     eprintln!("  原因 / caused by: {c}");
+                }
+                if !hint.is_empty() {
+                    eprintln!("建议下一步:");
+                    for h in hint {
+                        eprintln!("  - {h}");
+                    }
                 }
             }
             std::process::exit(1);
@@ -238,14 +277,20 @@ fn run(cli: Cli) -> Result<i32> {
         Cmd::Conflicts(a) => m4cmd::cmd_conflicts(&cli, a),
         Cmd::Migrate(a) => m4cmd::cmd_migrate(&cli, a),
         Cmd::Pack(a) => m4cmd::cmd_pack(&cli, a),
+        Cmd::Render(a) => render::cmd_render(&cli, a),
+        Cmd::Status(a) => ai::cmd_status(&cli, a),
+        Cmd::Help { topic, search } => ai::cmd_help(&cli, topic.as_deref(), search.as_deref()),
+        Cmd::Mcp => mcp::serve(&cli),
+        Cmd::Ai(c) => ai::cmd_ai(&cli, c),
         Cmd::Assemble(a) => m3cmd::cmd_assemble(&cli, a),
         Cmd::Model(c) => m3cmd::cmd_model(&cli, c),
     }
 }
 
 fn emit(cli: &Cli, v: &Value) {
+    guide::stash(v);
     if cli.json {
-        println!("{}", serde_json::to_string_pretty(v).unwrap());
+        println!("{}", serde_json::to_string_pretty(&guide::with_next(v)).unwrap());
     }
 }
 
@@ -353,6 +398,7 @@ fn cmd_doctor(cli: &Cli) -> Result<i32> {
         ok = false;
     }
     report["ok"] = json!(ok);
+    crate::guide::stash(&report);
     if cli.json {
         emit(cli, &report);
         return Ok(if ok { 0 } else { 1 });
@@ -569,6 +615,7 @@ fn cmd_find(cli: &Cli, pattern: &str, ship: bool, limit: usize) -> Result<i32> {
         let (hits, mo, gp_err) = search_ships(&g, &ix, &reader, pattern)?;
         let list: Vec<Value> = hits.iter().map(|h| h.to_json()).collect();
         let report = json!({"ok": true, "query": pattern, "mo": mo, "gameparams_error": gp_err, "ships": list});
+        crate::guide::stash(&report);
         if cli.json {
             emit(cli, &report);
         } else {
@@ -753,6 +800,7 @@ fn cmd_extract(cli: &Cli, patterns: &[String], list: Option<&Path>, ship: Option
         "raw": raw, "bc7prep_decoded": bc7prep.len(), "bc7prep_files": bc7prep,
         "errors": errors.iter().map(|(p, e)| json!({"path": p, "error": e})).collect::<Vec<_>>(),
     });
+    crate::guide::stash(&report);
     if cli.json {
         emit(cli, &report);
     } else {
@@ -1065,6 +1113,7 @@ fn cmd_export(cli: &Cli, input: &str, out: &Path, mode: PairingMode, visual: Opt
         }));
     }
     let report = json!({"ok": all_ok, "results": results});
+    crate::guide::stash(&report);
     if cli.json {
         emit(cli, &report);
     } else {

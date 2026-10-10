@@ -108,6 +108,31 @@ fn home() -> PathBuf {
     std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.join("wowsmod_data"))).unwrap_or_else(|| PathBuf::from("wowsmod_data"))
 }
 
+/// 本机 SDK 素材记录: <home>/sdk_sources.json { 船: {src, sdk_dir} }(import-sdk 成功时自动写)
+fn sdk_sources_path() -> PathBuf {
+    home().join("sdk_sources.json")
+}
+pub fn sdk_sources() -> Value {
+    std::fs::read(sdk_sources_path()).ok().and_then(|d| serde_json::from_slice(&d).ok()).unwrap_or_else(|| json!({}))
+}
+pub fn sdk_source(ship: &str) -> Option<Value> {
+    let v = sdk_sources();
+    let k = &v[ship];
+    let src = k["src"].as_str()?;
+    Path::new(src).is_dir().then(|| k.clone())
+}
+pub fn remember_sdk_source(ship: &str, src: &Path, sdk_dir: Option<&Path>) {
+    let abs = |p: &Path| std::fs::canonicalize(p).map(|x| x.display().to_string().trim_start_matches(r"\\?\").to_string()).unwrap_or_else(|_| p.display().to_string());
+    let mut v = sdk_sources();
+    v[ship] = json!({"src": abs(src), "sdk_dir": sdk_dir.map(abs)});
+    let _ = std::fs::create_dir_all(home());
+    let _ = std::fs::write(sdk_sources_path(), serde_json::to_string_pretty(&v).unwrap_or_default());
+}
+
+pub fn home_dir() -> PathBuf {
+    home()
+}
+
 fn check_running(ignore: bool) -> Result<()> {
     let r = game::running();
     if !r.is_empty() && !ignore {
@@ -249,6 +274,7 @@ pub fn cmd_install(cli: &Cli, a: &InstallArgs) -> Result<i32> {
     if !pre.is_null() {
         r["reinstall_uninstalled"] = pre;
     }
+    crate::guide::stash(&r);
     if cli.json {
         emit(cli, &r);
     } else {
@@ -324,6 +350,7 @@ pub fn cmd_uninstall(cli: &Cli, a: &UninstallArgs) -> Result<i32> {
     r["ok"] = json!(a.dry_run || complete);
     r["res_mods"] = json!(res_mods.display().to_string());
     r["res_mods_pristine"] = json!(game::res_mods_state(&res_mods).pristine);
+    crate::guide::stash(&r);
     if cli.json {
         emit(cli, &r);
     } else {
@@ -350,6 +377,7 @@ pub fn cmd_installed(cli: &Cli, a: &InstalledArgs) -> Result<i32> {
     v["intact"] = json!(all_ok);
     v["res_mods_top_level"] = json!(st.top_level);
     v["pnf_mods_dirs"] = json!(st.pnf_mods);
+    crate::guide::stash(&v);
     if cli.json {
         emit(cli, &v);
     } else {
@@ -401,6 +429,7 @@ pub fn cmd_conflicts(cli: &Cli, a: &ConflictsArgs) -> Result<i32> {
         }
     }
     let v = json!({"ok": true, "res_mods": rm.display().to_string(), "installed": registry::names(&registry::load(&rm)?), "targets": out, "conflicts_total": total, "compatible": total == 0});
+    crate::guide::stash(&v);
     if cli.json {
         emit(cli, &v);
     } else {
@@ -493,6 +522,7 @@ pub fn cmd_migrate(cli: &Cli, a: &MigrateArgs) -> Result<i32> {
         }
     }
     let v = json!({"ok": failed == 0, "from": from.display().to_string(), "to": to.display().to_string(), "build": ctx.install.build, "mods": results, "failed": failed, "old_uninstalled": old_removed, "dry_run": a.dry_run});
+    crate::guide::stash(&v);
     if cli.json {
         emit(cli, &v);
     } else {
@@ -610,6 +640,7 @@ pub fn cmd_pack(cli: &Cli, a: &PackArgs) -> Result<i32> {
     // 自检: 读回并校验
     let back = zipfile::read(&std::fs::read(&out)?).map_err(|e| anyhow!("自检失败: {e}"))?;
     let v = json!({"ok": true, "package": out.display().to_string(), "bytes": z.len(), "sha256": sha256_hex(&z), "entries": back.len(), "mod_files": n_real, "stubs_filled_at_install": n_stub, "full_files": full_n, "excluded": ["oo2core*/oodle*", "pfsunpack*/mkut*", "*.exe/*.dll/脚本", ".install/", "edits/.undo"]});
+    crate::guide::stash(&v);
     if cli.json {
         emit(cli, &v);
     } else {

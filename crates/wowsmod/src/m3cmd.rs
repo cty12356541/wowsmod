@@ -245,6 +245,7 @@ pub fn cmd_assemble(cli: &Cli, a: &AssembleArgs) -> Result<i32> {
     let n_mounts = table["mounts"].as_array().map(|x| x.len()).unwrap_or(0);
     let r = json!({"ok": true, "ship": ship_name, "glb": a.out.display().to_string(), "glb_bytes": glb.len(), "table": tp.display().to_string(),
         "sections": table["sections"], "mounts": n_mounts, "hardpoints_total": table["hardpoints_total"], "warnings": warn, "seconds": t0.elapsed().as_secs_f64()});
+    crate::guide::stash(&r);
     if cli.json {
         emit(cli, &r);
     } else {
@@ -680,6 +681,7 @@ impl ModelCmd {
 
 pub fn cmd_model(cli: &Cli, c: &ModelCmd) -> Result<i32> {
     let r = run_model(cli, c)?;
+    crate::guide::stash(&r);
     if cli.json {
         emit(cli, &r);
     } else {
