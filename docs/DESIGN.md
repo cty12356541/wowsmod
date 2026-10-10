@@ -182,3 +182,13 @@ assets/res_mods/...    改后的资源(sdk 模式在 PnFMods/<Mod>/ 下, 允许�
 ### 9.5 install --dev / uninstall
 - 安装时自动: 占位文件从游戏包补齐(同名多份优先 content/gameplay/)、BC7 去 prep、补齐 .ddN(并检查 K 与原版一致)、sdk 模式补 PnFModsLoader.py。
 - 已存在的文件先备份; 清单逐条写入、写后校验。卸载只删哈希一致的文件, 还原备份, 删除自己创建的空目录。
+
+## 10. M3: geometry 编码与模型编辑
+
+- **映射名**:id = murmur3(名字);`X`→`XShape`,已以 `Shape<数字>` 结尾的原样使用。LOD 族名 = 去掉 `Shape\d+`、`_lodN`、结尾的 `_lod`。
+- **编码**:按模板渲染集的顶点格式打包(法线/切线 4 字节压缩、UV half/float、骨骼字节取逐顶点模板)。索引按原编码方式;装甲/碰撞块原样保留;没有名字的映射原样拷贝。
+- **空间**:船体渲染集多数是节点局部空间,MidBack 烟囱 3 个是蒙皮世界空间(Root/Chimney)。部件变换:骨骼只吸收平移和旋转,缩放写进顶点;世界空间渲染集顶点乘 T,其余乘 W·T·W'⁻¹。
+- **挂点**:move 用 W'=W·T(分段空间);scale/rotate 用 L'=Tr(−p)·Op·Tr(p)·L。港口证实引擎会采用挂点矩阵里的缩放。
+- **LOD**:编辑作用于同一 geometry 的所有 LOD 族;Blender 导回时,改动族的 lod1–3 指向 LOD0 网格;lod4 不动。
+- **编辑记录**:`edits/NNN_model_*.json`(参数可重放 + 改前/改后 sha256 + `.undo` 备份),提供 undo / replay。
+- **港口验收脚本**:`scripts/ingame/m3_game.ps1`。
