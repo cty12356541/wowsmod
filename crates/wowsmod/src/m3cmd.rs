@@ -1334,11 +1334,31 @@ fn export_blender(root: &Path, src: &GeomSrc, t: &Target, out: &Path, hullsets: 
         "how": "Blender: 导入 glTF; 修改后导出 glTF(GLB, +Y Up, 勾选 Custom Properties), 再 wowsmod model import-blender"}))
 }
 
+/// 网格是否“没改”: 顶点按下标逐个相等, 或(Blender 会重排/合并/拆分顶点、丢弃重复三角形)
+/// 三角形(三个顶点位置量化 1e-4, 允许轮转)去重后的集合相同。
 fn same_mesh(a: &MeshData, b: &MeshData) -> bool {
-    if a.positions.len() != b.positions.len() || a.indices.len() != b.indices.len() {
-        return false;
+    if a.positions.len() == b.positions.len() && a.indices.len() == b.indices.len() && a.positions.iter().zip(&b.positions).all(|(p, q)| (0..3).all(|i| (p[i] - q[i]).abs() <= 1e-4 * (1.0 + p[i].abs()))) {
+        return true;
     }
-    a.positions.iter().zip(&b.positions).all(|(p, q)| (0..3).all(|i| (p[i] - q[i]).abs() <= 1e-4 * (1.0 + p[i].abs())))
+    // Blender 导入会合并/丢弃完全重复的三角形, 所以按“去重后的三角形集合”比较, 不要求索引数相同
+    let q = |p: &[f32; 3]| -> [i64; 3] { [(p[0] as f64 * 1e4).round() as i64, (p[1] as f64 * 1e4).round() as i64, (p[2] as f64 * 1e4).round() as i64] };
+    let tris = |m: &MeshData| -> Vec<[[i64; 3]; 3]> {
+        let mut v: Vec<[[i64; 3]; 3]> = m
+            .indices
+            .chunks_exact(3)
+            .map(|t| {
+                let mut x = [q(&m.positions[t[0] as usize]), q(&m.positions[t[1] as usize]), q(&m.positions[t[2] as usize])];
+                // 允许轮转: 以最小顶点开头
+                let k = (0..3).min_by_key(|&i| x[i]).unwrap();
+                x.rotate_left(k);
+                x
+            })
+            .collect();
+        v.sort();
+        v.dedup();
+        v
+    };
+    tris(a) == tris(b)
 }
 
 fn import_blender(tx: &mut Tx, root: &Path, src: &GeomSrc, glb: &Path) -> Result<Value> {
@@ -1410,8 +1430,8 @@ fn import_blender(tx: &mut Tx, root: &Path, src: &GeomSrc, glb: &Path) -> Result
                             unchanged += 1;
                             continue;
                         }
-                        let info = ge.replace_mesh_keep(&rs_name, &m).map_err(|e| anyhow!("{rs_name}: {e}"))?;
-                        changed.push(json!({"renderSet": rs_name, "vertices_before": old.positions.len(), "vertices_after": info.vertex_count, "per_vertex_skin_kept": old.positions.len() == m.positions.len()}));
+                        let (info, exact, near) = ge.replace_mesh_matched(&rs_name, &m).map_err(|e| anyhow!("{rs_name}: {e}"))?;
+                        changed.push(json!({"renderSet": rs_name, "vertices_before": old.positions.len(), "vertices_after": info.vertex_count, "template_exact_position": exact, "template_nearest": near}));
                         changed_names.insert(rs_name.clone());
                     }
                     _ => new_prims.push(GlbPrim { node: n.name.clone(), material: p.material.clone(), mesh: mesh_vs }),

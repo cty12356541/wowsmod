@@ -56,7 +56,9 @@ if (Want 'blender') {
   if ($p) {
     $bd = Join-Path $root '_blender'; New-Item -ItemType Directory -Force $bd | Out-Null
     Run 'blender' @('--json', 'model', 'export-blender', '--project', $p, '--section', 'MidBack', '-o', "$bd\midback_in.glb") | Out-Null
+    $eap = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
     $bo = & $Blender --background --factory-startup --python 'scripts\blender\m3_roundtrip.py' -- "$bd\midback_in.glb" "$bd\midback_out.glb" 1.35 2>&1 | Out-String
+    $ErrorActionPreference = $eap
     Set-Content -Encoding UTF8 (Join-Path $logs 'blender_run.log') $bo
     if (-not (Test-Path "$bd\midback_out.glb")) { throw "Blender 没有导出 GLB: $bo" }
     Run 'blender' @('--json', 'model', 'import-blender', '--project', $p, "$bd\midback_out.glb") | Out-Null

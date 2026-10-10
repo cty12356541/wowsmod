@@ -463,7 +463,51 @@ impl GeoEdit {
         self.add_mesh(name, &format, mesh, tpl.as_deref())
     }
 
-    /// 替换网格; 顶点数与原来相同时逐顶点保留原始的蒙皮/额外字节(Blender 往返常见), 否则用第 0 个顶点做模板
+/// 替换网格, 逐顶点从原网格找模板顶点(保留蒙皮/额外字节): 先按位置精确匹配(量化 1e-5), 匹配不到的取最近的原顶点。
+    /// 返回 (信息, 精确匹配数, 最近邻匹配数)。用于 Blender 往返(顶点顺序/数量可能变化)。
+    pub fn replace_mesh_matched(&mut self, name: &str, mesh: &MeshData) -> Result<(MeshInfo, usize, usize)> {
+        let info = self.info(name)?;
+        let old = self.mesh(name)?;
+        let q = |p: &[f32; 3]| -> (i64, i64, i64) { ((p[0] as f64 * 1e5).round() as i64, (p[1] as f64 * 1e5).round() as i64, (p[2] as f64 * 1e5).round() as i64) };
+        let mut map: std::collections::HashMap<(i64, i64, i64), usize> = std::collections::HashMap::new();
+        for (i, p) in old.positions.iter().enumerate() {
+            map.entry(q(p)).or_insert(i);
+        }
+        let n_old = old.positions.len();
+        let mut src_idx = Vec::with_capacity(mesh.positions.len());
+        let (mut exact, mut near) = (0, 0);
+        let unmatched = mesh.positions.iter().filter(|p| !map.contains_key(&q(p))).count();
+        let brute = unmatched.saturating_mul(n_old) <= 80_000_000;
+        for p in &mesh.positions {
+            if let Some(&i) = map.get(&q(p)) {
+                src_idx.push(i);
+                exact += 1;
+            } else if brute {
+                let mut best = (f32::MAX, 0usize);
+                for (i, o) in old.positions.iter().enumerate() {
+                    let d = (o[0] - p[0]).powi(2) + (o[1] - p[1]).powi(2) + (o[2] - p[2]).powi(2);
+                    if d < best.0 {
+                        best = (d, i);
+                    }
+                }
+                src_idx.push(best.1);
+                near += 1;
+            } else {
+                src_idx.push(0);
+                near += 1;
+            }
+        }
+        let mut raws = Vec::with_capacity(n_old);
+        for i in 0..n_old {
+            raws.push(self.raw_vertex(name, i)?);
+        }
+        let pv: Vec<Vec<u8>> = src_idx.iter().map(|&i| raws[i].clone()).collect();
+        self.remove(name)?;
+        let mi = self.add_mesh_tpl(name, &info.format, mesh, Some(&raws[0]), Some(&pv))?;
+        Ok((mi, exact, near))
+    }
+
+    /// 替换网格; 顶点数与原来相同时逐顶点保留原始的蒙皮/额外字节(按下标), 否则用第 0 个顶点做模板
     pub fn replace_mesh_keep(&mut self, name: &str, mesh: &MeshData) -> Result<MeshInfo> {
         let info = self.info(name)?;
         let pv: Option<Vec<Vec<u8>>> = if info.vertex_count as usize == mesh.positions.len() {
