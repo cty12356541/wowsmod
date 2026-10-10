@@ -130,6 +130,7 @@ def port_select(name, thumb=None):
     else:
         time.sleep(18)
         res["note"] = "已保存并等待加载; 用 shot --thumb 确认"
+    sw, sh = screen(); move_abs(sw // 2, int(sh * 0.62))  # 鼠标移回画面中央, 免得停在船列表上弹提示
     return res
 
 def _small():
@@ -137,7 +138,7 @@ def _small():
     return ImageGrab.grab().convert("L").resize((160, 90))
 
 def _diff(a, b):
-    pa, pb = list(a.getdata()), list(b.getdata())
+    pa, pb = a.tobytes(), b.tobytes()
     return sum(abs(x - y) for x, y in zip(pa, pb)) / len(pa)
 
 def shot_clean(out, thumb=None, hold=1.2):

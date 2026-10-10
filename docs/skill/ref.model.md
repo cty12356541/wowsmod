@@ -18,7 +18,7 @@ wowsmod model import --project <项目> --mesh figure.glb --like Turret --part F
 wowsmod model pmx2glb figure.pmx -o figure.glb --pose arms-down:55   # MMD → GLB; --pose 静态摆姿势(骨^度 / 骨=rx,ry,rz)
 wowsmod model undo --project <项目>
 ```
-- 坐标是游戏坐标:x 右舷,y 上,z 船艏;单位与 .visual 相同; 米/单位: 在 mod.toml `[mod]` 写 `ship_length_m = <真实舰长>`, `model import/animate` 结果的 `units` 会给出 `hull_length_units`、`m_per_unit`、物件米制高度(没写舰长时只给单位数)。
+- 坐标是游戏坐标:x 右舷,y 上,z 船艏;单位与 .visual 相同。米/单位: `wowsmod mod set <项目> --ship-length <真实舰长 m>` 后, `model list` 的 `units` 直接给 `hull_length_units`、`m_per_unit` 和 1.0/1.4/2.0 单位的米数; `model import/animate` 结果也带物件米高。
 - 渲染集的编辑默认作用于全部 LOD,所以拉远后不会变回原样。
 - 每次编辑都记录在 `edits/` 下,可以 `undo`,也可以用 `replay` 在别的项目上重放。
 - 检查:`wowsmod render <项目> --compare --view all`。

@@ -8,7 +8,10 @@
   - **例外**:要做发光的 DeckHouse,它的 `_mg` B 留给 glow 用,不要清零。
 - 港口光照会让颜色变亮、变灰。先换算:`wowsmod port-albedo <想在港口看到的颜色>`,结果里的 `to_color` 才是给 recolor 用的颜色。
 
-## 步骤(SDK 项目,以整船换成深海蓝为例)
+## 整船同色(一条命令)
+`wowsmod ship-color <项目> --hull <色> --deckhouse <色> --parts <色>`(或分开 `--guns/--directors/--radars`, `--parts-filter "FGM|FGS"` 只改主副炮; `--keep-deckhouse-mg` 留发光; `--dry-run` 先看清单)。按项目里贴图目录分组, 共享网格/玻璃贴图不动。
+
+## 步骤(单张贴图, 以整船换成深海蓝为例)
 ```
 wowsmod --json port-albedo #1E3F66                  # → to_color
 wowsmod mod status <项目> --json                     # 看有哪些 *_a.dds
