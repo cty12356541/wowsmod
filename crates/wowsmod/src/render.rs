@@ -570,7 +570,7 @@ pub fn render(cli: &Cli, a: &RenderArgs) -> Result<(Vec<u8>, Value)> {
     let ctx = game_ctx(cli, true)?.unwrap();
     let rdir = p.root.join(".render");
     std::fs::create_dir_all(&rdir)?;
-    let width = a.width.clamp(200, 4096);
+    let width = a.width.clamp(200, 8192);
     if let Some(t) = &a.texture {
         let mut tb = TexCache { ctx: &ctx, proj: None, imgs: HashMap::new(), missing: vec![] };
         let base = tb.get(t).ok_or_else(|| anyhow!("读不到原版贴图 {t}: {:?}", tb.missing))?;

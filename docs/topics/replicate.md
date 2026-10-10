@@ -13,6 +13,7 @@ JSON 的 `frame` 给世界→像素映射(`像素 = origin_px + Y*y_axis_px + Z*
 按参考在与 base.png 同尺寸的透明 PNG 上画: 块面用一种键色(如 #808080), 发光线/环用另一种(#00FFFF)。形状按参考的走向画, 不要用规则网格条纹。
 
 ## 4 投影进 UV(贴合结构)
+- 分辨率: 设计图与 bake-ref 用 `--width 8192`(舷侧每米像素更多); 近景仍有锯齿就在 glow/recolor 加 `--feather 3`。
 - 舷侧: `wowsmod bake-ref <项目> --ref design.png --material "Hull$|Hull_skinned$" --like <Hull_a> --view side --width 4096 --mirror-x --key "#00FFFF:0.2=lines.png" --key "#808080:0.1=blocks.png" -o ref_uv.png`(左右舷 UV 不共用时必须 --mirror-x)
 - 上层建筑棱线: `wowsmod lineart <项目> --material DeckHouse --like <DeckHouse_a> --crease 70 --width 3 --box=x0,y0,z0,x1,y1,z1`(覆盖率 2–4% 为宜; >7% 太花)
 - 按世界位置选整块部件(如主炮炮管): `wowsmod lineart … --material FGM049 --fill --box=…`

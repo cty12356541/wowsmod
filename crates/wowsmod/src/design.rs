@@ -576,7 +576,7 @@ pub fn cmd_bake_ref(cli: &Cli, a: &BakeRefArgs) -> Result<i32> {
     let view = if a.yaw.is_some() || a.pitch.is_some() { View::Side } else { a.view };
     let tris: Vec<[V3; 3]> = all.iter().map(|t| t.p).collect();
     let bounds = render::bounds_of(&tris, view);
-    let width = a.width.clamp(200, 4096);
+    let width = a.width.clamp(200, 8192);
     let pj = Proj::new(view, bounds, width);
     let mut refimg = texture::read_png(&std::fs::read(&a.reference).with_context(|| format!("读取 {}", a.reference.display()))?).map_err(|e| anyhow!("{e}"))?;
     let mut notes = Vec::new();
