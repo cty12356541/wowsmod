@@ -46,6 +46,10 @@ pub struct PreviewState {
     name_index: Mutex<Option<HashMap<String, Vec<PathBuf>>>>,
     /// GameParams 里的等级/国家/类型 + 本地化船名(后台线程加载, 按游戏版本缓存在临时目录)
     ship_meta: std::sync::Arc<RwLock<Value>>,
+    /// 游戏索引: 小写文件名 → entries 下标(一次建好; 以前每张贴图都线性扫全部条目, 增量重载要 8 秒)
+    game_names: std::sync::OnceLock<HashMap<String, Vec<usize>>>,
+    /// 最近一次 rebuild 各阶段耗时
+    phases: Mutex<Vec<(&'static str, f32)>>,
 }
 
 #[derive(Clone)]
@@ -127,6 +131,8 @@ impl PreviewState {
             game_memo: Mutex::new(HashMap::new()),
             name_index: Mutex::new(None),
             ship_meta: std::sync::Arc::new(RwLock::new(Value::Null)),
+            game_names: std::sync::OnceLock::new(),
+            phases: Mutex::new(vec![]),
         };
         st.load_ship_meta();
         st.rebuild()?;
@@ -212,7 +218,8 @@ impl PreviewState {
         let new_blobs = after.iter().filter(|h| !before.contains(*h)).count();
         let geom_after = self.geom.read().unwrap().as_ref().map(|g| g.hash.clone());
         self.bump("steps", json!({}));
-        Ok(json!({"new_textures": new_blobs, "textures": after.len(), "geometry_changed": geom_before != geom_after, "head": self.head_id(), "seconds": t0.elapsed().as_secs_f32()}))
+        let phases: serde_json::Map<String, Value> = self.phases.lock().unwrap().iter().map(|(k, v)| (k.to_string(), json!(v))).collect();
+        Ok(json!({"new_textures": new_blobs, "textures": after.len(), "geometry_changed": geom_before != geom_after, "head": self.head_id(), "seconds": t0.elapsed().as_secs_f32(), "phases": phases}))
     }
 
     /// 项目内容指纹(文件路径+大小+mtime), 用来判断要不要增量重载。跳过 renders/.render/.wowsmod(缓存的 geometry.glb 除外)
@@ -236,6 +243,12 @@ impl PreviewState {
     }
 
     fn rebuild(&self) -> Result<()> {
+        let mut ph: Vec<(&'static str, f32)> = vec![];
+        let mut tp = std::time::Instant::now();
+        let mut lap = |k: &'static str, ph: &mut Vec<(&'static str, f32)>| {
+            ph.push((k, tp.elapsed().as_secs_f32()));
+            tp = std::time::Instant::now();
+        };
         // 文件名索引(一次遍历)
         let mut idx: HashMap<String, Vec<PathBuf>> = HashMap::new();
         for f in self.project.files().unwrap_or_default() {
@@ -244,12 +257,16 @@ impl PreviewState {
             }
         }
         *self.name_index.lock().unwrap() = Some(idx);
+        lap("index", &mut ph);
         let edits = load_edits(&self.project.root)?;
         let steps = group_steps(&self.project.root, &edits)?;
+        lap("edits", &mut ph);
         // base materials from SDK copy
         let mut blobs = HashMap::new();
         let base_mats = self.scan_materials(false, &mut blobs)?;
+        lap("scan_base", &mut ph);
         let head_mats = self.scan_materials(true, &mut blobs)?;
+        lap("scan_head", &mut ph);
         // intermediate: start from base, apply texture outputs from edits
         let mut mats_map = HashMap::new();
         mats_map.insert("base".into(), base_mats.clone());
@@ -279,8 +296,11 @@ impl PreviewState {
         *self.mats.write().unwrap() = mats_map;
         *self.blobs.write().unwrap() = blobs;
         *self.steps.write().unwrap() = steps;
+        lap("steps", &mut ph);
         self.ensure_geometry()?;
         self.ensure_sim_parts()?;
+        lap("geometry", &mut ph);
+        *self.phases.lock().unwrap() = ph;
         // 步骤标题里的贴图名 → 部件中文名
         {
             let parts_doc = self.parts.read().unwrap().clone();
@@ -324,8 +344,10 @@ impl PreviewState {
             if let Ok(t) = std::fs::read_to_string(p) {
                 // per material block
                 for mat in t.split("<material>").skip(1) {
-                    let id = regex::Regex::new(r"<identifier>\s*(\S+)\s*</identifier>").unwrap().captures(mat).map(|c| c[1].to_string());
-                    let mf = regex::Regex::new(r"<mfm>\s*(\S+)\s*</mfm>").unwrap().captures(mat).map(|c| Path::new(&c[1]).file_name().unwrap().to_string_lossy().to_string());
+                    static RE_ID: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+                    static RE_MFM: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+                    let id = RE_ID.get_or_init(|| regex::Regex::new(r"<identifier>\s*(\S+)\s*</identifier>").unwrap()).captures(mat).map(|c| c[1].to_string());
+                    let mf = RE_MFM.get_or_init(|| regex::Regex::new(r"<mfm>\s*(\S+)\s*</mfm>").unwrap()).captures(mat).map(|c| Path::new(&c[1]).file_name().unwrap().to_string_lossy().to_string());
                     if let (Some(id), Some(mf)) = (id, mf) {
                         if id.contains("EMISSIVE") {
                             emissive_id.insert(mf);
@@ -395,7 +417,17 @@ impl PreviewState {
         }
         // 2) game by file name
         if let Some(ctx) = &self.ctx {
-            let hits: Vec<_> = ctx.index.entries.iter().filter(|e| e.path.rsplit('/').next().map(|x| x.eq_ignore_ascii_case(&format!("{name}.dds"))).unwrap_or(false)).collect();
+            let names = self.game_names.get_or_init(|| {
+                let mut m: HashMap<String, Vec<usize>> = HashMap::new();
+                for (i, e) in ctx.index.entries.iter().enumerate() {
+                    let f = e.path.rsplit('/').next().unwrap_or(&e.path);
+                    if f.len() > 4 && f[f.len() - 4..].eq_ignore_ascii_case(".dds") {
+                        m.entry(f.to_lowercase()).or_default().push(i);
+                    }
+                }
+                m
+            });
+            let hits: Vec<_> = names.get(&format!("{name}.dds").to_lowercase()).map(|v| v.iter().map(|i| &ctx.index.entries[*i]).collect()).unwrap_or_default();
             if hits.len() == 1 {
                 let vp = hits[0].path.clone();
                 if let Some(h) = self.game_memo.lock().unwrap().get(&vp).cloned() {

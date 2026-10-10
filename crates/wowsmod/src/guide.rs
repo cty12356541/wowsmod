@@ -187,7 +187,9 @@ pub fn next(key: &str, v: &Value) -> Vec<String> {
             }
         }
         "assemble" => vec!["看图: wowsmod render <项目> --compare".into()],
-        "render" => vec![s("满意: wowsmod install {p} 后重启游戏进港查看(只看港口)"), "不满意: 调整后再 render".into(), s("要连续出图: 先 wowsmod render --warm {p} 预热, 之后每张约 1 秒")],
+        "render" if ["warm", "status", "stop", "serve"].contains(&p.as_str()) => vec![],
+        "render" if std::env::args().any(|x| x == "--warm") => vec![s("出图: wowsmod render {p} --compare(自动连常驻实例)"), s("状态 / 关闭: wowsmod render status {p} / wowsmod render stop {p}")],
+        "render" => vec![s("满意: wowsmod install {p} 后重启游戏进港查看(只看港口)"), "不满意: 调整后再 render".into()].into_iter().chain((v["warm"] != true).then(|| s("要连续出图: 先 wowsmod render --warm {p} 预热, 之后每张约 1 秒"))).collect(),
         "install" => {
             if ok {
                 let t = project_arg().map(|x| q(&x)).unwrap_or_else(|| v["mod"].as_str().unwrap_or("<mod>").to_string());

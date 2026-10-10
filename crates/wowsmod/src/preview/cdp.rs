@@ -114,6 +114,8 @@ pub(crate) fn launch(exe: &Path, swiftshader: bool, tag: &str) -> Result<Browser
     }
     args.push("about:blank".into());
     let mut child = Command::new(exe).args(&args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().context("启动浏览器")?;
+    #[cfg(windows)]
+    kill_on_exit::attach(&child);
     let port_file = user_dir.join("DevToolsActivePort");
     let t0 = Instant::now();
     loop {
@@ -604,4 +606,76 @@ pub(crate) fn output_with_timeout(mut cmd: Command, secs: u64) -> Result<std::pr
     let _ = std::fs::remove_file(tmp.with_extension("out"));
     let _ = std::fs::remove_file(tmp.with_extension("err"));
     Ok(std::process::Output { status, stdout, stderr })
+}
+
+
+/// Windows: 把无头浏览器放进 "本进程退出即杀" 的 Job 里。
+/// 常驻实例/冷启动进程被强杀(任务管理器、taskkill、崩溃)时浏览器跟着退出, 不留孤儿 msedge。
+#[cfg(windows)]
+mod kill_on_exit {
+    use std::os::windows::io::AsRawHandle;
+    use std::sync::OnceLock;
+
+    #[repr(C)]
+    #[derive(Default)]
+    struct BasicLimit {
+        per_process_user_time_limit: i64,
+        per_job_user_time_limit: i64,
+        limit_flags: u32,
+        minimum_working_set_size: usize,
+        maximum_working_set_size: usize,
+        active_process_limit: u32,
+        affinity: usize,
+        priority_class: u32,
+        scheduling_class: u32,
+    }
+    #[repr(C)]
+    #[derive(Default)]
+    struct IoCounters([u64; 6]);
+    #[repr(C)]
+    #[derive(Default)]
+    struct ExtendedLimit {
+        basic: BasicLimit,
+        io: IoCounters,
+        process_memory_limit: usize,
+        job_memory_limit: usize,
+        peak_process_memory_used: usize,
+        peak_job_memory_used: usize,
+    }
+    extern "system" {
+        fn CreateJobObjectW(attrs: *mut core::ffi::c_void, name: *const u16) -> *mut core::ffi::c_void;
+        fn SetInformationJobObject(job: *mut core::ffi::c_void, class: i32, info: *mut core::ffi::c_void, len: u32) -> i32;
+        fn AssignProcessToJobObject(job: *mut core::ffi::c_void, process: *mut core::ffi::c_void) -> i32;
+    }
+    const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION: i32 = 9;
+    const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x2000;
+
+    struct Job(usize);
+    static JOB: OnceLock<Option<Job>> = OnceLock::new();
+
+    fn job() -> Option<usize> {
+        JOB.get_or_init(|| unsafe {
+            let h = CreateJobObjectW(std::ptr::null_mut(), std::ptr::null());
+            if h.is_null() {
+                return None;
+            }
+            let mut info = ExtendedLimit::default();
+            info.basic.limit_flags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            if SetInformationJobObject(h, JOB_OBJECT_EXTENDED_LIMIT_INFORMATION, &mut info as *mut _ as *mut _, std::mem::size_of::<ExtendedLimit>() as u32) == 0 {
+                return None;
+            }
+            // 句柄故意不关: 进程退出时系统关闭它 → Job 里的浏览器全部结束
+            Some(Job(h as usize))
+        })
+        .as_ref()
+        .map(|j| j.0)
+    }
+
+    pub fn attach(child: &std::process::Child) {
+        if let Some(j) = job() {
+            unsafe {
+                AssignProcessToJobObject(j as *mut _, child.as_raw_handle() as *mut _);
+            }
+        }
+    }
 }
