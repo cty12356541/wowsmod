@@ -1,8 +1,11 @@
 //! wowsmod —— 莱服《战舰世界》(Мир кораблей) AI 改模工具箱命令行。
 //!
-//! 子命令: doctor / find / extract / export / check / geom
+//! 子命令: doctor / find / extract / export / check / geom / tex / mask / glow / mod / install / uninstall
 //! 所有子命令支持 `--json`(机器可读输出, 供 AI 代理调用)。
 mod game;
+mod m2cmd;
+mod modproj;
+mod texcmd;
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -122,6 +125,46 @@ enum Cmd {
         #[arg(long, default_value_t = 20)]
         limit: usize,
     },
+    /// 贴图: info / export(DDS→PNG) / import(PNG→DDS) / rewrite / recolor / texture tools
+    #[command(subcommand)]
+    Tex(m2cmd::TexCmd),
+    /// 生成遮罩 PNG(按 GLB 部件/三维盒、UV 矩形、遮罩图), 可叠加到贴图上预览 / build a UV mask
+    Mask {
+        #[command(flatten)]
+        mask: texcmd::MaskArgs,
+        /// 遮罩尺寸取自该贴图(并可 --overlay 预览)
+        #[arg(long)]
+        like: Option<String>,
+        /// 遮罩尺寸 WxH(如 4096x4096)
+        #[arg(long)]
+        size: Option<String>,
+        #[arg(short, long)]
+        out: PathBuf,
+        /// 把遮罩以品红叠到 --like 贴图上, 写预览 PNG
+        #[arg(long)]
+        overlay: Option<PathBuf>,
+        #[arg(long)]
+        project: Option<PathBuf>,
+    },
+    /// 发光: 写 _mg 的 B 通道(发光遮罩/强度)、把发光区漫反射染色、切换 .mfm 到 emissive 着色器 / emissive edit
+    Glow(m2cmd::GlowArgs),
+    /// mod 项目: init / import-sdk / status
+    #[command(subcommand)]
+    Mod(m2cmd::ModCmd),
+    /// 把项目安装到 res_mods(--dev: 直接复制并记录清单; 自动补齐 SDK 占位与贴图分卷)
+    Install {
+        dir: PathBuf,
+        #[arg(long)]
+        dev: bool,
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// 按安装清单精确卸载(只删哈希一致的文件, 还原被覆盖的文件, 删除空的新建目录)
+    Uninstall {
+        dir: PathBuf,
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum, Debug)]
@@ -170,6 +213,12 @@ fn run(cli: Cli) -> Result<i32> {
         }
         Cmd::Check { files } => cmd_check(&cli, files),
         Cmd::Geom { input, roundtrip, limit } => cmd_geom(&cli, input, *roundtrip, *limit),
+        Cmd::Tex(c) => m2cmd::cmd_tex(&cli, c),
+        Cmd::Mask { mask, like, size, out, overlay, project } => m2cmd::cmd_mask(&cli, mask, like.as_deref(), size.as_deref(), out, overlay.as_deref(), project),
+        Cmd::Glow(a) => m2cmd::cmd_glow(&cli, a),
+        Cmd::Mod(c) => m2cmd::cmd_mod(&cli, c),
+        Cmd::Install { dir, dev, dry_run } => m2cmd::cmd_install(&cli, dir, *dev, *dry_run),
+        Cmd::Uninstall { dir, dry_run } => m2cmd::cmd_uninstall(&cli, dir, *dry_run),
     }
 }
 

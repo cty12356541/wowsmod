@@ -142,6 +142,8 @@ pub struct ReadPrim {
     pub name: String,
     pub positions: Vec<[f32; 3]>,
     pub normals: Option<Vec<[f32; 3]>>,
+    pub uvs: Option<Vec<[f32; 2]>>,
+    pub material: Option<String>,
     pub indices: Option<Vec<u32>>,
 }
 
@@ -231,6 +233,22 @@ pub fn read_glb(d: &[u8]) -> Result<(Value, Vec<ReadPrim>)> {
             } else {
                 None
             };
+            let uvs = if p["attributes"].get("TEXCOORD_0").is_some() {
+                let (nn, ct, off, stride, comps) = acc(&p["attributes"]["TEXCOORD_0"])?;
+                if ct != 5126 || comps != 2 || nn != n {
+                    None
+                } else {
+                    let mut v = Vec::with_capacity(nn);
+                    for i in 0..nn {
+                        let s = crate::util::slice(bin, off + i * stride, 8, "glb TEXCOORD_0")?;
+                        v.push([f32::from_le_bytes(s[0..4].try_into().unwrap()), f32::from_le_bytes(s[4..8].try_into().unwrap())]);
+                    }
+                    Some(v)
+                }
+            } else {
+                None
+            };
+            let material = p["material"].as_u64().and_then(|mi| j["materials"][mi as usize]["name"].as_str().map(|s| s.to_string()));
             let indices = if p.get("indices").is_some() {
                 let (n, ct, off, stride, _) = acc(&p["indices"])?;
                 let mut v = Vec::with_capacity(n);
@@ -247,7 +265,7 @@ pub fn read_glb(d: &[u8]) -> Result<(Value, Vec<ReadPrim>)> {
             } else {
                 None
             };
-            prims.push(ReadPrim { mesh: mi, prim: pi, name: m["name"].as_str().unwrap_or("").to_string(), positions, normals, indices });
+            prims.push(ReadPrim { mesh: mi, prim: pi, name: m["name"].as_str().unwrap_or("").to_string(), positions, normals, uvs, material, indices });
         }
     }
     Ok((j, prims))

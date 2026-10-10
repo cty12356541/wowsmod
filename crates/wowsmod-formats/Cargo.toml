@@ -26,6 +26,8 @@ globset = "0.4"
 block_compression = { version = "=0.10.0", default-features = false, features = ["bc15", "bc7"] }
 png = "0.17"
 rayon = "1"
+# 遮罩按材质/网格名筛选(MIT/Apache)
+regex = "1"
 
 [dev-dependencies]
 
