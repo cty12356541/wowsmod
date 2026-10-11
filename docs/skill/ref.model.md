@@ -11,6 +11,7 @@ wowsmod model scale 1.3 --project <项目> --hp HP_FGM_3     # 单个挂点
 wowsmod model move --by 0,0.05,0 --project <项目> --renderset '^MidBack_Net$'
 wowsmod model rotate --deg 0,90,0 --project <项目> --hp HP_FGS_1
 wowsmod model remove --project <项目> --renderset <正则>   # 或 --part / --hp
+wowsmod model prune --project <项目> --renderset '^(Bow|MidFront|MidBack|Stern)$' --facing side --max-size 0.08 --dry-run   # 原壳降噪: 删游离小块(全 LOD, 只退化三角形), 见 shape.refine.clean
 wowsmod model replace --project <项目> --part A --with B   # 或 --glb 网格
 wowsmod model add --project <项目> --glb new.glb --like <渲染集>   # 共用模板材质
 wowsmod model import --project <项目> --mesh wing.obj --like Turret --part FGM049 --at 0.4,0.12,-0.2 --glow mask.png   # 新部件+独立材质/贴图, 见 help ref.model.import
