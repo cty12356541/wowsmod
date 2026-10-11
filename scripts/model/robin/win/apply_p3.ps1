@@ -18,10 +18,12 @@ if(Test-Path "$T\hull_a_p2_half.png"){
 }
 $cfg=Get-Content $Spec -Raw -Encoding UTF8 | ConvertFrom-Json
 foreach($p in $cfg.props){
-  $a=@('--json-out',"$J\imp_$($p.name).json",'model','import','--project',$dst,'--mesh',"$R\props\$($p.name).glb",'--like',$p.like,'--name',$p.name,
+  $verb='import'; if($p.anim){ $verb='animate' }   # A7: 悬浮翼 → model animate --preset float(缓慢上下浮动)
+  $a=@('--json-out',"$J\imp_$($p.name).json",'model',$verb,'--project',$dst,'--mesh',"$R\props\$($p.name).glb",'--like',$p.like,'--name',$p.name,
        '--texture',"$R\prop_atlas.png",'--glow',"$R\prop_glow.png",'--power',"$($cfg.power)",'--tex-size','1024','--gloss',"$($cfg.gloss)")
   if($p.section){ $a+=@('--section',$p.section) }; if($p.part){ $a+=@('--part',$p.part) }; if($p.hp){ $a+=@('--hp',$p.hp) }
   if($p.node){ $a+=@('--node',$p.node) }; if($p.at){ $a+=@('--at',$p.at) }; if($p.rot){ $a+=@('--rot',$p.rot) }; if($p.scale){ $a+=@('--scale',"$($p.scale)") }
+  if($p.anim){ $a+=@('--preset',$p.anim.preset,'--float-amp',"$($p.anim.amp)",'--period',"$($p.anim.period)") }
   & $W @a | Out-Null
   $res=Get-Content "$J\imp_$($p.name).json" -Raw -Encoding UTF8 | ConvertFrom-Json
   "$($p.name) ok=$($res.ok) err=$($res.error) warn=$(($res.warnings | % { $_ }) -join ';')"
