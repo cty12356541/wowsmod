@@ -519,6 +519,15 @@ impl PreviewState {
         if let Some(g) = &self.game {
             c.arg("--game").arg(&g.root);
         }
+        // 无完整客户端的环境(如 CI/盒子): WOWSMOD_GP = GameParams 船条目 JSON, WOWSMOD_GEOM_DIR = 原版 .geometry 目录(可多个, 用系统路径分隔符)
+        if let Ok(gp) = std::env::var("WOWSMOD_GP") {
+            c.arg("--gp").arg(gp);
+        }
+        if let Some(dirs) = std::env::var_os("WOWSMOD_GEOM_DIR") {
+            for d in std::env::split_paths(&dirs) {
+                c.arg("--geom-dir").arg(d);
+            }
+        }
         let o = c.output().context("assemble")?;
         if !o.status.success() {
             bail!("assemble 失败: {}", String::from_utf8_lossy(&o.stderr));

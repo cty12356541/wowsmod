@@ -57,3 +57,7 @@ sun #fff0e4 ×1.395, envI 0.95(IBL 主导), hemi 0.10, toe (0.0025,0.0059,0), tm
 - **水体**: 游戏内模式下水较透明, 能看到水下船体和星点; 港口的水更浑。只影响观感, 不影响船体色。
 - **夜景**只按亮度和饱和度统计粗调过(没有同设计的夜景贴图), 未做 ΔE 验收。
 - 港口光照每次进入会变(正午 vs 黄昏)。本次拟合用的是正午晴天一组, 换港口或时段需要重新拟合。
+
+## 附: 没有游戏客户端的盒子上预览带外带件的项目
+预览装配需要 GameParams 和原版 geometry。可以设 `WOWSMOD_GP=<船条目 JSON>` 和 `WOWSMOD_GEOM_DIR=<原版 .geometry 目录>`, 预览会把它们转给 `assemble --gp/--geom-dir`。
+船条目 JSON 可以从 GameParams_py3.data 解出来(zlib 反序 + pickle), 例如 `/workspace/e2e/calib/gp_bour.json`。
