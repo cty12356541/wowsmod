@@ -23,4 +23,5 @@ wowsmod model import-blender --project <p> ship_edited.glb
 
 **回 import 验收**: `model list` 有道具名、主题无人体材质; `render --warm` 后 day/night 的 side+stern 不穿模、不挡炮、LOD 在、比例合设计书; 发光仍微光。港口无 UI 抽检见 `workflow.layers.verify.port`。
 
+**坑**: 立环/薄环勿对最小轴用 `--height`(会按薄边爆缩放); 改用 `--scale` 或先在 Blender 把包围盒摆正再定标。
 **社区对照**: 镜学家精修外带; 竹宛受其指导挂 PnF; 星尘 Maya 整船重导(我们优先补丁式 import, 避丢 LOD)。细节 `ref.blender`。
