@@ -267,32 +267,53 @@ def build_wings():
     初级飞羽×6(骨外半段, 越外越长越外展) → 次级×6(骨内半段, 短, periwinkle, 叠在初级下) → 覆羽两排(圆头白, 盖住羽根) → 裙摆×3。
     剪影目标: 知更鸟立绘头翼(白→淡紫, 外缘长尖羽成扇弧, 内侧短羽叠层)。"""
     P = []
-    # A6: 整翼下移 DZ(默认 −0.40 ≈ 舷楼高 1.87 的 21%), 羽厚 ×TK(默认 0.45), 羽宽 ×0.9, 小覆羽排取消
-    DZ = float(os.environ.get('ROBIN_WING_DZ', '-0.40')); TK = float(os.environ.get('ROBIN_WING_TK', '0.45'))
-    wall = Vector((0.47, -0.64, 1.98 + DZ))         # 舰桥侧外墙
-    sh = Vector((0.82, -0.72, 2.10 + DZ))           # 套筒外端 = 翼骨起点
-    tip = Vector((1.75, -1.05, 2.38 + DZ))
+    # A6: 整翼下移 DZ, 羽厚 ×TK, 羽宽 ×0.9, 小覆羽排取消
+    # A7 悬浮(默认): 无墙板/套筒/斜撑实体; 整翼外移到舷外(翼根 x≈船舷 1.19 + 间隙 GAP), 下移 DZ=−0.60;
+    #   翼根 = 小发光悬浮核心(金细环 + 发光环 + 发光核, 光环语言); 与船弱关联 = 一串渐小发光光点(非实体杆)。
+    MODE = os.environ.get('ROBIN_WING_MODE', 'float')
+    TK = float(os.environ.get('ROBIN_WING_TK', '0.45'))
+    if MODE == 'float':
+        DZ = float(os.environ.get('ROBIN_WING_DZ', '-0.60')); GAP = float(os.environ.get('ROBIN_WING_GAP', '0.45'))
+        sh = Vector((1.19 + GAP, -0.80, 2.10 + DZ))
+        tip = sh + Vector((0.62, -0.38, 0.22))      # 翼骨更短, 控制翼展/船宽
+        LS = float(os.environ.get('ROBIN_WING_LS', '0.70')); SW = 8   # 初级再收短、多后掠
+    else:
+        DZ = float(os.environ.get('ROBIN_WING_DZ', '-0.40'))
+        sh = Vector((0.82, -0.72, 2.10 + DZ)); tip = Vector((1.75, -1.05, 2.38 + DZ)); LS = 0.86; SW = 0
+    wall = Vector((0.47, -0.64, 1.98 + DZ))
     arm = lambda t: sh + (tip - sh) * t
-    # 壁板(薄, 贴墙) + 护腕套筒(壁端张口 r0.17 → 外端 r0.11) + 外端金细环 + 发光环
-    wp = sphere(1.0, 'white', 24); xform(wp, loc=(wall.x + 0.01, wall.y, wall.z - 0.02), scale=(0.03, 0.24, 0.22))   # A5b: 小、白, 贴墙不显成紫盘; P.append(wp)
-    n = 8
-    P.append(tube([tuple(wall + (sh - wall) * (i / n)) for i in range(n + 1)], [0.17 - 0.06 * (i / n) ** 0.7 for i in range(n + 1)], 'white', seg=16))
-    ring_at = wall + (sh - wall) * 0.92
-    P.append(tube([tuple(wall + (sh - wall) * t) for t in (0.86, 0.94)], [0.118, 0.118], 'gold', seg=16))
-    P.append(tube([tuple(wall + (sh - wall) * t) for t in (0.30, 0.36)], [0.160, 0.160], 'glow', seg=16))
+    if MODE == 'float':
+        ax = (sh - tip).normalized()   # 核心环面朝翼骨方向
+        core = sphere(1.0, 'glow', 20); xform(core, loc=tuple(sh), scale=(0.075, 0.075, 0.075)); P.append(core)
+        for R, r, col in [(0.15, 0.016, 'gold'), (0.20, 0.008, 'glow'), (0.25, 0.006, 'gold')]:
+            ring = torus(R, r, 48, 6, col); P.append(ring)
+            # 环轴(局部 Z) 对准翼骨方向 ax
+            q = Vector((0, 0, 1)).rotation_difference(ax)
+            ring.matrix_world = Matrix.Translation(sh) @ q.to_matrix().to_4x4(); bpy.ops.object.select_all(action='DESELECT')
+            ring.select_set(True); bpy.context.view_layer.objects.active = ring; bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+        # 弱关联光点: 舷墙外侧(y≈1.0, 船舷) → 核心, 6 个渐大发光点, 沿下垂弧
+        p0 = Vector((1.22, -0.80, 1.05))
+        for i in range(1, 7):
+            t = i / 7.0; pt = p0 + (sh - p0) * t + Vector((0, 0, -0.10 * math.sin(math.pi * t)))
+            d = sphere(1.0, 'glow', 10); rr = 0.012 + 0.014 * t; xform(d, loc=tuple(pt), scale=(rr, rr, rr)); P.append(d)
+    else:
+        n = 8
+        P.append(tube([tuple(wall + (sh - wall) * (i / n)) for i in range(n + 1)], [0.17 - 0.06 * (i / n) ** 0.7 for i in range(n + 1)], 'white', seg=16))
+        P.append(tube([tuple(wall + (sh - wall) * t) for t in (0.86, 0.94)], [0.118, 0.118], 'gold', seg=16))
+        P.append(tube([tuple(wall + (sh - wall) * t) for t in (0.30, 0.36)], [0.160, 0.160], 'glow', seg=16))
     # 翼骨: 细白, 下沿发光
     m = 14
-    P.append(tube([tuple(arm(i / m)) for i in range(m + 1)], [0.105 * (1 - 0.6 * i / m) + 0.02 for i in range(m + 1)], 'white', seg=12))
-    P.append(tube([tuple(arm(i / m) + Vector((0, 0.0, -0.09 * (1 - 0.6 * i / m)))) for i in range(m + 1)], [0.010] * (m + 1), 'glow', seg=5))
-    # 细斜撑(舷楼中层 → 套筒中段), 白 + 发光线
-    br0 = Vector((0.50, -0.58, min(1.25, 1.25 + DZ + 0.15))); br1 = wall + (sh - wall) * 0.5 + Vector((0, 0, -0.10))
-    P.append(tube([tuple(br0 + (br1 - br0) * (i / 8)) for i in range(9)], [0.055 + 0.015 * i / 8 for i in range(9)], 'white', seg=10))
-    P.append(tube([tuple(br0 + (br1 - br0) * (i / 8) + Vector((0.06, 0, 0))) for i in range(9)], [0.008] * 9, 'glow', seg=5))
+    P.append(tube([tuple(arm(i / m)) for i in range(m + 1)], [0.085 * (1 - 0.6 * i / m) + 0.02 for i in range(m + 1)], 'white', seg=12))
+    P.append(tube([tuple(arm(i / m) + Vector((0, 0.0, -0.075 * (1 - 0.6 * i / m)))) for i in range(m + 1)], [0.010] * (m + 1), 'glow', seg=5))
+    if MODE != 'float':
+        br0 = Vector((0.50, -0.58, min(1.25, 1.25 + DZ + 0.15))); br1 = wall + (sh - wall) * 0.5 + Vector((0, 0, -0.10))
+        P.append(tube([tuple(br0 + (br1 - br0) * (i / 8)) for i in range(9)], [0.055 + 0.015 * i / 8 for i in range(9)], 'white', seg=10))
+        P.append(tube([tuple(br0 + (br1 - br0) * (i / 8) + Vector((0.06, 0, 0))) for i in range(9)], [0.008] * 9, 'glow', seg=5))
     UP = lambda tilt: (0, 1.0, math.tan(math.radians(tilt)))   # 前缘朝艏, 倾 tilt°
     # 初级飞羽 ×6: 骨外半段, 越外越长越外展越仰
     for t, L, el, sw, W in [(0.50, 1.45, 4, 46, 0.30), (0.60, 1.70, 7, 38, 0.31), (0.70, 1.95, 10, 30, 0.32),
                             (0.80, 2.20, 13, 22, 0.33), (0.90, 2.40, 16, 15, 0.33), (1.00, 2.50, 19, 8, 0.32)]:
-        L *= 0.86   # A5b: 梢 x 4.27 → ≈3.6, 不压船
+        L *= LS; sw += SW   # A5b ×0.86; A7 悬浮 ×0.70 且多后掠, 控翼展
         b = plume(L, W * 0.9, 0.055 * TK, 'feather_wp', curve=0.13, glow=(L > 2.0))
         aim(b, tuple(arm(t) + Vector((0, 0, 0.03))), dvec(el, sw), UP(35), roll=0); P += b
     # 次级 ×6: 骨内半段, 短, periwinkle, 叠在初级下(低 0.06)
