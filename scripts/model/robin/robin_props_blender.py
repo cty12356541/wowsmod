@@ -26,13 +26,15 @@ def new_obj(name, bm, mats):
     return ob
 
 # ---------- 基元 ----------
-def feather(L, W, th=0.018, curve=0.10, nL=16, nW=4, colname='feather_wp', tipsharp=0.55):
+def feather(L, W, th=0.018, curve=0.10, nL=16, nW=4, colname='feather_wp', tipsharp=0.55, profile=None):
     """羽片: 透镜截面, 沿 +X 长 L, 宽 W(Y 向), 在 XY 平面内向 -Y 弯; UV u=横向 v=沿长。"""
     bm = bmesh.new(); uvl = bm.loops.layers.uv.new('UVMap')
     top, bot = [], []
     for i in range(nL + 1):
         t = i / nL
         w = W * (math.sin(math.pi * min(t, 0.999) ** 0.85) ** tipsharp) * (1.0 - 0.25 * t) + 0.004
+        if profile == 'vane':   # A5 真羽: 羽根窄→1/4 处最宽→末端收尖(不对称: 后缘更宽)
+            w = 1.35 * W * min(1.0, t / 0.22) ** 0.6 * (1.0 - t) ** 0.85 + 0.003
         cx = L * t; cy = -curve * L * t * t
         rt, rb = [], []
         for j in range(nW + 1):
@@ -242,54 +244,72 @@ def dvec(el, sw, out=1.0):
     e, w = math.radians(el), math.radians(sw)
     return (out * math.cos(e) * math.cos(w), -math.cos(e) * math.sin(w), math.sin(e))
 
+def plume(L, W, th, col, curve=0.14, edge=True, shaft=True, glow=False, round_tip=False):
+    """A5 羽片: 弯弧(向后缘弯) + 末端收尖 + 根部窄; 金只在前缘(细, 渐细)和羽轴(细)。round_tip=覆羽圆头。"""
+    parts = []
+    f = feather(L, W, th=th, curve=curve, nL=20, nW=4, colname=col, tipsharp=0.8 if round_tip else 0.45,
+                profile=None if round_tip else 'vane'); parts.append(f)
+    def wv(t):
+        if round_tip: return W * (math.sin(math.pi * min(t, 0.999) ** 0.85) ** 0.8) * (1.0 - 0.25 * t) + 0.004
+        return 1.35 * W * min(1.0, t / 0.22) ** 0.6 * (1.0 - t) ** 0.85 + 0.003
+    if edge:
+        pts = [(L * t, -curve * L * t * t + 0.5 * wv(t) + 0.003, th * 0.2) for t in [0.08 + 0.84 * i / 16 for i in range(17)]]
+        parts.append(tube(pts, [0.011 * (1 - 0.7 * i / 16) + 0.002 for i in range(17)], 'gold', seg=5))
+    if shaft:
+        sp = [(L * t, -curve * L * t * t, th * (1 - (0.6 * t)) + 0.004) for t in [0.02 + 0.85 * i / 16 for i in range(17)]]
+        parts.append(tube(sp, [0.010 * (1 - 0.7 * i / 16) + 0.002 for i in range(17)], 'glow' if glow else 'gold', seg=5))
+    return parts
+
 def build_wings():
-    """方案 A4(=A3 + 加厚 + 根部衔接件)「舞台·展翼歌者」: 舰桥=歌者头部, 光环=冠, 舰桥两侧的知更鸟头翼=全船唯一视觉中心。
-    A2 自评问题: 所有羽从同一点放射+羽面竖直 → 侧看像竖起的扇子, 俯看只剩细棍, 无厚度/分层/外展。
-    A3 改法: ①翼骨(厚白臂, 金脊)从舰桥侧向外上后伸出, 羽根沿翼骨错开(非单点);
-    ②三层上下错层: 上=初级长羽(外展, 仰 6–22°) / 中=次级(平, 深色 periwinkle) / 下=裙摆羽(外下);
-    ③羽面倾 30–45°(前缘朝艏偏上), 俯视与侧视都有面积; 羽更宽更厚; 覆羽沿骨叠一排白厚片。"""
+    """方案 A5「舞台·展翼歌者」(A4 → 用户: 肩球臃肿、羽像船桨、横向金条太多)。
+    衔接: 贴舷楼外墙的薄壁板 + 流线护腕套筒(壁端略张口) + 细斜撑; 不用球。
+    翼骨: 套筒外接细白骨(下沿发光)。羽: plume() 弯弧收尖, 长短渐变 ——
+    初级飞羽×6(骨外半段, 越外越长越外展) → 次级×6(骨内半段, 短, periwinkle, 叠在初级下) → 覆羽两排(圆头白, 盖住羽根) → 裙摆×3。
+    剪影目标: 知更鸟立绘头翼(白→淡紫, 外缘长尖羽成扇弧, 内侧短羽叠层)。"""
     P = []
-    sh = Vector((0.55, -0.62, 2.02))            # 肩(舰桥侧)
-    tip = Vector((1.85, -1.05, 2.42))           # 翼骨末端(外上后)
+    wall = Vector((0.47, -0.64, 1.98))         # 舰桥侧外墙
+    sh = Vector((0.82, -0.72, 2.10))           # 套筒外端 = 翼骨起点
+    tip = Vector((1.90, -1.08, 2.40))
     arm = lambda t: sh + (tip - sh) * t
-    # 肩座: 白厚羽根 + 金环 + 发光环
-    h = sphere(1.0, 'white', 24); xform(h, loc=tuple(sh), scale=(0.22, 0.36, 0.26)); P.append(h)
-    r = torus(0.25, 0.028, 48, 8, 'gold'); xform(r, loc=(sh.x + 0.04, sh.y, sh.z), rot=(0, 90, 0), scale=(1, 1.4, 1)); P.append(r)
-    gr = torus(0.29, 0.010, 48, 6, 'glow'); xform(gr, loc=(sh.x + 0.05, sh.y, sh.z), rot=(0, 90, 0), scale=(1, 1.4, 1)); P.append(gr)
-    # 翼骨: 厚白锥管 + 上脊金管 + 下沿发光
-    n = 14
-    P.append(tube([tuple(arm(i / n)) for i in range(n + 1)], [0.18 * (1 - 0.50 * i / n) + 0.02 for i in range(n + 1)], 'white', seg=14))   # A4 加粗
-    P.append(tube([tuple(arm(i / n) + Vector((0, 0.02, 0.11 * (1 - 0.55 * i / n)))) for i in range(n + 1)], [0.022] * (n + 1), 'gold', seg=6))
-    P.append(tube([tuple(arm(i / n) + Vector((0, 0.0, -0.12 * (1 - 0.55 * i / n)))) for i in range(n + 1)], [0.010] * (n + 1), 'glow', seg=5))
-    # A4 根部衔接(与舷楼自然连接, 不像插上去): ①肩甲 —— 白厚弧壳贴舰桥侧壁(舰桥侧 x≈0.5 @ y1.2–2.0)包住翼根;
-    # ②斜撑 —— 从舷楼中层侧壁(y≈1.2)斜上接肩, 白管+发光线(接船体发光主线竖段); ③整流鳍 —— 肩下三角白板把斜撑与翼骨连成一体。
-    pd = sphere(1.0, 'white', 28); xform(pd, loc=(sh.x - 0.06, sh.y, sh.z - 0.30), scale=(0.16, 0.42, 0.55)); P.append(pd)
-    pr = torus(1.0, 0.05, 48, 8, 'peri'); xform(pr, loc=(sh.x - 0.02, sh.y, sh.z - 0.30), rot=(0, 90, 0), scale=(0.42, 0.55, 0.30)); P.append(pr)
-    br0 = Vector((0.48, -0.55, 1.18)); br1 = sh + Vector((0.02, 0.0, -0.08))
-    P.append(tube([tuple(br0 + (br1 - br0) * (i / 10)) for i in range(11)], [0.10 + 0.04 * i / 10 for i in range(11)], 'white', seg=12))
-    P.append(tube([tuple(br0 + (br1 - br0) * (i / 10) + Vector((0.11, 0, 0))) for i in range(11)], [0.012] * 11, 'glow', seg=5))
-    P.append(tube([tuple(br0 + (br1 - br0) * (i / 10)) for i in (0, 1)], [0.14, 0.14], 'gold', seg=12))   # 底座金箍
-    fin = feather(0.95, 0.55, th=0.07, curve=0.02, colname='white', tipsharp=0.5)
-    aim([fin], tuple(sh + Vector((0.05, -0.10, -0.05))), dvec(-55, 35), (0, 1.0, 0.2), roll=0); P.append(fin)
+    # 壁板(薄, 贴墙) + 护腕套筒(壁端张口 r0.17 → 外端 r0.11) + 外端金细环 + 发光环
+    wp = sphere(1.0, 'peri', 24); xform(wp, loc=(wall.x + 0.01, wall.y, wall.z - 0.04), scale=(0.035, 0.30, 0.36)); P.append(wp)
+    n = 8
+    P.append(tube([tuple(wall + (sh - wall) * (i / n)) for i in range(n + 1)], [0.17 - 0.06 * (i / n) ** 0.7 for i in range(n + 1)], 'white', seg=16))
+    ring_at = wall + (sh - wall) * 0.92
+    P.append(tube([tuple(wall + (sh - wall) * t) for t in (0.86, 0.94)], [0.118, 0.118], 'gold', seg=16))
+    P.append(tube([tuple(wall + (sh - wall) * t) for t in (0.30, 0.36)], [0.160, 0.160], 'glow', seg=16))
+    # 翼骨: 细白, 下沿发光
+    m = 14
+    P.append(tube([tuple(arm(i / m)) for i in range(m + 1)], [0.105 * (1 - 0.6 * i / m) + 0.02 for i in range(m + 1)], 'white', seg=12))
+    P.append(tube([tuple(arm(i / m) + Vector((0, 0.0, -0.09 * (1 - 0.6 * i / m)))) for i in range(m + 1)], [0.010] * (m + 1), 'glow', seg=5))
+    # 细斜撑(舷楼中层 → 套筒中段), 白 + 发光线
+    br0 = Vector((0.50, -0.58, 1.25)); br1 = wall + (sh - wall) * 0.5 + Vector((0, 0, -0.10))
+    P.append(tube([tuple(br0 + (br1 - br0) * (i / 8)) for i in range(9)], [0.055 + 0.015 * i / 8 for i in range(9)], 'white', seg=10))
+    P.append(tube([tuple(br0 + (br1 - br0) * (i / 8) + Vector((0.06, 0, 0))) for i in range(9)], [0.008] * 9, 'glow', seg=5))
     UP = lambda tilt: (0, 1.0, math.tan(math.radians(tilt)))   # 前缘朝艏, 倾 tilt°
-    # 上层 初级长羽 ×5: 沿骨 t 0.40→1.0, 外展(仰 22→6°, 后掠 8→40°)
-    for k, (t, L, el, sw, W) in enumerate([(0.40, 1.95, 22, 8, 0.50), (0.55, 2.20, 18, 16, 0.54), (0.70, 2.30, 14, 24, 0.54),
-                                           (0.85, 2.15, 10, 32, 0.50), (1.00, 1.85, 6, 40, 0.46)]):
-        b = blade(L, W, 0.13, main='feather_wp', sub='feather_pv', sub_k=0.6)
-        aim(b, tuple(arm(t) + Vector((0, 0, 0.06))), dvec(el, sw), UP(38), roll=0); P += b
-    # 中层 次级羽 ×4: 低 0.18, 平展, 深色 periwinkle(和上层拉开明度做分层)
-    for k, (t, L, el, sw, W) in enumerate([(0.20, 1.60, 2, 30, 0.44), (0.40, 1.55, -2, 40, 0.42), (0.60, 1.45, -5, 50, 0.40), (0.80, 1.25, -8, 60, 0.36)]):
-        b = blade(L, W, 0.11, main='feather_pv', sub='navy', sub_k=0.6)
-        aim(b, tuple(arm(t) + Vector((0, -0.05, -0.18))), dvec(el, sw), UP(30), roll=0); P += b
-    # 下层 裙摆羽 ×3: 肩下, 外下后, 白→violet 副刃(歌者裙摆)
-    for k, (L, el, sw, W) in enumerate([(1.55, -14, 30, 0.40), (1.35, -24, 42, 0.36), (1.10, -34, 55, 0.32)]):
-        b = blade(L, W, 0.09, main='feather_wp', sub='violet', sub_k=0.5)
-        aim(b, (sh.x + 0.02, sh.y - 0.10 - 0.10 * k, sh.z - 0.28), dvec(el, sw), UP(45), roll=0); P += b
-    # 覆羽: 沿骨一排白厚短羽(盖住羽根, 给厚度)
+    # 初级飞羽 ×6: 骨外半段, 越外越长越外展越仰
+    for t, L, el, sw, W in [(0.50, 1.45, 4, 46, 0.30), (0.60, 1.70, 7, 38, 0.31), (0.70, 1.95, 10, 30, 0.32),
+                            (0.80, 2.20, 13, 22, 0.33), (0.90, 2.40, 16, 15, 0.33), (1.00, 2.50, 19, 8, 0.32)]:
+        b = plume(L, W, 0.055, 'feather_wp', curve=0.13, glow=(L > 2.3))
+        aim(b, tuple(arm(t) + Vector((0, 0, 0.03))), dvec(el, sw), UP(35), roll=0); P += b
+    # 次级 ×6: 骨内半段, 短, periwinkle, 叠在初级下(低 0.06)
+    for k, t in enumerate([0.0, 0.10, 0.20, 0.30, 0.40, 0.50]):
+        L = 1.10 + 0.06 * k; sw = 72 - 6 * k; el = -6 + k
+        b = plume(L, 0.30, 0.05, 'feather_pv', curve=0.12, edge=(k % 2 == 0))
+        aim(b, tuple(arm(t) + Vector((0, -0.04, -0.07))), dvec(el, sw), UP(30), roll=0); P += b
+    # 覆羽两排: 大覆羽(圆头白, 盖住飞羽根) + 小覆羽(更短, 贴骨)
+    for k in range(7):
+        t = 0.02 + 0.15 * k
+        f = plume(0.72 - 0.03 * k, 0.28, 0.06, 'white', curve=0.08, edge=False, shaft=False, round_tip=True)
+        aim(f, tuple(arm(t) + Vector((0, 0.02, 0.07))), dvec(6, 40 - 3 * k), UP(38), roll=0); P += f
     for k in range(6):
-        t = 0.08 + 0.16 * k
-        f = feather(0.75 - 0.05 * k, 0.36, th=0.10, curve=0.03, colname='white', tipsharp=0.4)
-        aim([f], tuple(arm(t) + Vector((0, 0.04, 0.10))), dvec(4, 30 + 4 * k), UP(40), roll=0); P.append(f)
+        t = 0.04 + 0.16 * k
+        f = plume(0.40, 0.22, 0.05, 'white', curve=0.06, edge=False, shaft=False, round_tip=True)
+        aim(f, tuple(arm(t) + Vector((0, 0.05, 0.11))), dvec(10, 45), UP(45), roll=0); P += f
+    # 裙摆 ×3: 套筒下, 外下后
+    for k, (L, el, sw) in enumerate([(1.30, -16, 34), (1.12, -26, 46), (0.92, -36, 58)]):
+        b = plume(L, 0.28, 0.05, 'feather_wp', curve=0.12, edge=(k == 0))
+        aim(b, tuple(sh + Vector((-0.05, -0.06 - 0.08 * k, -0.14))), dvec(el, sw), UP(45), roll=0); P += b
     for p in P: p.select_set(False)
     right = join(P, 'wing_R')
     left = mirror_x(right, 'wing_L')
