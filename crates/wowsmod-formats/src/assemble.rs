@@ -100,6 +100,15 @@ pub fn hardpoints(sdk: &Path, master: &str, mv: &Visual) -> Result<(Vec<(String,
     }
     let mut hps = BTreeMap::new();
     for (s, sm) in &sections {
+        // 特效挂点(HP_FX_*: 烟囱烟/航迹/火/进水…)也可能在分段主 visual 里(如 HP_FX_Smoke_1), ports 优先
+        let sv = sdk.join("ship").join(format!("{master}_{s}.visual"));
+        if let Ok(t) = read_text(&sv) {
+            if let Ok(v) = Visual::parse(&t) {
+                for n in v.nodes.iter().filter(|n| n.name.starts_with("HP_FX_")) {
+                    hps.insert(n.name.clone(), (s.clone(), mat_mul(&n.world, sm)));
+                }
+            }
+        }
         let pv = sdk.join("ship").join(format!("{master}_{s}_ports.visual"));
         if !pv.exists() {
             continue;
@@ -326,10 +335,18 @@ pub fn assemble(sdk: &Path, ship_name: &str, ship: &Value, geometry: &dyn Fn(&st
             "game_barrel_dir": [r4(w[2][0]), r4(w[2][1]), r4(w[2][2])],
         }));
     }
+    // 特效挂点 → 空节点(extras.fx), 供工作台放烟囱烟/航迹; 位置只读, 不改模型
+    let mut fx_hps = Vec::new();
+    for (name, (sec, w)) in hps.iter().filter(|(k, _)| k.starts_with("HP_FX_")) {
+        let n = game_to_gltf(w);
+        sb.add_node(name, None, Some(&n), json!({"fx": name, "section": sec}), None);
+        fx_hps.push(json!({"hp": name, "section": sec, "gltf_pos": [r4(n[0][3]), r4(n[1][3]), r4(n[2][3])]}));
+    }
     sb.asset_extras = json!({"ship": ship_name, "hullModel": master});
     let table = json!({
         "ship": ship_name, "hullModel": master, "sections": table_sections, "mounts": mounts,
         "hardpoints_total": hps.len(),
+        "fx_hardpoints": fx_hps,
         "animations": anims,
         "conventions": {
             "game": "BigWorld 左手系: x 右舷, y 上, z 船艏; .visual 矩阵为行向量约定, row3=平移",
