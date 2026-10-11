@@ -276,15 +276,22 @@ def paint_turret(pos,nrm,cov,kind):
     x,y,z=pos[...,0],pos[...,1],pos[...,2]; covd=cov>0
     up=covd&(nrm[...,1]>0.7); side=covd&~up
     ymax=np.percentile(y[covd],99); zmin=z[covd].min(); zmax=z[covd].max(); xmax=np.abs(x[covd]).max()
-    # 侧面 periwinkle, 底部紫色座圈, 顶缘金线
-    idx[side]=NAMES.index('peri')
-    idx[side&(y<0.035*(ymax/0.24))]=NAMES.index('violet')
-    idx[side&(y>ymax*0.86)]=NAMES.index('gold')
+    if STYLE=='blocks':   # T1: 配合装甲围板 —— 侧面白为主(上部露出段), 底座圈 periwinkle; 去掉顶缘金线/紫座圈(边沿杂条纹)
+        idx[side]=NAMES.index('turret')
+        idx[side&(y<0.035*(ymax/0.24))]=NAMES.index('peri')
+    else:
+        # 侧面 periwinkle, 底部紫色座圈, 顶缘金线
+        idx[side]=NAMES.index('peri')
+        idx[side&(y<0.035*(ymax/0.24))]=NAMES.index('violet')
+        idx[side&(y>ymax*0.86)]=NAMES.index('gold')
     # 顶面: 白 + 中线 periwinkle 缎带 + 两侧金细线 + 尾部八芒星
     idx[up]=NAMES.index('turret')
     w=0.12*xmax
-    idx[up&(np.abs(x)<w)]=NAMES.index('peri')
-    idx[up&(np.abs(np.abs(x)-w*1.35)<0.012*xmax/0.5)]=NAMES.index('gold')
+    if STYLE=='blocks':   # T1: 顶面中线 royal 宽分区(硬边), 不要两侧金细线
+        idx[up&(np.abs(x)<w*1.25)]=NAMES.index('royal')
+    else:
+        idx[up&(np.abs(x)<w)]=NAMES.index('peri')
+        idx[up&(np.abs(np.abs(x)-w*1.35)<0.012*xmax/0.5)]=NAMES.index('gold')
     em=emblem(512)
     s_=xmax*0.9; zc=zmin+0.28*(zmax-zmin)
     dv=sample_decal(em,x/s_+0.5,(z-zc)/s_+0.5)
