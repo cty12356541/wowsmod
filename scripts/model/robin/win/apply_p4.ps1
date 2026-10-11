@@ -38,7 +38,7 @@ if($Prune){   # 原壳降噪(shape.refine.clean): 舷侧小件 + 主甲板小件
 }
 if($FlatN){   # 原壳降噪「融」: 舷窗/铆钉/小舱口凹凸在 Hull_n 法线里(几何删不掉) → 船体法线 R/G 置 128(平); B/A 不动
   Get-ChildItem $dst -Recurse -Filter '*_Hull_n.dds' | % {
-    foreach($c in 'r','g'){ & $W --json-out "$Jlatn_$c.json" tex channel $_.Name --project $dst --channel $c --set 128 | Out-Null
+    foreach($c in 'r','g'){ & $W --json-out "$J\flatn_$c.json" tex channel $_.Name --project $dst --channel $c --set 128 | Out-Null
       $res=Get-Content "$J\flatn_$c.json" -Raw -Encoding UTF8 | ConvertFrom-Json; "flatN $($_.Name) $c ok=$($res.ok) err=$($res.error)" } }
 }
 # r32/T3: apply 后自检, 失败即报错
