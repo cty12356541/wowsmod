@@ -417,15 +417,91 @@ def turret_shell(hw, hl, cz, y0, y1, flare, open_deg=38, fin_len=0.5, scallops=1
         o = octagram(0.06 * hw / 0.5 + 0.02, 0.008, 'gold'); xform(o, loc=(0, cz - hl - 0.005, (y0 + y1) / 2 + 0.02), rot=(90, 0, 0)); parts.append(o)
     return parts
 
-def build_shells():
-    T = {  # 炮塔局部(游戏坐标, 艏向 +Y); 由 geometry.glb 主材质包围盒/角度轮廓拟合
-        'FGM049': dict(hw=0.535, hl=0.70, cz=0.06, y0=0.015, y1=0.215, flare=0.06, open_deg=40, fin_len=0.55),
-        'FGS053': dict(hw=0.25, hl=0.38, cz=0.12, y0=0.01, y1=0.155, flare=0.03, open_deg=34, fin_len=0.28, seg=48, scallops=7),
-        'FGS036': dict(hw=0.165, hl=0.31, cz=0.10, y0=0.01, y1=0.19, flare=0.02, open_deg=30, fin_len=0.2, seg=36, scallops=6),
-    }
+# ---------- 炮塔装甲件 v2(T1) ----------
+# v1 软弧罩壳的问题(炮塔审查 r31): 超椭圆环外扩+喇叭口 → 与炮塔本体有 0.05–0.12 间隙、比本体长 0.1–0.3(像托盘/漂壳);
+# 下摆金边+发光线+顶金线一圈 → 边沿橙紫条纹; 后角耳羽鳍有被后炮塔炮管扫到的风险。
+# v2: 由 geometry.glb 实测的炮塔平面轮廓(半宽 w(z), 已排除炮管/玻璃)生成贴合装甲板:
+#     侧/后围板按段分件(分件缝)、顶沿内倒角; 白为主, 侧中板 periwinkle, 后板 violet; 金/发光只做后板徽记+短条点缀; 前方炮门全开。
+TURRET_PLAN = {   # 半轮廓 (z 前向, 半宽 w), 从后中线 → 前炮门边; H=围板高(≈0.7 炮塔高); g=贴合间隙
+    'FGM049': dict(pts=[(-0.600, 0.0), (-0.600, 0.30), (-0.565, 0.500), (0.080, 0.505), (0.180, 0.440), (0.300, 0.370), (0.385, 0.300)],
+                   H=0.165, g=0.008, th=0.016, ch=0.020, panels=['white', 'peri', 'white', 'violet']),
+    'FGS053': dict(pts=[(-0.235, 0.0), (-0.235, 0.07), (-0.185, 0.170), (-0.130, 0.215), (0.020, 0.235), (0.100, 0.210), (0.170, 0.160), (0.215, 0.105)],
+                   H=0.125, g=0.006, th=0.012, ch=0.014, panels=['white', 'peri', 'white', 'violet']),
+    'FGS036': dict(pts=[(-0.180, 0.0), (-0.180, 0.06), (-0.155, 0.120), (-0.100, 0.145), (0.100, 0.150), (0.145, 0.115), (0.165, 0.070)],
+                   H=0.150, g=0.005, th=0.009, ch=0.012, y0=0.045, panels=['white', 'peri', 'white', 'violet']),   # y0: 前副炮朝后时炮管从后副炮围板下缘下方掠过
+}
+
+def _resample(poly, n):
+    """折线按弧长等分 n 段, 返回 n+1 点。"""
+    L = [0.0]
+    for i in range(1, len(poly)): L.append(L[-1] + (Vector(poly[i]) - Vector(poly[i - 1])).length)
     out = []
-    for k, prm in T.items():
-        ps = turret_shell(**prm)
+    for k in range(n + 1):
+        t = L[-1] * k / n; j = max(1, next((i for i in range(1, len(L)) if L[i] >= t), len(L) - 1))
+        f = 0 if L[j] == L[j - 1] else (t - L[j - 1]) / (L[j] - L[j - 1])
+        out.append(Vector(poly[j - 1]).lerp(Vector(poly[j]), f))
+    return out, L[-1]
+
+def armor_panel(seg_pts, g, th, H, ch, col, y0=0.012):
+    """一段围板: seg_pts 平面折线(Blender X, Y), 法向外; 内面=轮廓+g, 外面=+g+th; 顶沿外侧倒角 ch(外上缘降 ch 并内收)。"""
+    bm = bmesh.new(); uvl = bm.loops.layers.uv.new('UVMap')
+    n = len(seg_pts)
+    nors = []
+    for i in range(n):
+        a = seg_pts[max(i - 1, 0)]; b = seg_pts[min(i + 1, n - 1)]
+        t = (b - a).normalized(); nrm = Vector((t.y, -t.x)); nors.append(nrm)   # 右手: 沿逆时针走时外法向
+    rows = []
+    for i, p in enumerate(seg_pts):
+        nn = nors[i]
+        pin = p + nn * g; pout = p + nn * (g + th)
+        rows.append([bm.verts.new((pin.x, pin.y, y0)), bm.verts.new((pout.x, pout.y, y0)),
+                     bm.verts.new((pout.x, pout.y, H - ch)), bm.verts.new((pin.x + nn.x * th * 0.25, pin.y + nn.y * th * 0.25, H))])
+    for i in range(n - 1):
+        for k in range(4):
+            k2 = (k + 1) % 4
+            f = bm.faces.new([rows[i][k], rows[i + 1][k], rows[i + 1][k2], rows[i][k2]])
+            for lp in f.loops: lp[uvl].uv = (0.5, 0.5)
+    for r in (rows[0], rows[-1][::-1]):
+        f = bm.faces.new(r)
+        for lp in f.loops: lp[uvl].uv = (0.5, 0.5)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    return new_obj('armor', bm, [col])
+
+def turret_armor(pts, H, g, th, ch, panels, seam=0.008, seg_per=6, y0=0.012):
+    """整圈围板: 右半轮廓镜像成 左炮门边→后→右炮门边, 按 panels(从后中向前, 左右对称)分件, 件间留缝。"""
+    right = [Vector((w, z)) for z, w in pts]                       # 后中 → 右前
+    left = [Vector((-v.x, v.y)) for v in reversed(right)]          # 左前 → 后中
+    loop = left[:-1] + right                                       # 左前 → 后 → 右前(逆时针: 外法向向外)
+    npan = len(panels) * 2 - 1                                     # 后中一件居中
+    pts_all, total = _resample(loop, npan * seg_per)
+    parts = []
+    # 颜色从前到后: 前侧板→…→后中板(panels[-1]=后)
+    seq = panels[:-1] + [panels[-1]] + list(reversed(panels[:-1]))
+    for k in range(npan):
+        seg = pts_all[k * seg_per:(k + 1) * seg_per + 1]
+        # 缝: 两端各收 seam/2
+        a0 = seg[0] + (seg[1] - seg[0]).normalized() * seam * 0.5; a1 = seg[-1] + (seg[-2] - seg[-1]).normalized() * seam * 0.5
+        seg = [a0] + seg[1:-1] + [a1]
+        parts.append(armor_panel(seg, g, th, H, ch, seq[k], y0=y0))
+    return parts, pts_all
+
+def build_shells():
+    out = []
+    for k, prm in TURRET_PLAN.items():
+        pts = prm['pts']; H = prm['H']; g = prm['g']; th = prm['th']; ch = prm['ch']
+        y0 = prm.get('y0', 0.012)
+        ps, loop = turret_armor(pts, H, g, th, ch, prm['panels'], y0=y0)
+        rz = pts[0][0] - g - th                          # 后板外表面 z
+        s_ = (pts[2][1] if k == 'FGM049' else pts[3][1])  # 尺度参考
+        # 后板徽记: 金八芒星 + 下方短发光缝(少而精)
+        o = octagram(0.10 * s_ + 0.012, 0.004 + 0.004 * s_, 'gold'); xform(o, loc=(0, rz - 0.003, H * 0.55), rot=(90, 0, 0)); ps.append(o)
+        gl = tube([(-0.16 * s_, rz - 0.004, max(H * 0.22, y0 + 0.012)), (0.16 * s_, rz - 0.004, max(H * 0.22, y0 + 0.012))], [0.004 + 0.004 * s_] * 2, 'glow', seg=6); ps.append(gl)
+        # 侧中板(peri)上沿短金条: 每侧一段, 只在该板中部 60%
+        for sx in (1, -1):
+            zc = 0.5 * (pts[3][0] + pts[4][0]) if len(pts) > 4 else pts[3][0]
+            wz = max(w for z, w in pts) + g + th * 0.6
+            L = 0.18 * (pts[-1][0] - pts[0][0])
+            gt = tube([(sx * wz, zc - L / 2, H - ch * 0.5), (sx * wz, zc + L / 2, H - ch * 0.5)], [0.003 + 0.002 * s_] * 2, 'gold', seg=5); ps.append(gt)
         out.append(join(ps, 'shell_' + k))
     return out
 
