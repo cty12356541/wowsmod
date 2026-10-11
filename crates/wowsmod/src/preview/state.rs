@@ -599,7 +599,8 @@ impl PreviewState {
             "game": {"client": "Мир кораблей", "version": ver, "build": build, "path": path, "running": !running.is_empty()},
             "install": self.install.read().unwrap().clone(),
             "activity": self.activity.read().unwrap().clone(),
-            "head": self.head_id(), "etag": self.etag()
+            "head": self.head_id(), "etag": self.etag(),
+            "fx": crate::fxcmd::project_fx_view(&self.project.root)
         })
     }
 

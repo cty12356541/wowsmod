@@ -130,7 +130,7 @@ pub struct AssembleArgs {
     pub full: bool,
 }
 
-fn resolve_ship_json(gp: &Value, q: &str) -> Result<(String, Value)> {
+pub(crate) fn resolve_ship_json(gp: &Value, q: &str) -> Result<(String, Value)> {
     let o = gp.as_object().ok_or_else(|| anyhow!("--gp 不是 JSON 字典"))?;
     let qp = if q.starts_with('P') { q.to_string() } else { format!("P{q}") };
     for k in [q.to_string(), qp.clone()] {

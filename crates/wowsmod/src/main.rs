@@ -5,6 +5,7 @@
 mod ai;
 mod design;
 mod design_preview;
+mod fxcmd;
 mod shipcolor;
 mod game;
 mod guide;
@@ -175,6 +176,9 @@ enum Cmd {
     DesignPreview(design_preview::PreviewArgs),
     /// 整船同色: 船体/上层建筑/炮塔/指挥仪/雷达按组一次换色(内部逐张 tex recolor + 清 _mg B) / recolor whole ship by part groups
     ShipColor(shipcolor::ShipColorArgs),
+    /// 特效层: 炮口焰/开火烟/烟囱烟/航迹 — 按类查贴图、看船的特效绑定、按项目 fx.json 主题换色(全局生效) / FX layer
+    #[command(subcommand)]
+    Fx(fxcmd::FxCmd),
     /// 发光: 写 _mg 的 B 通道(发光遮罩/强度)、把发光区漫反射染色、切换 .mfm 到 emissive 着色器 / emissive edit
     Glow(m2cmd::GlowArgs),
     /// 颜色换算: 想在港口里"看到"某颜色时贴图该用什么颜色(按勃艮第港口实测标定, 近似) / port colour compensation
@@ -340,6 +344,7 @@ fn run(cli: Cli) -> Result<i32> {
         Cmd::DesignBook(c) => design::cmd_book(&cli, c),
         Cmd::DesignPreview(a) => design_preview::cmd(&cli, a),
         Cmd::ShipColor(a) => shipcolor::cmd(&cli, a),
+        Cmd::Fx(c) => fxcmd::cmd(&cli, c),
         Cmd::Preview(a) => preview::cmd_preview(&cli, a),
         Cmd::Status(a) => ai::cmd_status(&cli, a),
         Cmd::Help { topic, search, tree, children, check } => ai::cmd_help(&cli, topic.as_deref(), search.as_deref(), *tree, *children, *check),
