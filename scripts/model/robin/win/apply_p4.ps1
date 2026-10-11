@@ -1,4 +1,4 @@
-﻿param([string]$Spec='C:\Users\Administrator\e2e_port\p4\props_spec_T3.json',[double]$GlowPower=0.7,[string]$R='C:\Users\Administrator\e2e_port\p4',[int]$Prune=1)
+﻿param([string]$Spec='C:\Users\Administrator\e2e_port\p4\props_spec_T3.json',[double]$GlowPower=0.7,[string]$R='C:\Users\Administrator\e2e_port\p4',[int]$Prune=1,[int]$FlatN=1)
 # P4/T3: 发光强度 0.7(夜景读主题色、白天可见); 原壳降噪 model prune; 末尾自动 verify_apply, 失败即报错退出(不要 install)
 # PowerShell 变量不分大小写: 勿用 $spec 覆盖 [string]$Spec 参数
 # 确定性重建: dir_p2(贴图层定稿) → dir_p3 镜像, 再按 spec 逐件 import 外带(避免反复 import 的同名渲染集残留)
@@ -35,6 +35,11 @@ if($Prune){   # 原壳降噪(shape.refine.clean): 舷侧小件 + 主甲板小件
     if($pr[2]){ $a+=@("--box=$($pr[2])") }
     & $W @a | Out-Null; $res=Get-Content "$J\prune_$($pr[0]).json" -Raw -Encoding UTF8 | ConvertFrom-Json; "prune $($pr[0]) ok=$($res.ok) err=$($res.error)"
   }
+}
+if($FlatN){   # 原壳降噪「融」: 舷窗/铆钉/小舱口凹凸在 Hull_n 法线里(几何删不掉) → 船体法线 R/G 置 128(平); B/A 不动
+  Get-ChildItem $dst -Recurse -Filter '*_Hull_n.dds' | % {
+    foreach($c in 'r','g'){ & $W --json-out "$Jlatn_$c.json" tex channel $_.Name --project $dst --channel $c --set 128 | Out-Null
+      $res=Get-Content "$J\flatn_$c.json" -Raw -Encoding UTF8 | ConvertFrom-Json; "flatN $($_.Name) $c ok=$($res.ok) err=$($res.error)" } }
 }
 # r32/T3: apply 后自检, 失败即报错
 & powershell -NoProfile -ExecutionPolicy Bypass -File 'D:\WoWSModding\wowsmod\scripts\model\robin\verify_apply.ps1' -Proj $dst -Spec $Spec

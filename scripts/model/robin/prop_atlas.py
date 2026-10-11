@@ -40,16 +40,17 @@ def build(out_dir, size=1024):
         img[:, k * cw:(k + 1) * cw][np.broadcast_to(gl & (vv > 0.15), (size, cw))] = GL
     for k, c in zip(range(2, 8), [W, P, V, N, G, GL]):
         img[:, k * cw:(k + 1) * cw] = c
-    # T3: 列 2–5 上半(v∈[0.5,1]) = 面板细节区(pnl_<列>): 底部 AO、上沿倒角高光/下沿压暗、侧缘暗、两排铆钉、中缝、低频斑驳
+    # T3b(翻转安全): 纯色=中带 v≈0.5; 面板细节=上带 v∈[0.62,0.98] 且下带为其上下镜像 → 引擎 v 翻转与否外观一致
+    # 原 T3: 列 2–5 上半 = 面板细节区(pnl_<列>): 底部 AO、上沿倒角高光/下沿压暗、侧缘暗、两排铆钉、中缝、低频斑驳
     rows = np.arange(size); vrow = 1 - rows / size
-    tt = np.clip((vrow - 0.53) / 0.44, 0, 1)[:, None]; uu = np.clip((u - 0.08) / 0.84, 0, 1)
+    tt = np.clip((vrow - 0.62) / 0.36, 0, 1)[:, None]; uu = np.clip((u - 0.08) / 0.84, 0, 1)
     sm = lambda x: x * x * (3 - 2 * x)
     f = 0.80 + 0.20 * sm(np.clip(tt / 0.45, 0, 1))
     f = f * np.where(tt > 0.93, 1.07, 1.0) * np.where(tt < 0.05, 0.84, 1.0) * np.where(np.abs(uu - 0.5) > 0.46, 0.86, 1.0)
-    f = f * np.where(np.abs(tt - 0.5) < 2.0 / (0.44 * size), 0.84, 1.0)
-    py = tt * 0.44 * size; px = uu * 0.84 * cw
+    f = f * np.where(np.abs(tt - 0.5) < 2.0 / (0.36 * size), 0.84, 1.0)
+    py = tt * 0.36 * size; px = uu * 0.84 * cw
     for tr in (0.13, 0.86):
-        cy = tr * 0.44 * size
+        cy = tr * 0.36 * size
         for k_ in range(10):
             cx = (0.05 + 0.1 * k_) * 0.84 * cw
             d = np.sqrt((px - cx) ** 2 + (py - cy) ** 2); f = f * np.where(d < 2.6, 0.80, np.where(d < 3.6, 1.05, 1.0))
@@ -58,9 +59,10 @@ def build(out_dir, size=1024):
     from PIL import ImageFilter
     mot = np.asarray(Image.fromarray(((mot * 40) + 128).clip(0, 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(10)), float) / 40 - 3.2
     f = f * (1 + 0.025 * mot)
-    top = vrow >= 0.5
+    top = vrow >= 0.61
     for k, c in zip(range(2, 6), [W, P, V, N]):
         img[top, k * cw:(k + 1) * cw] = (c[None, None, :] * f[top][..., None]).clip(0, 255)
+        img[::-1][top, k * cw:(k + 1) * cw] = img[top, k * cw:(k + 1) * cw]   # 下带 = 上带上下镜像
     mask[:, 7 * cw:] = 1.0
     Image.fromarray(np.clip(img, 0, 255).astype(np.uint8)).save(f'{out_dir}/prop_atlas.png')
     Image.fromarray((mask * 255).astype(np.uint8)).save(f'{out_dir}/prop_glow.png')

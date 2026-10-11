@@ -132,14 +132,14 @@ def atlas_bake_uv(ob):
     uv = me.uv_layers.active.data
     for poly in me.polygons:
         mname = me.materials[poly.material_index].name[3:]
-        pnl = mname.startswith('pnl_')   # T3: 面板细节区(图集该列上半 v∈[0.53,0.97]: 倒角明暗/AO/铆钉/中缝)
+        pnl = mname.startswith('pnl_')   # T3b: 面板细节区(图集该列上带 v∈[0.62,0.98], 下带镜像: 倒角明暗/AO/铆钉/中缝)
         if pnl: mname = mname[4:]
         col = COLS.index(mname) if mname in COLS else 2
         for li in poly.loop_indices:
             u, v = uv[li].uv
             if col <= 1: uu = (col + 0.12 + 0.76 * u) / 8.0; vv = 0.03 + 0.94 * v   # v2: 内缩防 mip 串列
-            elif pnl: uu = (col + 0.08 + 0.84 * min(max(u, 0), 1)) / 8.0; vv = 0.53 + 0.44 * min(max(v, 0), 1)
-            else: uu = (col + 0.5) / 8.0; vv = 0.25   # T3: 纯色取下半(上半给面板细节)
+            elif pnl: uu = (col + 0.08 + 0.84 * min(max(u, 0), 1)) / 8.0; vv = 0.62 + 0.36 * min(max(v, 0), 1)
+            else: uu = (col + 0.5) / 8.0; vv = 0.5   # T3b: 纯色取中带(翻转不变; 上/下带为镜像面板细节)
             uv[li].uv = (uu, vv)
     # 合成单材质
     me.materials.clear(); me.materials.append(bpy.data.materials.get('rb_atlas') or bpy.data.materials.new('rb_atlas'))
