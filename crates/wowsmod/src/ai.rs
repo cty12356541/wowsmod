@@ -187,6 +187,7 @@ pub fn agents_md(exe: &str) -> String {
 ## 规则
 - 只用 wowsmod 改项目目录; 只有 `install` 写游戏, `uninstall` 完全还原。游戏运行时不能 install; 验证只在港口, 不进战斗。
 - 命令加 `--json`, 结果里的 `next` 是建议下一步。不确定就说不确定, 用 `--dry-run` / `render` 先验证。
+- 出图看效果: `render --look game-day`(游戏内预览, 按港口实拍拟合)定稿, 港口只确认; `--look studio` 是浅色展台图。见 `help workflow.layers.verify.wysiwyg`。
 - Oodle: 默认构建不含 oozextract(见 LICENSE_REPORT.md), 勿分发游戏 DLL。
 - 素材许可: 第三方模型/立绘多禁止二次分发; 导入时 wowsmod 会扫描使用规则并给项目打 `[license]` 标记, `pack` 默认拒绝, 只本机 `install`。训练房/购买需用户明确授权。
 - Windows PowerShell 会弄坏管道里的 UTF-8 JSON: 用 `--json-out <文件>` 取结果。
