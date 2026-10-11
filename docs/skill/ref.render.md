@@ -14,6 +14,7 @@ wowsmod preview <项目>                          # 启动本机预览页(可交
 - 默认引擎是系统 Edge/Chrome(API.md §11): 内嵌与 `preview` 相同的服务, 用 CDP 调 `window.__render`。
 - 找不到浏览器: 退出码 3、`browser_not_found`, 提示安装或用 `--browser` / `--engine soft`。
 - `--look`: 默认 game(白天); 定稿与验收用 game-day, 展示图用 studio。详见 `workflow.layers.verify.wysiwyg`。机位可加 `fov=`、`tgt=x,y,z`。
+- 特效: `--query "env=water&speed=full&warm=20"`(航迹+烟囱烟) / `"…&fire=main&fireT=0.09"`(炮口焰); `fx=project`(默认, 项目 fx.json) | `vanilla` | JSON。见 `workflow.layers.fx`。
 - 输出默认写到 `<项目>/renders/`。`--json` 含绝对路径 `out` 与 meta。
 - MCP 的 `wowsmod_render` 直接返回 PNG 图片内容; 找不到浏览器时返回文本说明(不算错误)。
 - 软件光栅(`--engine soft`)只有漫反射+发光近似, 用于没浏览器的环境。真实观感以 WebGL 出图和进港截图为准。
