@@ -18,6 +18,7 @@
 - 回转: 射界内(GameParams horizSector)每 10° 查壳 vs 船体分段/邻炮塔本体+炮管/邻壳; 只计原炮塔本体同姿态不撞的(扣基线)。后排炮管掠过前炮塔顶时不加顶板。
 - 造型: 顶板/侧裙/前盾分件, 件缝+倒角; 金/发光只点缀(徽记、短条), 不做沿边整圈条纹。
 - 工具: `turret_check.py`(数值), `turret_pose_render.py`(转 90°+最大仰角姿态图; box 预览装配几何无 yaw 骨骼, `turret=` 不生效), `turret_shots.sh`(game-day 近景)。
+**apply 后自检**(r32, 必过才可拍/汇报): `scripts/model/robin/verify_apply.ps1 -Proj <dir> -Spec <props_spec>` 退出码=失败数, 须 0 —— 每个件都出现在非 misc 的已加载 `.visual`(`<vertices>` 名匹配)且 mfm 为 emissive fx; Hull/DeckHouse mfm 为 emissive; 任一 `.model` 带 `.ssm` 即告警(动画件可能只挂了骨骼动画、网格不在可见 visual)。再进港口拍一张确认件在画面里, 夜港(黑桃城)确认发光。r32 根因: `model animate` 只把 ssm 挂到船 `.model`, 网格在独立 misc visual 未被加载 → 游戏里翅膀消失, 但 apply 报 ok=True 未拦; 修前先用静态 `model import`。
 **完成标准**: 清单全勾; 失败件回 model 修, 不进 accept。
 **脚本**: `mesh_budget.py`(已固化); 炮塔件用 `turret_check.py` 自动碰撞; 其余穿模以出图目视为主。
 **预览光照**: 工作台 STUDIO 灰光会把乳白/淡紫读成灰、发光不可见 —— 灰光预览只用于剪影/布局, 色彩审美以港口实拍或校准后的预览为准(预览↔港口校准另见对应节点)。
