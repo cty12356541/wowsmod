@@ -6,6 +6,7 @@
 
 | 日期 | 层 | 差在哪 | 根因 | 怎么补 | 效果 |
 |---|---|---|---|---|---|
+| 10-11 r20 | 3/4 | P1 配色不符+船模几乎没改却曾过自审 | 无部位本色/无几何对标/验收同角缺失 | `part_colors`+`role_share`; 本色优先写入 color-logic; 新建 `shape.refine` 七子节点; 拆解书几何清单 | 阶段1 |
 | 10-11 r19 | 3/4 | 配色只抄色号、外带无造型语言 | 引导缺失 | `paint.color-logic`+`shape.form-language`+`color_logic.py`; 挂 benchmark/blender | 本轮 |
 | 10-11 r18 | 2/7 | C 脏青灰+无倒角却过自审 | 验收太松 | `map.benchmark` 门槛≥3; 底线加量化配色/外带细节 | BENCHMARK |
 | 10-11 r17 | 3 | CLI 粗挂穿模; 薄环 `--height` 爆缩放 | 引导缺失 | `shape.blender`+薄环用 `--scale` | C 外带 |
