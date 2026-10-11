@@ -15,5 +15,6 @@
 | 10-11 r13 | 1/2/全部 | 陌生 AI 走查(复刻: 别船发光视频; 原创: 一句风格): 流程写「三模式都出 2~3 方向」与复刻冲突; 原创会出两轮预览; 层 1 完成标准只适合复刻; 通用底线在 workflow 与 styles 各写一份; 复刻别人 mod 的许可没提 | 引导缺失 | 复刻只出 1 个粗样; 原创的 ≥3 方向即 §4; 层 1 完成标准按模式分; 通用底线只留 workflow 一份; 复刻立项 `mod license --note`; 非 B 站视频取帧说明 | 树双向索引与可达性脚本校验: 41 节点无孤儿/死链 |
 | 10-11 r14 | 3/主题 | 验证件把知更鸟全身 PMX 当雕像挂上船; skill 把「有模型就 import」当完成标准 | 引导缺失 | theme/shape/map.preview/风格包写死: 主题=设计语言→涂装+道具外带件, 禁止人物雕像; PMX 只导出道具; 走查补芙莉莲×大和反例 | 设计书 v0.2 + 三方向重做 |
 | 10-11 r15 | learn | 社区流程散落站外 | 引导缺失 | 增 `learn`→`learn.makers` 五子节点(texture/extra-model/emissive-pnf/sdk-pipeline/pitfalls)+`e2e/learn/MAKERS_NOTES.md`; guide 校验含 learn | 本轮 |
+| 10-11 r17 | 3 | 外带只靠 CLI `--at/--height` 易穿模/比例飘; 社区镜学家用 Blender/ZBrush 精修 | 引导缺失 | 增 `workflow.layers.shape.blender`(何时进、比例/拓扑/贴合、glb 导出标准、回 import 验收); shape/ref.blender 挂链; C 上限外带按此流程 | 本轮 |
 | 10-11 r16 | 主题 | 社区高质量主题=UV重画+道具外带, 非立人像 | 引导缺失 | theme 加社区对齐句; makers 总览写死 theme 禁立人像/复刻可例外 | 与 shape/theme 一致 |
 

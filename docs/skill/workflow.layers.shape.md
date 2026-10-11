@@ -1,10 +1,14 @@
 # workflow.layers.shape: 层 3 大形与额外模型
 上级: workflow.layers
-下级: 无(命令细节: `wowsmod help ref.model`、`ref.model.import`、`ref.model.animate`)
+下级:
+- workflow.layers.shape.blender: 精细改网格(曲率/贴合/雕刻)时进 Blender 往返
 ---
 **目标**: 先定新增**装饰件**与部件改动的位置、比例、数量, 再做细节。
-**输入**: 设计书 §3 的额外模型行(来源/挂点/尺寸); 网格来源: 自建简化几何 / 从官方模型**只导出的道具部件** / 外部道具 glb。无素材时不硬凑。
-**主题模式硬规则**: 只允许道具形外带件(翅膀饰板、麦克风、羽毛、音符环、徽章板、天環环等)。**禁止**导入角色全身/半身/头身人物 mesh 当雕像。复刻模式若参考视频里确实有人物模型, 在设计书写明「参考含人物模型」并征求用户确认后才可做; 默认仍禁止。
-**做法**: 现有部件 `model scale|move|rotate|remove|replace`; 新装饰件 `model import`(多材质 GLB; PMX 先 `pmx2glb`, 导出前去掉人体材质); 会动的道具 `model animate`。坐标 y 上、船艏 +z; `mod set --ship-length` 后看 `units` 定米制尺寸(装饰件通常远小于船长 2%)。
-**完成标准**: 剪影与设计一致; 装饰件日/夜可见、LOD 仍在、不穿模、不挡炮管; 主题项目的 `model list` 渲染集名不含人物身体材质装配。港口同角度并排。
-**自评**: 遮住贴图只看剪影, 主次清楚吗? 有没有把「认得出角色」寄托在甲板上的立人像上(错)?
+**输入**: 设计书 §3 的额外模型行(来源/挂点/尺寸); 网格来源: 自建简化几何 / 官方模型**只导出的道具部件** / 外部道具 glb。无素材时不硬凑。
+**主题模式硬规则**: 只允许道具形外带件。**禁止**人物全身/半身 mesh 当雕像。复刻若参考含人物, 设计书写明并经用户确认; 默认仍禁。
+**做法**:
+1. 粗摆: `model scale|move|rotate|remove|replace` / `model import`(PMX 先 `pmx2glb` 去人体材质)。
+2. **精细外形** → `workflow.layers.shape.blender`(必读): export-blender → 改网格 → import-blender → 出图验收。
+3. 会动的道具: `model animate`。尺寸: `mod set --ship-length` + `units`(装饰件通常 ≪ 船长 2%)。
+**完成标准**: 剪影与设计一致; 日/夜可见、LOD 在、不穿模、不挡炮管; 主题 `model list` 无人体材质装配。港口同角并排。
+**自评**: 只看剪影主次清吗? 有没有靠甲板上立人像认角色(错)? 该进 Blender 的精细件有没有用贴图糊弄?

@@ -11,3 +11,4 @@
 **分辨率**: 船体常见 4096²; **务必带完整 mip**(`.dds`+分级或工具生成)。社区包无 mip 会远处闪烁。
 **对本工具**: `import-sdk` → `ship-color` / `tex recolor` / `bake-ref` / `tex composite` → 迷彩区 `tex channel … b --set 0` → 层 4 完成标准: 关发光仍是那套涂装。命令细节 `ref.recolor` / `workflow.layers.paint`。
 **主题**: 角色只贡献配色与纹样; 在官方 UV 上画, 不另展 UV(除非走模型改 UV 流程, 见莱服 UV FAQ)。
+**作者实践**: 茄宝洋芋公开直播教学= **PS 分层画官方 UV**(底板 `_a` + 字牌/立绘圆标/色带, 组与混合模式)→ DDS → PnFMods; 夙岚同属 UV 主笔(笔刷流线或大色块)。见 `e2e/learn/C_bili_makers.md`。
