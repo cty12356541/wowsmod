@@ -256,6 +256,28 @@ impl GeoEdit {
         Ok(MeshData { positions: u.positions, normals: u.normals, uvs: u.uvs, indices: idx })
     }
 
+    /// 就地把指定三角形改成退化三角形(三个索引都取该三角形第一个顶点): 顶点缓冲/计数/映射全不变, 只改索引缓冲。
+    /// tris = 渲染集内三角形序号。返回实际改动数。
+    pub fn degenerate_tris(&mut self, name: &str, tris: &[usize]) -> Result<usize> {
+        let (_, i) = self.maps(name)?;
+        let k = i.buffer_index as usize;
+        let off = i.items_offset as usize;
+        let n = i.items_count as usize / 3;
+        let buf = self.ibuf(k)?;
+        let mut c = 0;
+        for &t in tris {
+            if t >= n { continue; }
+            let a = buf[off + 3 * t];
+            if buf[off + 3 * t + 1] != a || buf[off + 3 * t + 2] != a {
+                buf[off + 3 * t + 1] = a;
+                buf[off + 3 * t + 2] = a;
+                c += 1;
+            }
+        }
+        if c > 0 { self.idirty[k] = true; }
+        Ok(c)
+    }
+
     /// 原始顶点字节(用作新顶点的模板)
     pub fn raw_vertex(&mut self, name: &str, i: usize) -> Result<Vec<u8>> {
         let (v, _) = self.maps(name)?;

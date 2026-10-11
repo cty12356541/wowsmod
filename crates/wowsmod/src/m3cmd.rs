@@ -570,6 +570,27 @@ pub enum ModelCmd {
         #[command(flatten)]
         t: Target,
     },
+    /// 原壳降噪: 按尺寸/区域/朝向删去渲染集里「游离小连通块」(舷窗盖/通风口/小舱口/小管件等突起); 全部 LOD 同条件处理,
+    /// 顶点缓冲不变只删三角形(挂点/节点不动)。先 --dry-run 盘点(数量/三角数/位置), 再执行。
+    Prune {
+        #[command(flatten)]
+        t: Target,
+        /// 连通块包围盒对角线上限(visual 单位, 1≈30 m 量级; 舷窗盖/通风口约 0.03–0.08)
+        #[arg(long, default_value_t = 0.08)]
+        max_size: f64,
+        /// 只处理中心落在这些盒内的块: "x0,y0,z0,x1,y1,z1"(visual/游戏坐标, 可多次)
+        #[arg(long = "box", allow_hyphen_values = true)]
+        boxes: Vec<String>,
+        /// 朝向过滤: side(法向主轴 x, 舷侧件) / up(朝上, 甲板件) / any
+        #[arg(long, default_value = "any")]
+        facing: String,
+        /// 舷侧判定: 块中心 |x| ≥ 该分段同 z 处最大 |x| − side_band(只在 facing=side 时用)
+        #[arg(long, default_value_t = 0.06)]
+        side_band: f64,
+        /// 只盘点不改
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// 新增网格: GLB 加成新渲染集(材质/顶点格式/挂接节点取自 --like), 默认写进全部 LOD
     Add {
         #[command(flatten)]
@@ -810,6 +831,7 @@ impl ModelCmd {
             | ModelCmd::Rotate { t, .. }
             | ModelCmd::Replace { t, .. }
             | ModelCmd::Remove { t }
+            | ModelCmd::Prune { t, .. }
             | ModelCmd::Add { t, .. }
             | ModelCmd::Import { t, .. }
             | ModelCmd::Animate { t, .. }
@@ -827,6 +849,7 @@ impl ModelCmd {
             ModelCmd::Rotate { .. } => "model_rotate",
             ModelCmd::Replace { .. } => "model_replace",
             ModelCmd::Remove { .. } => "model_remove",
+            ModelCmd::Prune { .. } => "model_prune",
             ModelCmd::Add { .. } => "model_add",
             ModelCmd::Import { .. } => "model_import",
             ModelCmd::Rebuild { .. } => "model_rebuild",
@@ -949,7 +972,7 @@ fn run_model(cli: &Cli, c: &ModelCmd) -> Result<Value> {
     let src = GeomSrc::new(cli, &t.geom_dir)?;
     let mut tx = Tx::new(&p);
     let n_targets = [t.hp.is_some(), t.part.is_some(), t.renderset.is_some()].iter().filter(|x| **x).count();
-    let needs_target = matches!(c, ModelCmd::Scale { .. } | ModelCmd::Move { .. } | ModelCmd::Rotate { .. } | ModelCmd::Replace { .. } | ModelCmd::Remove { .. });
+    let needs_target = matches!(c, ModelCmd::Scale { .. } | ModelCmd::Move { .. } | ModelCmd::Rotate { .. } | ModelCmd::Replace { .. } | ModelCmd::Remove { .. } | ModelCmd::Prune { .. });
     if needs_target && n_targets != 1 {
         bail!("需要且只能给一个目标: --hp / --part / --renderset");
     }
@@ -970,6 +993,22 @@ fn run_model(cli: &Cli, c: &ModelCmd) -> Result<Value> {
         ModelCmd::Rotate { deg, pivot, .. } => transform(&mut tx, &root, &src, &t, &compose([0.0; 3], parse_vec3(deg)?, [1.0; 3]), pivot.as_deref().map(parse_vec3).transpose()?, false)?,
         ModelCmd::Move { by, .. } => transform(&mut tx, &root, &src, &t, &translate(parse_vec3(by)?), None, true)?,
         ModelCmd::Remove { .. } => remove(&mut tx, &root, &src, &t)?,
+        ModelCmd::Prune { max_size, boxes, facing, side_band, dry_run, .. } => {
+            let bx = boxes.iter().map(|b| {
+                let v: Vec<f64> = b.split(',').map(|x| x.trim().parse::<f64>()).collect::<std::result::Result<_, _>>().map_err(|e| anyhow!("--box {b}: {e}"))?;
+                if v.len() != 6 { bail!("--box 需要 6 个数: x0,y0,z0,x1,y1,z1"); }
+                Ok(([v[0].min(v[3]), v[1].min(v[4]), v[2].min(v[5])], [v[0].max(v[3]), v[1].max(v[4]), v[2].max(v[5])]))
+            }).collect::<Result<Vec<Aabb>>>()?;
+            if !matches!(facing.as_str(), "side" | "up" | "any") { bail!("--facing 取 side/up/any"); }
+            let r = prune(&mut tx, &root, &src, &t, *max_size, &bx, facing, *side_band)?;
+            if *dry_run {
+                let mut r = r;
+                r["dry_run"] = json!(true);
+                r["ok"] = json!(true);
+                return Ok(r);
+            }
+            r
+        }
         ModelCmd::Replace { with, with_sdk, glb, space, .. } => replace(&mut tx, &p, &root, &src, &t, with.as_deref(), with_sdk.as_deref(), glb.as_deref(), space)?,
         ModelCmd::Add { glb, like, name, space, lod0_only, .. } => add(&mut tx, &root, &src, &t, glb, like, name.as_deref(), space, *lod0_only)?,
         ModelCmd::Import { mesh, like, node, at, rot, scale, name, texture, color, glow, glow_all, power, tex_size, gloss, lod0_only, b_max, materials, glow_mat, double_sided, alpha_test, height, .. } => import::import(
@@ -1347,6 +1386,109 @@ fn remove(tx: &mut Tx, root: &Path, src: &GeomSrc, t: &Target) -> Result<Value> 
         bail!("没有匹配的渲染集");
     }
     Ok(json!({"target": target_json(t), "units": out}))
+}
+
+// ───────────── prune(原壳降噪) ─────────────
+
+/// 按位置焊接(1e-4)后的三角形连通块
+fn tri_components(m: &MeshData) -> Vec<Vec<usize>> {
+    let q = |p: &[f32; 3]| ((p[0] as f64 * 1e4).round() as i64, (p[1] as f64 * 1e4).round() as i64, (p[2] as f64 * 1e4).round() as i64);
+    let mut weld: HashMap<(i64, i64, i64), usize> = HashMap::new();
+    let vid: Vec<usize> = m.positions.iter().map(|p| { let n = weld.len(); *weld.entry(q(p)).or_insert(n) }).collect();
+    let mut par: Vec<usize> = (0..weld.len()).collect();
+    fn find(p: &mut [usize], mut x: usize) -> usize { while p[x] != x { p[x] = p[p[x]]; x = p[x]; } x }
+    let nt = m.indices.len() / 3;
+    for t in 0..nt {
+        let a = find(&mut par, vid[m.indices[3 * t] as usize]);
+        for j in 1..3 {
+            let b = find(&mut par, vid[m.indices[3 * t + j] as usize]);
+            if a != b { par[b] = a; }
+        }
+    }
+    let mut groups: HashMap<usize, Vec<usize>> = HashMap::new();
+    for t in 0..nt {
+        let r = find(&mut par, vid[m.indices[3 * t] as usize]);
+        groups.entry(r).or_default().push(t);
+    }
+    groups.into_values().collect()
+}
+
+fn prune(tx: &mut Tx, root: &Path, src: &GeomSrc, t: &Target, max_size: f64, boxes: &[Aabb], facing: &str, side_band: f64) -> Result<Value> {
+    let units = units_for(root, t)?;
+    let re = t.renderset.as_ref().map(|r| Regex::new(r)).transpose().map_err(|e| anyhow!("--renderset 正则: {e}"))?;
+    let mut out = Vec::new();
+    let mut any_change = false;
+    for u in units {
+        let vis = load_visuals(tx, &u.visuals)?;
+        let mut ge = GeoEdit::parse(&tx.geometry(&u.geometry, src)?).map_err(|e| anyhow!("{e}"))?;
+        let mut done: BTreeSet<String> = BTreeSet::new();
+        let mut sets = Vec::new();
+        let mut changed = false;
+        for (li, v) in vis.iter().enumerate() {
+            for k in 0..v.render_sets.len() {
+                let rs = &v.render_sets[k];
+                if let Some(re) = &re {
+                    if !(re.is_match(&rs.base_name()) || rs.nodes.first().map(|n| re.is_match(n)).unwrap_or(false)) { continue; }
+                }
+                let name = rs.base_name();
+                if !done.insert(name.clone()) { continue; }
+                let m = ge.mesh(&name).map_err(|e| anyhow!("{name}: {e}"))?;
+                let w = rs_to_visual(v, k);
+                let pw: Vec<[f64; 3]> = m.positions.iter().map(|p| xform_point(&w, [p[0] as f64, p[1] as f64, p[2] as f64])).collect();
+                // 半宽剖面(z 每 0.1 一格): 本渲染集全部顶点 max|x|
+                let mut prof: HashMap<i64, f64> = HashMap::new();
+                for p in &pw { let e = prof.entry((p[2] * 10.0).round() as i64).or_insert(0.0); *e = e.max(p[0].abs()); }
+                let comps = tri_components(&m);
+                let mut drop = vec![false; m.indices.len() / 3];
+                let (mut n_hit, mut tri_hit) = (0usize, 0usize);
+                let mut samples = Vec::new();
+                for c in &comps {
+                    let pts = c.iter().flat_map(|&t| (0..3).map(move |j| t * 3 + j)).map(|i| pw[m.indices[i] as usize]);
+                    let Some((mn, mx)) = aabb_of_points(pts) else { continue };
+                    let d = ((mx[0] - mn[0]).powi(2) + (mx[1] - mn[1]).powi(2) + (mx[2] - mn[2]).powi(2)).sqrt();
+                    if d >= max_size { continue; }
+                    let ctr = [(mn[0] + mx[0]) / 2.0, (mn[1] + mx[1]) / 2.0, (mn[2] + mx[2]) / 2.0];
+                    if !boxes.is_empty() && !boxes.iter().any(|(a, b)| (0..3).all(|i| ctr[i] >= a[i] && ctr[i] <= b[i])) { continue; }
+                    let mut nrm = [0.0f64; 3];
+                    for &t in c {
+                        let (a, b, cc) = (pw[m.indices[3 * t] as usize], pw[m.indices[3 * t + 1] as usize], pw[m.indices[3 * t + 2] as usize]);
+                        let e1 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]]; let e2 = [cc[0] - a[0], cc[1] - a[1], cc[2] - a[2]];
+                        let n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
+                        for i in 0..3 { nrm[i] += n[i].abs(); }
+                    }
+                    let tot = nrm[0] + nrm[1] + nrm[2] + 1e-12;
+                    let ok = match facing {
+                        "side" => {
+                            let zb = (ctr[2] * 10.0).round() as i64;
+                            let hb = (-1..=1).filter_map(|j| prof.get(&(zb + j))).cloned().fold(0.0, f64::max);
+                            ctr[0].abs() >= hb - side_band && nrm[0] / tot > 0.4
+                        }
+                        "up" => nrm[1] / tot > 0.5,
+                        _ => true,
+                    };
+                    if !ok { continue; }
+                    n_hit += 1; tri_hit += c.len();
+                    for &t in c { drop[t] = true; }
+                    if li == 0 || samples.len() < 8 { samples.push(json!({"center": ctr.map(|x| (x * 1000.0).round() / 1000.0), "diag": (d * 1000.0).round() / 1000.0, "tris": c.len()})); }
+                }
+                if n_hit > 0 {
+                    // 就地退化(只改索引, 顶点字节/UV/切线/计数不动; 整体重写顶点会丢失部分属性, 实测深色小件变白)
+                    let dt: Vec<usize> = drop.iter().enumerate().filter(|(_, &d)| d).map(|(t, _)| t).collect();
+                    ge.degenerate_tris(&name, &dt).map_err(|e| anyhow!("{name}: {e}"))?;
+                    changed = true;
+                }
+                sets.push(json!({"renderSet": name, "lodVisual": li, "tris": m.indices.len() / 3, "components": comps.len(), "pruned": n_hit, "prunedTris": tri_hit, "samples": samples}));
+            }
+        }
+        if changed {
+            let geo = ge.finish().map_err(|e| anyhow!("{e}"))?;
+            tx.write(&u.geometry, geo.serialize());
+            any_change = true;
+        }
+        out.push(json!({"unit": u.kind, "name": u.name, "renderSets": sets}));
+    }
+    if out.is_empty() { bail!("没有匹配的渲染集"); }
+    Ok(json!({"target": target_json(t), "units": out, "changed": any_change, "note": "只删三角形(顶点缓冲/节点/挂点不变); 每个 LOD 渲染集按同条件独立判定"}))
 }
 
 // ───────────── GLB → 网格 ─────────────

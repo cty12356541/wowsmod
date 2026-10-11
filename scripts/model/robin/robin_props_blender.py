@@ -132,11 +132,14 @@ def atlas_bake_uv(ob):
     uv = me.uv_layers.active.data
     for poly in me.polygons:
         mname = me.materials[poly.material_index].name[3:]
+        pnl = mname.startswith('pnl_')   # T3: 面板细节区(图集该列上半 v∈[0.53,0.97]: 倒角明暗/AO/铆钉/中缝)
+        if pnl: mname = mname[4:]
         col = COLS.index(mname) if mname in COLS else 2
         for li in poly.loop_indices:
             u, v = uv[li].uv
             if col <= 1: uu = (col + 0.12 + 0.76 * u) / 8.0; vv = 0.03 + 0.94 * v   # v2: 内缩防 mip 串列
-            else: uu = (col + 0.5) / 8.0; vv = 0.5
+            elif pnl: uu = (col + 0.08 + 0.84 * min(max(u, 0), 1)) / 8.0; vv = 0.53 + 0.44 * min(max(v, 0), 1)
+            else: uu = (col + 0.5) / 8.0; vv = 0.25   # T3: 纯色取下半(上半给面板细节)
             uv[li].uv = (uu, vv)
     # 合成单材质
     me.materials.clear(); me.materials.append(bpy.data.materials.get('rb_atlas') or bpy.data.materials.new('rb_atlas'))
@@ -424,13 +427,13 @@ def turret_shell(hw, hl, cz, y0, y1, flare, open_deg=38, fin_len=0.5, scallops=1
 #     侧/后围板按段分件(分件缝)、顶沿内倒角; 白为主, 侧中板 periwinkle, 后板 violet; 金/发光只做后板徽记+短条点缀; 前方炮门全开。
 TURRET_PLAN = {   # 半轮廓 (z 前向, 半宽 w), 从后中线 → 前炮门边; H=围板高(≈0.7 炮塔高); g=贴合间隙
     'FGM049': dict(pts=[(-0.600, 0.0), (-0.600, 0.30), (-0.565, 0.500), (0.080, 0.505), (0.180, 0.440), (0.300, 0.370), (0.385, 0.300)],
-                   H=0.165, g=0.008, th=0.016, ch=0.020, panels=[('violet', 1.15), 'white', 'peri', 'white', 'violet'],
+                   H=0.165, g=0.008, th=0.016, ch=0.020, panels=[None, 'white', 'peri', 'white', 'violet'], band=0.24,
                    roof=dict(x=0.27, y0=-0.53, y1=-0.14, z=0.243, th=0.010, gap=0.036, ch=0.012)),
     'FGS053': dict(pts=[(-0.235, 0.0), (-0.235, 0.07), (-0.185, 0.170), (-0.130, 0.215), (0.020, 0.235), (0.100, 0.210), (0.170, 0.160), (0.215, 0.105)],
-                   H=0.125, g=0.006, th=0.012, ch=0.014, panels=[('violet', 1.0), 'white', 'peri', 'white', 'violet'],
-                   roof=dict(x=0.095, y0=-0.150, y1=0.012, z=0.172, th=0.007, gap=0.022, ch=0.007)),
+                   H=0.125, g=0.006, th=0.012, ch=0.014, panels=[None, 'white', 'peri', 'white', 'violet'], band=0.24,
+                   roof=dict(x=0.095, y0=-0.150, y1=0.012, z=0.172, th=0.007, gap=0.022, ch=0.007, accents=False), rear_glow=False),   # T3: FGS_11 炮管回转 50°/310° 扫到 FGS_10 顶板点缀 → 副炮顶板不加点缀
     'FGS036': dict(pts=[(-0.180, 0.0), (-0.180, 0.06), (-0.155, 0.120), (-0.100, 0.145), (0.100, 0.150), (0.145, 0.115), (0.165, 0.070)],
-                   H=0.150, g=0.005, th=0.009, ch=0.012, y0=0.045, panels=[('violet', 1.0), 'white', 'peri', 'white', 'violet'],
+                   H=0.150, g=0.005, th=0.009, ch=0.012, y0=0.045, panels=[None, 'white', 'peri', 'white', 'violet'], band=0.24,
                    roof=None),   # 不加顶板: 后排副炮(FGS_4/6)静止时炮管离本炮塔顶仅 ~0.01, 顶板会被扫到(turret_check)   # y0: 前副炮朝后时炮管从后副炮围板下缘下方掠过
 }
 
@@ -445,32 +448,44 @@ def _resample(poly, n):
         out.append(Vector(poly[j - 1]).lerp(Vector(poly[j]), f))
     return out, L[-1]
 
+SEAL = float(os.environ.get("RB_SEAL", "0.006"))   # T3: 内缘插入炮塔本体的深度(封住上下沿间隙 → 港口 SSAO 不再压出黑缝)
 def armor_panel(seg_pts, g, th, H, ch, col, y0=0.012):
-    """一段围板: seg_pts 平面折线(Blender X, Y), 法向外; 内面=轮廓+g, 外面=+g+th; 顶沿外侧倒角 ch(外上缘降 ch 并内收)。"""
+    """一段局部装甲板: seg_pts 平面折线(Blender X, Y), 法向外; 外面=轮廓+g+th; 上下沿内缘插入本体 SEAL(封缝);
+    上沿外侧倒角 ch、下沿外侧小倒角; UV u=沿弧长, v=高(→ 图集 pnl_ 面板细节区)。"""
     bm = bmesh.new(); uvl = bm.loops.layers.uv.new('UVMap')
     n = len(seg_pts)
     nors = []
     for i in range(n):
         a = seg_pts[max(i - 1, 0)]; b = seg_pts[min(i + 1, n - 1)]
         t = (b - a).normalized(); nrm = Vector((t.y, -t.x)); nors.append(nrm)   # 右手: 沿逆时针走时外法向
-    rows = []
+    L = [0.0]
+    for i in range(1, n): L.append(L[-1] + (seg_pts[i] - seg_pts[i - 1]).length)
+    cb = min(ch * 0.5, (H - y0) * 0.15)
+    rows = []; uvs = []
     for i, p in enumerate(seg_pts):
         nn = nors[i]
-        pin = p + nn * g; pout = p + nn * (g + th)
-        rows.append([bm.verts.new((pin.x, pin.y, y0)), bm.verts.new((pout.x, pout.y, y0)),
-                     bm.verts.new((pout.x, pout.y, H - ch)), bm.verts.new((pin.x + nn.x * th * 0.25, pin.y + nn.y * th * 0.25, H))])
+        pin = p - nn * SEAL; pout = p + nn * (g + th); pmid = p + nn * (g + th - cb)
+        rows.append([bm.verts.new((pin.x, pin.y, y0)), bm.verts.new((pmid.x, pmid.y, y0)), bm.verts.new((pout.x, pout.y, y0 + cb)),
+                     bm.verts.new((pout.x, pout.y, H - ch)), bm.verts.new((pout.x - nn.x * ch * 0.6, pout.y - nn.y * ch * 0.6, H)),
+                     bm.verts.new((pin.x, pin.y, H))])
+        uvs.append(L[i] / max(L[-1], 1e-6))
+    hv = [0.0, 0.0, cb, H - y0 - ch, H - y0, H - y0]
+    vv = [min(max(h / max(H - y0, 1e-6), 0), 1) for h in hv]
+    m = len(rows[0])
     for i in range(n - 1):
-        for k in range(4):
-            k2 = (k + 1) % 4
+        for k in range(m):
+            k2 = (k + 1) % m
             f = bm.faces.new([rows[i][k], rows[i + 1][k], rows[i + 1][k2], rows[i][k2]])
-            for lp in f.loops: lp[uvl].uv = (0.5, 0.5)
+            for lp in f.loops:
+                j = 0 if lp.vert in rows[i] else 1; kk = (rows[i] if j == 0 else rows[i + 1]).index(lp.vert)
+                lp[uvl].uv = (uvs[i + j], vv[kk])
     for r in (rows[0], rows[-1][::-1]):
         f = bm.faces.new(r)
         for lp in f.loops: lp[uvl].uv = (0.5, 0.5)
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
-    return new_obj('armor', bm, [col])
+    return new_obj('armor', bm, ['pnl_' + col])
 
-def turret_armor(pts, H, g, th, ch, panels, seam=0.008, seg_per=6, y0=0.012):
+def turret_armor(pts, H, g, th, ch, panels, seam=0.014, seg_per=6, y0=0.012):
     """整圈围板: 右半轮廓镜像成 左炮门边→后→右炮门边, 按 panels(从后中向前, 左右对称)分件, 件间留缝。"""
     right = [Vector((w, z)) for z, w in pts]                       # 后中 → 右前
     left = [Vector((-v.x, v.y)) for v in reversed(right)]          # 左前 → 后中
@@ -485,11 +500,13 @@ def turret_armor(pts, H, g, th, ch, panels, seam=0.008, seg_per=6, y0=0.012):
         # 缝: 两端各收 seam/2
         a0 = seg[0] + (seg[1] - seg[0]).normalized() * seam * 0.5; a1 = seg[-1] + (seg[-2] - seg[-1]).normalized() * seam * 0.5
         seg = [a0] + seg[1:-1] + [a1]
-        pc = seq[k]; col, hk = (pc if isinstance(pc, tuple) else (pc, 1.0))
+        pc = seq[k]
+        if pc is None: continue   # T3: 前侧不做板(保留原炮塔前脸细节)
+        col, hk = (pc if isinstance(pc, tuple) else (pc, 1.0))
         parts.append(armor_panel(seg, g, th, H * hk, ch, col, y0=y0))
     return parts, pts_all
 
-def roof_plate(x, y0, y1, z, th, gap, ch, col='white'):
+def roof_plate(x, y0, y1, z, th, gap, ch, col='white', accents=True):
     """顶板: 左右两块倒角薄板, 中缝 gap 露出贴图的 royal 中带; 四角斜切, 上表面内收 ch(倒角)。"""
     out = []
     for sx in (1, -1):
@@ -504,21 +521,28 @@ def roof_plate(x, y0, y1, z, th, gap, ch, col='white'):
         for f in fs:
             for lp in f.loops: lp[uvl].uv = (0.5, 0.5)
         bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
-        out.append(new_obj('roof', bm, [col]))
+        for f in fs:   # T3: 顶面走面板细节区(倒角明暗/铆钉), uv 按平面坐标
+            for lp in f.loops: lp[uvl].uv = ((abs(lp.vert.co.x) - xa) / max(xb - xa, 1e-6), (lp.vert.co.y - y0) / max(y1 - y0, 1e-6))
+        out.append(new_obj('roof', bm, ['pnl_' + col]))
+        # T3 点缀: 每块后部小金八芒星 + 后沿短发光缝(不沿边整圈)
+        if not accents: continue
+        s_ = (xb - xa)
+        o = octagram(0.16 * s_, 0.0035, 'gold'); xform(o, loc=(sx * (xa + xb) / 2, y0 + 0.22 * (y1 - y0), z + th + 0.0015)); out.append(o)
+        out.append(tube([(sx * (xa + 0.25 * s_), y0 + 0.06 * (y1 - y0), z + th * 0.9), (sx * (xa + 0.75 * s_), y0 + 0.06 * (y1 - y0), z + th * 0.9)], [0.0035 + 0.01 * s_] * 2, 'glow', seg=6))
     return out
 
 def build_shells():
     out = []
     for k, prm in TURRET_PLAN.items():
         pts = prm['pts']; H = prm['H']; g = prm['g']; th = prm['th']; ch = prm['ch']
-        y0 = prm.get('y0', 0.012)
+        y0 = max(prm.get('y0', 0.012), float(os.environ.get('RB_BAND', prm.get('band', 0.0))) * H)   # T3: 只做中上带(下沿抬离炮座/后悬, 露出原炮塔下部细节)
         ps, loop = turret_armor(pts, H, g, th, ch, prm['panels'], y0=y0)
         if prm.get('roof'): ps += roof_plate(**prm['roof'])
         rz = pts[0][0] - g - th                          # 后板外表面 z
         s_ = (pts[2][1] if k == 'FGM049' else pts[3][1])  # 尺度参考
         # 后板徽记: 金八芒星 + 下方短发光缝(少而精)
         o = octagram(0.10 * s_ + 0.012, 0.004 + 0.004 * s_, 'gold'); xform(o, loc=(0, rz - 0.003, H * 0.55), rot=(90, 0, 0)); ps.append(o)
-        gl = tube([(-0.16 * s_, rz - 0.004, max(H * 0.22, y0 + 0.012)), (0.16 * s_, rz - 0.004, max(H * 0.22, y0 + 0.012))], [0.004 + 0.004 * s_] * 2, 'glow', seg=6); ps.append(gl)
+        if prm.get('rear_glow', True): gl = tube([(-0.16 * s_, rz - 0.004, y0 + 0.22 * (H - y0)), (0.16 * s_, rz - 0.004, y0 + 0.22 * (H - y0))], [0.004 + 0.004 * s_] * 2, 'glow', seg=6); ps.append(gl)
         # 侧中板(peri)上沿短金条: 每侧一段, 只在该板中部 60%
         for sx in (1, -1):
             zc = 0.5 * (pts[3][0] + pts[4][0]) if len(pts) > 4 else pts[3][0]
@@ -536,12 +560,32 @@ def frame_place(parts, loc, ax_x, ax_y):
     for p in parts: p.matrix_world = M @ p.matrix_world
     return parts
 
+WING_TK = float(os.environ.get('ROBIN_WING_TK', '0.45'))
+def wing_fan(root, S, d0, up, n_pri=3, n_sec=1, n_cov=1, glow_k=0):
+    """主翼羽片语言的缩放小翼(同一生成器 plume、同厚宽比/弯弧/收尖/分层/金前缘/发光羽轴):
+    root 翼根, S=相对主翼的尺度, d0=(el, sw) 基准方向(右舷), up=前缘朝向提示。
+    初级 n_pri(白→长, 第 glow_k 片发光羽轴) + 次级 n_sec(periwinkle, 叠下) + 覆羽 n_cov(圆头白, 盖羽根)。"""
+    P = []; el0, sw0 = d0; R = Vector(root)
+    for k in range(n_pri):   # 主翼初级 L 1.45–2.50, W≈0.30, th 0.055·TK, curve 0.13
+        L = (2.2 - 0.35 * k) * S; W = 0.30 * 0.9 * (S ** 0.5) * 1.0
+        b = plume(L, W, 0.055 * WING_TK * (W / 0.27), 'feather_wp', curve=0.13, glow=(k == glow_k))
+        P += aim(b, tuple(R + Vector((0, -0.04 * k * S, 0.02 * k * S))), dvec(el0 - 7 * k, sw0 + 8 * k), up) or b
+    for k in range(n_sec):
+        L = 1.2 * S; W = 0.27 * (S ** 0.5)
+        b = plume(L, W, 0.05 * WING_TK * (W / 0.27), 'feather_pv', curve=0.12, edge=True)
+        P += aim(b, tuple(R + Vector((0, -0.04 * S, -0.06 * S))), dvec(el0 - 18 - 8 * k, sw0 + 22 + 8 * k), up) or b
+    for k in range(n_cov):
+        W = 0.26 * (S ** 0.5)
+        f = plume(0.72 * S, W, 0.06 * WING_TK * (W / 0.26), 'white', curve=0.08, edge=False, shaft=False, round_tip=True)
+        P += aim(f, tuple(R + Vector((0, 0.02 * S, 0.05 * S))), dvec(el0 - 6, sw0 + 14), up) or f
+    return P
+
 def build_bow():
-    """方案 A 艏饰(弱起/piano): 艏柱金八芒星+光环 + 两侧短耳羽各 2 片(后上扬, 贴舷不外伸)——引导视线向舯部翼组, 不抢主。"""
-    P = []
-    for k, (L, el, sw) in enumerate([(0.95, 28, 30), (0.70, 14, 42)]):
-        b = blade(L, 0.22, 0.035, main='feather_wp', sub='feather_pv', sub_k=0.55)
-        aim(b, (0.14, 8.30 - 0.12 * k, 0.66), (0.35, -1.0, math.tan(math.radians(el))), (0, 0.5, 1.0), roll=-25); P += b
+    """艏饰 v2(用户: 艏翼与舯部主翼风格统一): 两侧小翼改用主翼同一生成器 wing_fan(plume) ——
+    白薄羽片同厚宽比/弯弧/收尖/分层, 金前缘 + 发光羽轴, 同配色发光色; 尺度 S=0.40(主次: 明显小于舯部主翼)。
+    艏柱金八芒星 + 光环保留(光环语言同 halo/悬浮核心)。"""
+    S = float(os.environ.get('ROBIN_BOW_S', '0.40'))
+    P = wing_fan((0.14, 8.24, 0.66), S, (30, 70), (0, 0.5, 1.0), n_pri=3, n_sec=1, n_cov=1)
     for p in P: p.select_set(False)
     r = join(P, 'bowp_R'); l = mirror_x(r, 'bowp_L')
     o = octagram(0.16, 0.02, 'gold'); xform(o, loc=(0, 8.78, 0.72), rot=(90, 0, 0))

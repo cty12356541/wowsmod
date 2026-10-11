@@ -14,7 +14,7 @@ from PIL import Image, ImageDraw, ImageFilter
 # 屏上目标色(P2 色板, 见 color_derive/robin_p2_scheme.json)
 PAL = {
  'white':  '#F4F0E8', 'peri': '#8F8BC8', 'peri_d': '#6A5BA8', 'navy': '#172565', 'deck': '#2A1C55',
- 'dhwhite':'#E8E4EE', 'turret':'#F5F2F8', 'violet':'#7546C2', 'glow':'#B8E8FF', 'gold':'#D8B868',
+ 'dhwhite':'#E8E4EE', 'turret':'#F5F2F8', 'violet':'#7546C2', 'glow':'#58B8FF', 'gold':'#D8B868',
  'roof':   '#CFCBEA', 'star': '#F2EDDF', 'royal': '#573C9F',
 }
 NAMES=list(PAL)
