@@ -749,8 +749,8 @@ pub fn cmd_mod(cli: &Cli, c: &ModCmd) -> Result<i32> {
 /// 港口观感补偿(M2 实测标定): 渲染后线性值 ≈ a·(贴图线性值 − t)(按通道, 低端被压成 0)。
 /// 标定数据: 勃艮第船体侧板, 港口默认机位白天, 两组贴图 (40.9,74.3,112.9)→截图(3.1,61.4,117.7) 与 (59.6,73.9,88.6)→(27.0,58.4,86.0)。
 /// G 通道两组几乎同值, 斜率按 R/B 的平均起点估计。换船/换光照/换机位后只能当起点, 不确定。
-pub const PORT_SLOPE: [f32; 3] = [0.4448, 0.9746, 1.323];
-pub const PORT_TOE: [f32; 3] = [0.0200, 0.0243, 0.0286];
+pub const PORT_SLOPE: [f32; 3] = [0.7091, 1.1475, 1.1523];
+pub const PORT_TOE: [f32; 3] = [0.0249, 0.0294, 0.0137];
 
 pub fn port_albedo(screen: [u8; 3]) -> [f32; 3] {
     let mut o = [0f32; 3];
@@ -769,7 +769,7 @@ pub fn cmd_port_albedo(cli: &Cli, screen: &str, mean_offset: f32) -> Result<i32>
     let to: Vec<u8> = alb.iter().map(|v| (v - mean_offset).round().clamp(0.0, 255.0) as u8).collect();
     let hex = format!("#{:02X}{:02X}{:02X}", to[0], to[1], to[2]);
     let j = json!({"ok": true, "screen": screen, "surface_albedo": alb, "to_color": hex, "mean_offset": mean_offset,
-        "model": {"slope": PORT_SLOPE, "toe": PORT_TOE, "note": "勃艮第船体侧板/港口默认机位白天 两点标定, 其他船/光照下是近似值"}});
+        "model": {"slope": PORT_SLOPE, "toe": PORT_TOE, "note": "勃艮第船体侧板/港口默认机位白天 三点重拟合(r21: 两点版把 periwinkle 转成粉, 金实测发黄绿), 其他船/光照下是近似值"}});
     crate::guide::stash(&j);
     if cli.json { emit(cli, &j); } else { println!("港口里想看到 {screen}: 贴图表面色约 ({:.0},{:.0},{:.0}), recolor --to-color {hex}", alb[0], alb[1], alb[2]); }
     Ok(0)
