@@ -36,3 +36,8 @@
 | 10-11 r8 | 2/预览 | 克制档远景斜视几乎像原版灰船, 小海星/音符读不出; 三档差异主要靠近景 | 验收太松+引导不足 | map.preview: 克制也要角色色大面; fq 一眼分三档; 风格包自评加远景认色 | 知更鸟三方向粗样后复盘; 已改节点, 本轮未重做 A(留给定稿后) |
 
 | 10-11 r9 | 2/3/7/打包 | 方向预览靠一次性脚本; 人物尺寸靠猜米数; PowerShell 收 JSON 靠外部脚本; 受限模型能被 pack 出去; 港口操作靠临时脚本 | 工具缺能力 | `design-preview`(spec 驱动三方向出图+拼图); import 结果 `units`+`ship_length_m`; 全局 `--json-out`; 许可扫描→`[license]`→pack 默认拒绝(`--allow-restricted`); `scripts/port/port_shot.py`; `--box` 按像素裁剪 | A 方向 r8 一条 spec 重出, 舷侧色带边缘平直; pack 拒绝已实测 |
+
+| 10-11 r19 | 3/4/审美 | 配色只抄色号、外带无造型语言; C 丑仍过自审 | 引导缺失+验收太松 | 增 paint.color-logic(占比/明度层/冷暖/分区/发光/port-albedo)+shape.form-language(剪影/分件/倒角/镶边); color_logic.py; 与 benchmark/blender 挂链 | 本轮 |
+| 10-11 r18 | 2/3/7/审美 | C 上限配色脏青灰糊、外带无倒角却自审通过 | 验收太松: 只查有无人像/有无 mic·halo 文件, 缺对标与量化配色/外带细节门槛 | 增 map.benchmark; workflow 底线加量化配色+外带最低细节; review/verify/style/blender 挂钩; BENCHMARK.md | 本轮重做 C |
+| 10-11 r17 | 3 | 外带只靠 CLI `--at/--height` 易穿模/比例飘; 社区镜学家用 Blender/ZBrush 精修; 扁平立环 `--height` 按薄轴爆缩放 | 引导缺失 | 增 `workflow.layers.shape.blender`(何时进、比例/拓扑/贴合、glb 标准、验收、薄环用 `--scale`); C 上限按此流程 | C 天花板交付 |
+| 10-11 r16 | 主题 | 社区高质量主题=UV重画+道具外带, 非立人像 | 引导缺失 | theme 加社区对齐句; makers 总览写死 theme 禁立人像/复刻可例外 | 与 shape/theme 一致 |
