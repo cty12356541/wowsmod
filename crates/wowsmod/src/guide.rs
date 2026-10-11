@@ -62,7 +62,7 @@ pub fn check_tree() -> Vec<String> {
     if ids.len() != ns.len() {
         errs.push("有重复的节点 id".into());
     }
-    let id_re = regex::Regex::new(r"(?:help |`)((?:root|workflow|ref|styles)(?:\.[a-z0-9-]+)*)\b").unwrap();
+    let id_re = regex::Regex::new(r"(?:help |`)((?:root|workflow|ref|styles|learn)(?:\.[a-z0-9-]+)*)\b").unwrap();
     let help_re = regex::Regex::new(r"wowsmod help ([a-z][a-z0-9.-]*)").unwrap();
     for n in &ns {
         let lim = if n.id == "root" { ROOT_MAX_CHARS } else { NODE_MAX_CHARS };
