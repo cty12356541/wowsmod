@@ -15,10 +15,8 @@ def texmat(name, path):
     t = nt.nodes.new('ShaderNodeTexImage'); t.image = img(path); nt.links.new(t.outputs['Color'], bsdf.inputs['Base Color'])
     nt.nodes.active = t
     return m
-def flatmat(name, rgb, rough=0.6):
-    m = bpy.data.materials.new(name); m.diffuse_color = (*rgb, 1); m.use_nodes = True
-    b = m.node_tree.nodes.get('Principled BSDF'); b.inputs['Base Color'].default_value = (*rgb, 1); b.inputs['Roughness'].default_value = rough
-    return m
+def flatmat(name, rgb):
+    m = bpy.data.materials.new(name); m.diffuse_color = (*rgb, 1); return m
 bpy.ops.import_scene.gltf(filepath=SHIP)
 MAP = [('Hull_wire', None), ('Hull', 'hull_a_p2_half.png'), ('DeckHouse', 'dh_a_p2_half.png'), ('FGM049', 'FGM049_a_p2_half.png'),
        ('FGS036', 'FGS036_a_p2_half.png'), ('FGS053', 'FGS053_a_p2_half.png')]
@@ -60,28 +58,15 @@ for f in sorted(glob.glob(os.path.join(PROPS, 'rb_*.glb'))):
             o.location = (x, z, y); o.rotation_euler = (0, 0, math.radians(yaw))
 # 水面(遮住水线下, 否则船底深藏青把明度统计拉暗)
 bpy.ops.mesh.primitive_plane_add(size=80, location=(0, 0, 0.0)); wp = bpy.context.active_object; wp.name = 'water'
-wp.data.materials.append(flatmat('water', (0.03, 0.09, 0.13), rough=0.12))
+wp.data.materials.append(flatmat('water', (0.10, 0.20, 0.26)))
 scn = bpy.context.scene
 scn.render.engine = 'BLENDER_WORKBENCH'
 scn.display.shading.light = 'STUDIO'; scn.display.shading.color_type = 'TEXTURE'
 scn.display.shading.show_shadows = True; scn.display.shading.show_cavity = False
 scn.display.shading.background_type = 'VIEWPORT'
 scn.render.resolution_x, scn.render.resolution_y = 960, 540
-LIGHT = os.environ.get('PREVIEW_LIGHT', 'day')
-if LIGHT == 'day':
-    # 接近港口白天: 暖色太阳(仰 38°, 从右舷前上) + 天空环境光; Cycles CPU。工作台 STUDIO 灰光会把乳白/淡紫读成灰, 误导审美判断。
-    scn.render.engine = 'CYCLES'; scn.cycles.device = 'CPU'; scn.cycles.samples = 48
-    try: scn.cycles.use_denoising = True
-    except Exception: pass
-    scn.view_settings.view_transform = 'Standard'; scn.view_settings.look = 'None'; scn.view_settings.exposure = 0.2
-    w0 = bpy.data.worlds.new('sky'); scn.world = w0; w0.use_nodes = True
-    bg = w0.node_tree.nodes['Background']; bg.inputs['Color'].default_value = (0.42, 0.60, 0.85, 1); bg.inputs['Strength'].default_value = 0.9
-    sun = bpy.data.objects.new('sun', bpy.data.lights.new('sun', 'SUN')); scn.collection.objects.link(sun)
-    sun.data.energy = 3.6; sun.data.color = (1.0, 0.93, 0.82); sun.data.angle = math.radians(2)
-    sun.rotation_euler = (math.radians(52), 0, math.radians(-35))
 scn.render.film_transparent = False
-if LIGHT != 'day':
-    w = bpy.data.worlds.new('w'); scn.world = w; w.color = (0.20, 0.30, 0.36)
+w = bpy.data.worlds.new('w'); scn.world = w; w.color = (0.20, 0.30, 0.36)
 cam = bpy.data.objects.new('cam', bpy.data.cameras.new('cam')); scn.collection.objects.link(cam); scn.camera = cam
 cam.data.lens = 35
 from mathutils import Vector
