@@ -203,8 +203,9 @@ def paint_hull_blocks(pos,nrm,cov,upc=None):
         if edge_col:
             e=hi&(np.abs(tt-(t1 if sgn>0 else t0))<0.0035); idx[e]=NAMES.index(edge_col)
         return m
-    beam(0.06,0.13,'royal',1,'gold');  beam(0.17,0.30,'peri_d',1,'gold'); beam(0.33,0.49,'peri',1,'glow')
-    beam(0.59,0.75,'peri',-1,'glow');  beam(0.78,0.88,'peri_d',-1,'gold'); beam(0.91,0.96,'royal',-1,'gold')
+    # A5: 每侧 4 块(艏 royal 楔 / 前大 periwinkle / 后大 periwinkle / 艉 royal 楔), 其余留乳白大底
+    beam(0.04,0.11,'royal',1);  beam(0.22,0.46,'peri',1,'glow')
+    beam(0.62,0.82,'peri',-1,'glow');  beam(0.92,0.97,'royal',-1)
     # 舯「聚光」区: 乳白 + 金色三线谱折角
     gap=hi&(np.abs(t-TC)<0.045); idx[gap]=NAMES.index('white')
     for k in range(3):
@@ -213,7 +214,7 @@ def paint_hull_blocks(pos,nrm,cov,upc=None):
         idx[v]=NAMES.index('gold')
     # 发光主线: 沿舷 f≈0.34 贯穿艏艉, 在舯部聚光区折成向上的 V(指向翼根), 线宽加粗
     fl=0.34+0.50*np.clip(1-np.abs(t-TC)/0.045,0,1)
-    idx[S&(np.abs(f-fl)<0.022)&(t>0.03)&(t<0.97)]=NAMES.index('glow')
+    idx[S&(np.abs(f-fl)<0.040)&(t>0.03)&(t<0.97)]=NAMES.index('glow')   # A5 加粗(远景一眼可见)
     # 艏艉 navy 尖楔 + 星点
     bow=hi&(t<0.03+0.06*(1-f)); stern=hi&(t>0.97-0.05*(1-f))   # A3: 尖楔收小
     idx[bow|stern]=NAMES.index('navy')
@@ -257,7 +258,7 @@ def paint_dh(pos,nrm,cov):
         idx[side&(y>yy-0.045)&(y<yy)]=NAMES.index('peri' if i%2==0 else 'peri_d')
         idx[side&(np.abs(y-yy)<0.008)]=NAMES.index('gold')
     if STYLE=='blocks':   # A4: 发光主线上舷楼 —— 翼组站位(烘焙 z≈+0.7)从裙线竖直接到翼根高度
-        idx[side&(np.abs(z-0.70)<0.035)&(y>0.80)&(y<2.05)]=NAMES.index('glow')
+        idx[side&(np.abs(z-0.70)<0.050)&(y>0.80)&(y<2.05)]=NAMES.index('glow')
     # 烟囱: 高处(y>1.55)且 z 在烟囱段 → 深蓝顶 + 紫身 + 金环
     fun=side&(z>0.4)&(z<2.6)&(y>1.45)
     idx[fun]=NAMES.index('violet'); idx[fun&(y>2.05)]=NAMES.index('navy')
