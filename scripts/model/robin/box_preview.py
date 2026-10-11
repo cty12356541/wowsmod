@@ -56,6 +56,9 @@ for f in sorted(glob.glob(os.path.join(PROPS, 'rb_*.glb'))):
             o = src if k == 0 else src.copy()
             if k: bpy.context.collection.objects.link(o)
             o.location = (x, z, y); o.rotation_euler = (0, 0, math.radians(yaw))
+# 水面(遮住水线下, 否则船底深藏青把明度统计拉暗)
+bpy.ops.mesh.primitive_plane_add(size=80, location=(0, 0, 0.0)); wp = bpy.context.active_object; wp.name = 'water'
+wp.data.materials.append(flatmat('water', (0.10, 0.20, 0.26)))
 scn = bpy.context.scene
 scn.render.engine = 'BLENDER_WORKBENCH'
 scn.display.shading.light = 'STUDIO'; scn.display.shading.color_type = 'TEXTURE'

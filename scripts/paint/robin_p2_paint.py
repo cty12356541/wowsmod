@@ -191,20 +191,21 @@ def paint_hull_blocks(pos,nrm,cov,upc=None):
     ez=np.interp(z,(bins[:-1]+bins[1:])/2,np.clip(e,0.35,0.56)); hwz=np.interp(z,(bins[:-1]+bins[1:])/2,np.maximum(hw,0.15))
     f=np.clip(y/ez,-2,2); S=side
     TC=0.54   # 翼组站位(游戏 z≈−0.7)
-    idx[S&(f<0.22)]=NAMES.index('navy')
+    # A3 提亮: 深藏青只留水线下靴带(f<0.12), 0.12–0.22 periwinkle-深; 光束底改乳白, 光束本身 periwinkle 为主
+    idx[S&(f<0.12)]=NAMES.index('navy'); idx[S&(f>=0.12)&(f<0.22)]=NAMES.index('peri_d')
     hi=S&(f>=0.22)
-    idx[hi]=NAMES.index('peri')
-    # 「舞台追光」: 一列硬边斜切光束(平行四边形), 全部向舯部翼组倾斜(像追光打向歌者), 越近舯越宽越亮
+    idx[hi]=NAMES.index('white')
+    # 「舞台追光」: 一列硬边斜切光束(平行四边形), 全部向舯部翼组倾斜(像追光打向歌者), 越近舯越宽
     LEAN=0.030   # 每 1 个 f 单位的 t 偏移(船侧高≈0.5, 长17.7 → ≈45°)
-    beams=[(0.11,0.024,'royal'),(0.18,0.030,'white'),(0.26,0.034,'royal'),(0.35,0.042,'white'),(0.45,0.050,'white'),
-           (0.64,0.050,'white'),(0.73,0.040,'royal'),(0.81,0.034,'white'),(0.88,0.026,'royal')]
+    beams=[(0.10,0.026,'royal'),(0.17,0.034,'peri'),(0.245,0.022,'peri_d'),(0.32,0.044,'peri'),(0.42,0.056,'peri'),
+           (0.66,0.056,'peri'),(0.75,0.044,'peri'),(0.825,0.022,'peri_d'),(0.89,0.026,'royal')]
     for tc,w,col in beams:
         sgn=1 if tc<TC else -1                 # 顶部偏向舯部
         tt=t-tc-sgn*LEAN*(f-0.22)
         m=hi&(np.abs(tt)<w/2)
         idx[m]=NAMES.index(col)
         edge=hi&(np.abs(tt-sgn*w/2)<0.0030)      # 朝舯一侧的硬边 → 发光走结构
-        idx[edge]=NAMES.index('glow' if col=='white' else 'gold')
+        idx[edge]=NAMES.index('glow' if col=='peri' else 'gold')
     # 舯「聚光」区: 白底 + 金色三线谱折角
     gap=hi&(np.abs(t-TC)<0.035); idx[gap]=NAMES.index('white')
     for k in range(3):
@@ -214,17 +215,17 @@ def paint_hull_blocks(pos,nrm,cov,upc=None):
     # 水线发光界
     idx[S&(f>=0.22)&(f<0.25)]=NAMES.index('glow')
     # 艏艉 navy 尖楔 + 星点
-    bow=hi&(t<0.05+0.10*(1-f)); stern=hi&(t>0.95-0.08*(1-f))
+    bow=hi&(t<0.03+0.06*(1-f)); stern=hi&(t>0.97-0.05*(1-f))   # A3: 尖楔收小
     idx[bow|stern]=NAMES.index('navy')
     st=stars_field(z,y)&(bow|stern|(S&(f<0.22)&(y>-0.25)))
     idx[st]=NAMES.index('star')
     upper=S&(y>ez+0.06); idx[upper]=NAMES.index('dhwhite')
     # 甲板
-    U=up; idx[U]=NAMES.index('deck'); r=ax/hwz
+    U=up; idx[U]=NAMES.index('peri'); r=ax/hwz   # A3: 甲板底由深紫改 periwinkle, 两侧大板乳紫(roof)
     pA=U&(r>0.62)&(r<0.93)&(((t>0.13)&(t<TC-0.06))|((t>TC+0.06)&(t<0.88)))
     # 板端斜切
     pA&=~((t<0.13+0.06)&(r<0.62+(0.13+0.06-t)*5))&~((t>0.88-0.06)&(r<0.62+(t-(0.88-0.06))*5))
-    idx[pA]=NAMES.index('peri_d')
+    idx[pA]=NAMES.index('roof')
     idx[pA&(r<0.66)]=NAMES.index('glow')
     idx[U&(ax<0.05)]=NAMES.index('peri_d')
     em=emblem()
@@ -262,7 +263,7 @@ def paint_dh(pos,nrm,cov):
     idx[fun&(y>1.975)&(y<1.99)]=NAMES.index('glow')   # P3: 烟囱金环下发光环
     # 顶面: 淡紫白; 但艏艉/舯部 y<0.6 的 DeckHouse 顶面其实是主甲板铺板 → 甲板色(否则甲板上出现白楔)
     idx[up]=NAMES.index('roof')
-    idx[up&(y<0.6)]=NAMES.index('deck')
+    idx[up&(y<0.6)]=NAMES.index('peri' if STYLE=='blocks' else 'deck')
     # P3 锚: 艏锚是 DeckHouse 材质(Hull_Bow 子网格, UV≈u0.28-0.48 v0.58-0.68), 原先随裙色成 periwinkle/白糊 → 金锚
     idx[covd&(z<-8.1)&(y>0.33)&(y<0.62)&(np.abs(x)>0.08)]=NAMES.index('gold')
     return idx

@@ -243,31 +243,43 @@ def dvec(el, sw, out=1.0):
     return (out * math.cos(e) * math.cos(w), -math.cos(e) * math.sin(w), math.sin(e))
 
 def build_wings():
-    """方案 A「舞台·展翼歌者」: 舰桥=歌者头部, 光环=冠, 翼组=知更鸟头翼(白→periwinkle 层叠厚羽)挂在舰桥两侧偏高处,
-    向上外后展开; 全船唯一视觉中心。每侧 3 层: 初级长羽×4(上外后) + 次级羽×4(外后, 内叠深色) + 覆羽×3(短, 根部)。
-    A2: 初级 ×1.17 + 下层裙摆羽 ×2。尺度: 梢 x≈3.4(≈2.8 半宽, 标杆参考 3.5, 收一点让光环做冠), 顶 y≈3.5(略高于光环底), 挂点 z≈−0.7。不做下刃/机械舱。"""
+    """方案 A3「舞台·展翼歌者」: 舰桥=歌者头部, 光环=冠, 舰桥两侧的知更鸟头翼=全船唯一视觉中心。
+    A2 自评问题: 所有羽从同一点放射+羽面竖直 → 侧看像竖起的扇子, 俯看只剩细棍, 无厚度/分层/外展。
+    A3 改法: ①翼骨(厚白臂, 金脊)从舰桥侧向外上后伸出, 羽根沿翼骨错开(非单点);
+    ②三层上下错层: 上=初级长羽(外展, 仰 6–22°) / 中=次级(平, 深色 periwinkle) / 下=裙摆羽(外下);
+    ③羽面倾 30–45°(前缘朝艏偏上), 俯视与侧视都有面积; 羽更宽更厚; 覆羽沿骨叠一排白厚片。"""
     P = []
-    root = (0.70, -0.70, 2.00)
-    # 根: 白厚羽根座 + 金环 + 发光环(耳羽发饰)
-    h = sphere(1.0, 'white', 24); xform(h, loc=root, scale=(0.20, 0.38, 0.24)); P.append(h)
-    r = torus(0.24, 0.026, 48, 8, 'gold'); xform(r, loc=(root[0] + 0.03, root[1], root[2]), rot=(0, 90, 0), scale=(1, 1.5, 1)); P.append(r)
-    gr = torus(0.28, 0.010, 48, 6, 'glow'); xform(gr, loc=(root[0] + 0.04, root[1], root[2]), rot=(0, 90, 0), scale=(1, 1.5, 1)); P.append(gr)
-    # 初级长羽 ×4: 上外后扇形(仰 40→12°, 后掠 20→38°), 最长在中间偏上
-    for k, (L, el, sw, W) in enumerate([(2.50, 40, 20, 0.44), (3.00, 30, 25, 0.48), (3.15, 20, 31, 0.48), (2.75, 11, 38, 0.44)]):   # A2: 自评「偏弱」→ ×1.17
-        b = blade(L, W, 0.06, main='feather_wp', sub='feather_pv', sub_k=0.55)
-        aim(b, (root[0] + 0.05, root[1] - 0.05 * k, root[2] + 0.05 - 0.04 * k), dvec(el, sw), (0, 0.6, 1.0), roll=-30 + 8 * k); P += b
-    # 次级羽 ×4: 外后偏平, 内叠深色, 层次在初级下方
-    for k, (L, el, sw, W) in enumerate([(1.70, 22, 42, 0.36), (1.55, 14, 50, 0.34), (1.40, 6, 58, 0.32), (1.20, -2, 66, 0.30)]):
-        b = blade(L, W, 0.05, main='feather_pv', sub='navy', sub_k=0.6)
-        aim(b, (root[0], root[1] - 0.10 - 0.05 * k, root[2] - 0.12 - 0.03 * k), dvec(el, sw), (0, 0.6, 1.0), roll=-20 + 6 * k); P += b
-    # A2 下层「裙摆」羽 ×2: 外下后, 让高俯/舷斜也能读出三层(歌者裙摆; 不做标杆式下探机械刃)
-    for k, (L, el, sw, W) in enumerate([(1.75, -16, 34, 0.36), (1.40, -30, 50, 0.32)]):
-        b = blade(L, W, 0.05, main='feather_wp', sub='violet', sub_k=0.5)
-        aim(b, (root[0] - 0.02, root[1] - 0.12 - 0.08 * k, root[2] - 0.20), dvec(el, sw), (0, 0.6, 1.0), roll=-10 + 10 * k); P += b
-    # 覆羽 ×3: 短, 根部白
-    for k, (L, el, sw) in enumerate([(0.85, 32, 25), (0.75, 18, 40), (0.65, 6, 55)]):
-        f = feather(L, 0.26, th=0.04, curve=0.03, colname='white', tipsharp=0.4)
-        aim([f], (root[0] + 0.08, root[1] - 0.04 * k, root[2] + 0.08), dvec(el, sw), (0, 0.6, 1.0), roll=-20); P.append(f)
+    sh = Vector((0.55, -0.62, 2.02))            # 肩(舰桥侧)
+    tip = Vector((1.85, -1.05, 2.42))           # 翼骨末端(外上后)
+    arm = lambda t: sh + (tip - sh) * t
+    # 肩座: 白厚羽根 + 金环 + 发光环
+    h = sphere(1.0, 'white', 24); xform(h, loc=tuple(sh), scale=(0.22, 0.36, 0.26)); P.append(h)
+    r = torus(0.25, 0.028, 48, 8, 'gold'); xform(r, loc=(sh.x + 0.04, sh.y, sh.z), rot=(0, 90, 0), scale=(1, 1.4, 1)); P.append(r)
+    gr = torus(0.29, 0.010, 48, 6, 'glow'); xform(gr, loc=(sh.x + 0.05, sh.y, sh.z), rot=(0, 90, 0), scale=(1, 1.4, 1)); P.append(gr)
+    # 翼骨: 厚白锥管 + 上脊金管 + 下沿发光
+    n = 14
+    P.append(tube([tuple(arm(i / n)) for i in range(n + 1)], [0.13 * (1 - 0.55 * i / n) + 0.02 for i in range(n + 1)], 'white', seg=12))
+    P.append(tube([tuple(arm(i / n) + Vector((0, 0.02, 0.11 * (1 - 0.55 * i / n)))) for i in range(n + 1)], [0.022] * (n + 1), 'gold', seg=6))
+    P.append(tube([tuple(arm(i / n) + Vector((0, 0.0, -0.12 * (1 - 0.55 * i / n)))) for i in range(n + 1)], [0.010] * (n + 1), 'glow', seg=5))
+    UP = lambda tilt: (0, 1.0, math.tan(math.radians(tilt)))   # 前缘朝艏, 倾 tilt°
+    # 上层 初级长羽 ×5: 沿骨 t 0.40→1.0, 外展(仰 22→6°, 后掠 8→40°)
+    for k, (t, L, el, sw, W) in enumerate([(0.40, 1.95, 22, 8, 0.50), (0.55, 2.20, 18, 16, 0.54), (0.70, 2.30, 14, 24, 0.54),
+                                           (0.85, 2.15, 10, 32, 0.50), (1.00, 1.85, 6, 40, 0.46)]):
+        b = blade(L, W, 0.085, main='feather_wp', sub='feather_pv', sub_k=0.6)
+        aim(b, tuple(arm(t) + Vector((0, 0, 0.06))), dvec(el, sw), UP(38), roll=0); P += b
+    # 中层 次级羽 ×4: 低 0.18, 平展, 深色 periwinkle(和上层拉开明度做分层)
+    for k, (t, L, el, sw, W) in enumerate([(0.20, 1.60, 2, 30, 0.44), (0.40, 1.55, -2, 40, 0.42), (0.60, 1.45, -5, 50, 0.40), (0.80, 1.25, -8, 60, 0.36)]):
+        b = blade(L, W, 0.07, main='feather_pv', sub='navy', sub_k=0.6)
+        aim(b, tuple(arm(t) + Vector((0, -0.05, -0.18))), dvec(el, sw), UP(30), roll=0); P += b
+    # 下层 裙摆羽 ×3: 肩下, 外下后, 白→violet 副刃(歌者裙摆)
+    for k, (L, el, sw, W) in enumerate([(1.55, -14, 30, 0.40), (1.35, -24, 42, 0.36), (1.10, -34, 55, 0.32)]):
+        b = blade(L, W, 0.06, main='feather_wp', sub='violet', sub_k=0.5)
+        aim(b, (sh.x + 0.02, sh.y - 0.10 - 0.10 * k, sh.z - 0.28), dvec(el, sw), UP(45), roll=0); P += b
+    # 覆羽: 沿骨一排白厚短羽(盖住羽根, 给厚度)
+    for k in range(6):
+        t = 0.08 + 0.16 * k
+        f = feather(0.70 - 0.05 * k, 0.30, th=0.06, curve=0.03, colname='white', tipsharp=0.4)
+        aim([f], tuple(arm(t) + Vector((0, 0.04, 0.10))), dvec(4, 30 + 4 * k), UP(40), roll=0); P.append(f)
     for p in P: p.select_set(False)
     right = join(P, 'wing_R')
     left = mirror_x(right, 'wing_L')
