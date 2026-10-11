@@ -195,25 +195,25 @@ def paint_hull_blocks(pos,nrm,cov,upc=None):
     idx[S&(f<0.12)]=NAMES.index('navy'); idx[S&(f>=0.12)&(f<0.22)]=NAMES.index('peri_d')
     hi=S&(f>=0.22)
     idx[hi]=NAMES.index('white')
-    # 「舞台追光」: 一列硬边斜切光束(平行四边形), 全部向舯部翼组倾斜(像追光打向歌者), 越近舯越宽
-    LEAN=0.030   # 每 1 个 f 单位的 t 偏移(船侧高≈0.5, 长17.7 → ≈45°)
-    beams=[(0.10,0.026,'royal'),(0.17,0.034,'peri'),(0.245,0.022,'peri_d'),(0.32,0.044,'peri'),(0.42,0.056,'peri'),
-           (0.66,0.056,'peri'),(0.75,0.044,'peri'),(0.825,0.022,'peri_d'),(0.89,0.026,'royal')]
-    for tc,w,col in beams:
-        sgn=1 if tc<TC else -1                 # 顶部偏向舯部
-        tt=t-tc-sgn*LEAN*(f-0.22)
-        m=hi&(np.abs(tt)<w/2)
-        idx[m]=NAMES.index(col)
-        edge=hi&(np.abs(tt-sgn*w/2)<0.0030)      # 朝舯一侧的硬边 → 发光走结构
-        idx[edge]=NAMES.index('glow' if col=='peri' else 'gold')
-    # 舯「聚光」区: 白底 + 金色三线谱折角
-    gap=hi&(np.abs(t-TC)<0.035); idx[gap]=NAMES.index('white')
+    # A4: 斜条合并 → 每半船 2 块大硬边光束(大 periwinkle + 次 peri_d), 端部 royal 楔; 一条连续发光主线贯穿全船
+    LEAN=0.030
+    def beam(t0,t1,col,sgn,edge_col=None):
+        tt=t-sgn*LEAN*(f-0.22)
+        m=hi&(tt>t0)&(tt<t1); idx[m]=NAMES.index(col)
+        if edge_col:
+            e=hi&(np.abs(tt-(t1 if sgn>0 else t0))<0.0035); idx[e]=NAMES.index(edge_col)
+        return m
+    beam(0.06,0.13,'royal',1,'gold');  beam(0.17,0.30,'peri_d',1,'gold'); beam(0.33,0.49,'peri',1,'glow')
+    beam(0.59,0.75,'peri',-1,'glow');  beam(0.78,0.88,'peri_d',-1,'gold'); beam(0.91,0.96,'royal',-1,'gold')
+    # 舯「聚光」区: 乳白 + 金色三线谱折角
+    gap=hi&(np.abs(t-TC)<0.045); idx[gap]=NAMES.index('white')
     for k in range(3):
         c=TC+(k-1)*0.012
         v=hi&(np.abs((t-c)-0.035*(f-0.55))<0.0035)&(f>0.30)&(f<0.92)
         idx[v]=NAMES.index('gold')
-    # 水线发光界
-    idx[S&(f>=0.22)&(f<0.25)]=NAMES.index('glow')
+    # 发光主线: 沿舷 f≈0.34 贯穿艏艉, 在舯部聚光区折成向上的 V(指向翼根), 线宽加粗
+    fl=0.34+0.50*np.clip(1-np.abs(t-TC)/0.045,0,1)
+    idx[S&(np.abs(f-fl)<0.022)&(t>0.03)&(t<0.97)]=NAMES.index('glow')
     # 艏艉 navy 尖楔 + 星点
     bow=hi&(t<0.03+0.06*(1-f)); stern=hi&(t>0.97-0.05*(1-f))   # A3: 尖楔收小
     idx[bow|stern]=NAMES.index('navy')
@@ -256,6 +256,8 @@ def paint_dh(pos,nrm,cov):
       for i,yy in enumerate(np.arange(1.10,2.9,0.32)):
         idx[side&(y>yy-0.045)&(y<yy)]=NAMES.index('peri' if i%2==0 else 'peri_d')
         idx[side&(np.abs(y-yy)<0.008)]=NAMES.index('gold')
+    if STYLE=='blocks':   # A4: 发光主线上舷楼 —— 翼组站位(烘焙 z≈+0.7)从裙线竖直接到翼根高度
+        idx[side&(np.abs(z-0.70)<0.035)&(y>0.80)&(y<2.05)]=NAMES.index('glow')
     # 烟囱: 高处(y>1.55)且 z 在烟囱段 → 深蓝顶 + 紫身 + 金环
     fun=side&(z>0.4)&(z<2.6)&(y>1.45)
     idx[fun]=NAMES.index('violet'); idx[fun&(y>2.05)]=NAMES.index('navy')
