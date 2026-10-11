@@ -105,6 +105,10 @@ pub struct RenderArgs {
     /// 软件引擎自定义机位: 俯角(度, 0=水平, quarter≈22)
     #[arg(long)]
     pub pitch: Option<f32>,
+    /// 外观(浏览器引擎): game-day = 港口白天对齐(默认) / game-night = 港口夜景对齐 / studio = 影棚展台。
+    /// 与 --query 同用时追加 look=…, 覆盖查询串里的 light。校准与残差见 wowsmod help workflow.layers.verify.wysiwyg
+    #[arg(long, value_parser = ["game-day", "game-night", "studio", "game"])]
+    pub look: Option<String>,
 }
 
 // ---------- 小向量 ----------
@@ -690,8 +694,13 @@ fn parse_size(s: &str) -> (u32, u32) {
 }
 
 pub(crate) fn build_query(a: &RenderArgs) -> String {
+    let look = a.look.as_deref().map(|l| format!("&look={l}")).unwrap_or_default();
     if let Some(q) = &a.query {
-        return q.clone();
+        // 查询串里已有 look= 时以 --look 为准(前端取第一个 look, 故放前面)
+        return match &a.look {
+            Some(l) => format!("look={l}&{}", q.trim_start_matches('&')),
+            None => q.clone(),
+        };
     }
     let view = match a.view {
         View::Side => "side",
@@ -706,6 +715,7 @@ pub(crate) fn build_query(a: &RenderArgs) -> String {
     }
     let (w, h) = parse_size(&a.size);
     q.push_str(&format!("&w={w}&h={h}"));
+    q.push_str(&look);
     q
 }
 

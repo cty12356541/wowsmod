@@ -79,7 +79,7 @@ fn entry_tools() -> Vec<Value> {
         json!({"name": "wowsmod_run", "description": "执行任意 wowsmod 命令(自动 --json), 如 [\"tex\",\"recolor\",\"X_a.dds\",\"--project\",\"p\",\"--to-color\",\"#123456\"]。结果含 next(建议下一步)。参数见 <命令> --help。", "inputSchema": {"type": "object", "properties": {"args": {"type": "array", "items": {"type": "string"}}}, "required": ["args"]}}),
         json!({"name": "wowsmod_render", "description": "出图并直接返回 PNG: 整船 WebGL(compare=分屏 原版|当前; query 可给完整参数, 见 help render)或单张贴图(texture, 左原版右当前)。走常驻出图实例: 首次调用会先预热(约 20~60 秒), 之后每张约 1 秒; wowsmod_status 带 project 时会在后台提前预热。", "inputSchema": {"type": "object", "properties": {
             "project": {"type": "string"}, "view": {"type": "string", "enum": ["side", "top", "quarter", "all"]}, "compare": {"type": "boolean"}, "texture": {"type": "string"},
-            "query": {"type": "string", "description": "原样查询串, 如 view=fq&compare=split&base=base&w=1600&h=900&env=dark"}, "rev": {"type": "string"}, "base": {"type": "string"},
+            "query": {"type": "string", "description": "原样查询串, 如 view=fq&compare=split&base=base&w=1600&h=900&env=dark"}, "look": {"type": "string", "enum": ["game-day", "game-night", "studio"], "description": "外观: game-day(默认, 港口白天对齐) / game-night / studio(影棚展台)"}, "rev": {"type": "string"}, "base": {"type": "string"},
             "width": {"type": "integer", "description": "默认 1600"}, "height": {"type": "integer", "description": "默认 900"}, "timeout": {"type": "integer", "description": "单张超时秒, 默认 60"}}, "required": ["project"]}}),
         json!({"name": "wowsmod_expand", "description": format!("按组展开带参数说明的专用工具(展开后工具列表会更新; 不展开也可用 wowsmod_run)。组: {}", groups.join("; ")), "inputSchema": {"type": "object", "properties": {"group": {"type": "string", "enum": GROUPS.iter().map(|g| g.0).collect::<Vec<_>>()}}, "required": ["group"]}}),
     ]
@@ -246,7 +246,8 @@ fn call(cli: &Cli, name: &str, a: &Value, expanded: &mut BTreeSet<String>, chang
             let ra = render::RenderArgs { project: p.into(), project2: None, warm: false, idle: None, timeout: a["timeout"].as_u64().unwrap_or(60), cold: false, all: false,
                 view, compare: a["compare"].as_bool().unwrap_or(false), texture: None, out: None,
                 width: a["width"].as_u64().unwrap_or(1200) as u32, size: format!("{}x{}", a["width"].as_u64().unwrap_or(1600), a["height"].as_u64().unwrap_or(900)),
-                engine: render::Engine::Browser, browser: None, query: a["query"].as_str().map(|s| s.to_string()), sheet: false, rev: a["rev"].as_str().unwrap_or("head").into(), base: a["base"].as_str().map(|s| s.to_string()), yaw: a["yaw"].as_f64().map(|x| x as f32), pitch: a["pitch"].as_f64().map(|x| x as f32) };
+                engine: render::Engine::Browser, browser: None, query: a["query"].as_str().map(|s| s.to_string()), sheet: false, rev: a["rev"].as_str().unwrap_or("head").into(), base: a["base"].as_str().map(|s| s.to_string()), yaw: a["yaw"].as_f64().map(|x| x as f32), pitch: a["pitch"].as_f64().map(|x| x as f32),
+                look: a["look"].as_str().filter(|l| matches!(*l, "game-day" | "game-night" | "studio" | "game")).map(|s| s.to_string()) };
             let q = render::build_query(&ra);
             let pp = std::path::Path::new(p);
             let idle = warm::idle_minutes(None);
