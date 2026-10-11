@@ -11,3 +11,5 @@
 **莱服补充**: 论坛有独立「皮肤」「模型」「UV」帖; 工具链常提 gmConverter3D、MK Model Export、NVIDIA Texture Tools。解包莱服 26.x 二进制资产需 pfsunpack/MKUT(见本机 TOOLKIT), 勿用旧 wowsunpack 硬解 dds/geometry。
 **对本工具**: 日常不手搓 Export——`mod init --mode sdk` + `import-sdk`(需本机已有 extractSources 产物与 ModsSDK 船目录, 记在 sdk_sources.json)。细节 `ref.project`。官方 Maya 全流程是背景知识, 非常规路径。
 **完成标准**: 能说清 extract → register 与 `import-sdk` 的对应关系; 不知船 ID 时用 `find --ship`。
+**两种导出写法等价**: 临时改目标 mod 的 Main.py 调 extractSources, 或用 `ModsSDKExport/Main.py`(WG 2019); 导出后删 Export、**勿改 mod 文件夹名**。
+**莱服 API**: 船外观只用 `API_v1.0`+`registerShipMod`; **勿**塞 `API_v2.0`/SIGNATURE(那是受限脚本原型)。ModsSDK 从莱服当前版本盘取, 勿盲用 WG 包。

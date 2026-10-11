@@ -11,4 +11,6 @@
 7. **服差异**: 夙岚等简介常写「WG/国服可用, 莱服不能用」——涂装包按客户端做; 结构类似但 geometry/atlas 路径可能不同, **勿盲装直营包进莱服**。
 8. **主题误用人物 mesh**: 高质量主题≠立人像; 立人像仅复刻定制例外。见 `workflow.theme`。
 9. **垃圾源文件**: 原包常夹 PNG/副本/新建文件夹——打包前清; `pack` 扫许可。
+10. **mkmod(莱服 25.10+)**: 零压缩 zip 放 `bin/<build>/mods/`; `res_mods` 优先; **含 PnF/Python 的船外观不能进 mkmod**, 仍放 res_mods。
+11. **手改 paths.xml**: 中文旧帖常见, **0.9.6 后过时**; 只装 `bin/<最大>/res_mods`。
 排错命令: `ref.troubleshoot` / `doctor` / 港口验证 `workflow.layers.verify.port`。
