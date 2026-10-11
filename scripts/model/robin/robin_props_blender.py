@@ -269,10 +269,10 @@ def build_wings():
     P = []
     wall = Vector((0.47, -0.64, 1.98))         # 舰桥侧外墙
     sh = Vector((0.82, -0.72, 2.10))           # 套筒外端 = 翼骨起点
-    tip = Vector((1.90, -1.08, 2.40))
+    tip = Vector((1.75, -1.05, 2.38))
     arm = lambda t: sh + (tip - sh) * t
     # 壁板(薄, 贴墙) + 护腕套筒(壁端张口 r0.17 → 外端 r0.11) + 外端金细环 + 发光环
-    wp = sphere(1.0, 'peri', 24); xform(wp, loc=(wall.x + 0.01, wall.y, wall.z - 0.04), scale=(0.035, 0.30, 0.36)); P.append(wp)
+    wp = sphere(1.0, 'white', 24); xform(wp, loc=(wall.x + 0.01, wall.y, wall.z - 0.02), scale=(0.03, 0.24, 0.22))   # A5b: 小、白, 贴墙不显成紫盘; P.append(wp)
     n = 8
     P.append(tube([tuple(wall + (sh - wall) * (i / n)) for i in range(n + 1)], [0.17 - 0.06 * (i / n) ** 0.7 for i in range(n + 1)], 'white', seg=16))
     ring_at = wall + (sh - wall) * 0.92
@@ -290,7 +290,8 @@ def build_wings():
     # 初级飞羽 ×6: 骨外半段, 越外越长越外展越仰
     for t, L, el, sw, W in [(0.50, 1.45, 4, 46, 0.30), (0.60, 1.70, 7, 38, 0.31), (0.70, 1.95, 10, 30, 0.32),
                             (0.80, 2.20, 13, 22, 0.33), (0.90, 2.40, 16, 15, 0.33), (1.00, 2.50, 19, 8, 0.32)]:
-        b = plume(L, W, 0.055, 'feather_wp', curve=0.13, glow=(L > 2.3))
+        L *= 0.86   # A5b: 梢 x 4.27 → ≈3.6, 不压船
+        b = plume(L, W, 0.055, 'feather_wp', curve=0.13, glow=(L > 2.0))
         aim(b, tuple(arm(t) + Vector((0, 0, 0.03))), dvec(el, sw), UP(35), roll=0); P += b
     # 次级 ×6: 骨内半段, 短, periwinkle, 叠在初级下(低 0.06)
     for k, t in enumerate([0.0, 0.10, 0.20, 0.30, 0.40, 0.50]):
