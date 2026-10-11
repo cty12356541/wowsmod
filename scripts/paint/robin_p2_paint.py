@@ -13,10 +13,11 @@ from PIL import Image, ImageDraw, ImageFilter
 
 # 屏上目标色(P2 色板, 见 color_derive/robin_p2_scheme.json)
 PAL = {
- 'white':  '#F4F0E8', 'peri': '#8F8BC8', 'peri_d': '#6A5BA8', 'navy': '#172565', 'deck': '#2A1C55',
+ 'white':  '#F4F0E8', 'peri': '#A8C2F2', 'peri_d': '#8CA3E6', 'navy': '#172565', 'deck': '#C9CEE0',
  'dhwhite':'#E8E4EE', 'turret':'#F5F2F8', 'violet':'#7546C2', 'glow':'#58B8FF', 'gold':'#D8B868',
- 'roof':   '#CFCBEA', 'star': '#F2EDDF', 'royal': '#573C9F',
+ 'roof':   '#E9ECF5', 'star': '#F2EDDF', 'royal': '#573C9F',
 }
+# P5: deck(多面共用纹素)由深紫 #2A1C55 → 浅冷灰, 否则俯视出现大块深色; periwinkle 向清透蓝(呼应发光 #58B8FF), 值=港口期望色, 贴图走 port 全补偿; roof(甲板/顶面底)提到冷白(甲板是俯视大面)
 NAMES=list(PAL)
 def hx(h): return np.array([int(h[i:i+2],16) for i in (1,3,5)],float)
 
@@ -28,7 +29,7 @@ def srgb(l): l=np.clip(l,0,1); return np.where(l>0.0031308,1.055*l**(1/2.4)-0.05
 # v5 港口实测(r21): 金 #E6CF8E(raw) 港口成黄绿 #C2D993 —— 港口 G/B 增益 > R, 金必须全补偿(贴图偏橙 #FEB266 → 港口 ≈#D8B868);
 # 舷侧暖白 raw 在港口偏薄荷灰 → 半补偿(贴图略偏暖粉)。炮塔/上层白在港口高光截断, 仍用 raw。
 COLMODE={'white':'half','dhwhite':'raw','turret':'raw','roof':'raw','star':'half','navy':'raw','deck':'raw',
-         'peri':'half','peri_d':'half','royal':'half','violet':'half','glow':'raw','gold':'port'}   # c2: 发光天青用原值(港口 G/B 增益只会更亮更青)
+         'peri':'port','peri_d':'port','royal':'half','violet':'half','glow':'raw','gold':'port'}   # c2: 发光天青用原值(港口 G/B 增益只会更亮更青)
 TEXOVR={}
 STYLE='stripes'
 def to_tex(rgb,mode):
@@ -165,7 +166,7 @@ def paint_hull(pos,nrm,cov,upc=None):
         u=(x/s)+0.5; v=((z-zc)/s)+0.5
         if rot: v=1-v
         dv=sample_decal(em,u,v)
-        idx[U&(dv==1)]=NAMES.index('white'); idx[U&(dv==2)]=NAMES.index('gold')
+        idx[U&(dv==1)]=NAMES.index('peri'); idx[U&(dv==2)]=NAMES.index('gold')   # P5: 甲板已冷白 → 徽记填 periwinkle
     # UV 复用的平铺区(多次覆盖且朝上) → 纯甲板色, 避免图案错乱
     idx[up&(cov>1)]=NAMES.index('deck')
     if upc is not None: idx[covd&(upc>0)&(cov>upc)]=NAMES.index('deck')  # 甲板/舷侧共用纹素 → 纯甲板色
@@ -192,8 +193,9 @@ def paint_hull_blocks(pos,nrm,cov,upc=None):
     f=np.clip(y/ez,-2,2); S=side
     TC=0.54   # 翼组站位(游戏 z≈−0.7)
     # A3 提亮: 深藏青只留水线下靴带(f<0.12), 0.12–0.22 periwinkle-深; 光束底改乳白, 光束本身 periwinkle 为主
-    idx[S&(f<0.12)]=NAMES.index('navy'); idx[S&(f>=0.12)&(f<0.22)]=NAMES.index('peri_d')
-    hi=S&(f>=0.22)
+    # P5 配色重平衡(实拍: royal/深紫压过白): 深色只留水线下靴带 + 一条 royal 水线细带
+    idx[S&(f<0.12)]=NAMES.index('navy'); idx[S&(f>=0.12)&(f<0.16)]=NAMES.index('royal')
+    hi=S&(f>=0.16)
     idx[hi]=NAMES.index('white')
     # A4: 斜条合并 → 每半船 2 块大硬边光束(大 periwinkle + 次 peri_d), 端部 royal 楔; 一条连续发光主线贯穿全船
     LEAN=0.030
@@ -204,8 +206,9 @@ def paint_hull_blocks(pos,nrm,cov,upc=None):
             e=hi&(np.abs(tt-(t1 if sgn>0 else t0))<0.0035); idx[e]=NAMES.index(edge_col)
         return m
     # A5: 每侧 4 块(艏 royal 楔 / 前大 periwinkle / 后大 periwinkle / 艉 royal 楔), 其余留乳白大底
-    beam(0.04,0.11,'royal',1);  beam(0.22,0.46,'peri',1,'glow')
-    beam(0.62,0.82,'peri',-1,'glow');  beam(0.92,0.97,'royal',-1)
+    # P5: 光束收窄(每侧 periwinkle ≈30% 船长), royal 只做艏艉小硬楔
+    beam(0.05,0.085,'royal',1);  beam(0.26,0.42,'peri',1,'glow')
+    beam(0.64,0.78,'peri',-1,'glow');  beam(0.925,0.955,'royal',-1)
     # 舯「聚光」区: 乳白 + 金色三线谱折角
     gap=hi&(np.abs(t-TC)<0.045); idx[gap]=NAMES.index('white')
     for k in range(3):
@@ -216,17 +219,17 @@ def paint_hull_blocks(pos,nrm,cov,upc=None):
     fl=0.34+0.50*np.clip(1-np.abs(t-TC)/0.045,0,1)
     idx[S&(np.abs(f-fl)<0.040)&(t>0.03)&(t<0.97)]=NAMES.index('glow')   # A5 加粗(远景一眼可见)
     # 艏艉 navy 尖楔 + 星点
-    bow=hi&(t<0.03+0.06*(1-f)); stern=hi&(t>0.97-0.05*(1-f))   # A3: 尖楔收小
+    bow=hi&(t<0.02+0.035*(1-f)); stern=hi&(t>0.98-0.03*(1-f))   # P5: 艏艉 navy 尖楔再收小(深色只做小硬边点缀)
     idx[bow|stern]=NAMES.index('navy')
     st=stars_field(z,y)&(bow|stern|(S&(f<0.22)&(y>-0.25)))
     idx[st]=NAMES.index('star')
     upper=S&(y>ez+0.06); idx[upper]=NAMES.index('dhwhite')
     # 甲板
-    U=up; idx[U]=NAMES.index('peri'); r=ax/hwz   # A3: 甲板底由深紫改 periwinkle, 两侧大板乳紫(roof)
+    U=up; idx[U]=NAMES.index('roof'); r=ax/hwz   # P5: 甲板底冷白, 两侧大板 periwinkle(清透蓝)   # A3: 甲板底由深紫改 periwinkle, 两侧大板乳紫(roof)
     pA=U&(r>0.62)&(r<0.93)&(((t>0.13)&(t<TC-0.06))|((t>TC+0.06)&(t<0.88)))
     # 板端斜切
     pA&=~((t<0.13+0.06)&(r<0.62+(0.13+0.06-t)*5))&~((t>0.88-0.06)&(r<0.62+(t-(0.88-0.06))*5))
-    idx[pA]=NAMES.index('roof')
+    idx[pA]=NAMES.index('peri')
     idx[pA&(r<0.66)]=NAMES.index('glow')
     idx[U&(ax<0.05)]=NAMES.index('peri_d')
     em=emblem()
@@ -234,7 +237,7 @@ def paint_hull_blocks(pos,nrm,cov,upc=None):
         u=(x/s_)+0.5; v=((z-zc)/s_)+0.5
         if rot: v=1-v
         dv=sample_decal(em,u,v)
-        idx[U&(dv==1)]=NAMES.index('white'); idx[U&(dv==2)]=NAMES.index('gold')
+        idx[U&(dv==1)]=NAMES.index('peri'); idx[U&(dv==2)]=NAMES.index('gold')   # P5: 甲板已冷白 → 徽记填 periwinkle
     idx[up&(cov>1)]=NAMES.index('deck')
     if upc is not None: idx[covd&(upc>0)&(cov>upc)]=NAMES.index('deck')
     return idx
@@ -244,7 +247,7 @@ def paint_dh(pos,nrm,cov):
     x,y,z=pos[...,0],pos[...,1],pos[...,2]; covd=cov>0
     up=covd&(nrm[...,1]>0.7); side=covd&~up
     # 下层(裙): y<0.78 periwinkle, 上缘金线
-    idx[side&(y<0.78)]=NAMES.index('peri')
+    idx[side&(y<0.78)]=NAMES.index('dhwhite'); idx[side&(y<0.62)]=NAMES.index('peri')   # P5: 裙只留下段 periwinkle, 上段白
     idx[side&(np.abs(y-0.78)<0.012)]=NAMES.index('gold')
     idx[side&(y>0.80)&(y<0.818)]=NAMES.index('glow')   # P3: 裙线上方发光线
     # 层间细带: 每 0.32 一条 periwinkle 细线(贴层高)
@@ -266,7 +269,7 @@ def paint_dh(pos,nrm,cov):
     idx[fun&(y>1.975)&(y<1.99)]=NAMES.index('glow')   # P3: 烟囱金环下发光环
     # 顶面: 淡紫白; 但艏艉/舯部 y<0.6 的 DeckHouse 顶面其实是主甲板铺板 → 甲板色(否则甲板上出现白楔)
     idx[up]=NAMES.index('roof')
-    idx[up&(y<0.6)]=NAMES.index('peri' if STYLE=='blocks' else 'deck')
+    idx[up&(y<0.6)]=NAMES.index('roof' if STYLE=='blocks' else 'deck')   # P5: 与甲板冷白一致
     # P3 锚: 艏锚是 DeckHouse 材质(Hull_Bow 子网格, UV≈u0.28-0.48 v0.58-0.68), 原先随裙色成 periwinkle/白糊 → 金锚
     idx[covd&(z<-8.1)&(y>0.33)&(y<0.62)&(np.abs(x)>0.08)]=NAMES.index('gold')
     return idx
@@ -288,7 +291,7 @@ def paint_turret(pos,nrm,cov,kind):
     idx[up]=NAMES.index('turret')
     w=0.12*xmax
     if STYLE=='blocks':   # T1: 顶面中线 royal 宽分区(硬边), 不要两侧金细线
-        idx[up&(np.abs(x)<w*1.25)]=NAMES.index('royal')
+        idx[up&(np.abs(x)<w*1.25)]=NAMES.index('peri')   # P5: royal → periwinkle(减深色)
     else:
         idx[up&(np.abs(x)<w)]=NAMES.index('peri')
         idx[up&(np.abs(np.abs(x)-w*1.35)<0.012*xmax/0.5)]=NAMES.index('gold')
@@ -356,6 +359,9 @@ if __name__=='__main__':
         idx2=dilate_fill(idx,cov,fill)
         Image.fromarray(idx2).save(f'{a.outdir}/{key}_idx.png')
         Image.fromarray(((idx2==NAMES.index('glow'))*255).astype(np.uint8)).save(f'{a.outdir}/{key}_glow.png')   # P3 发光遮罩(wowsmod glow --mask)
+        if key=='hull':   # P5: 舷侧遮罩(给 tex channel --mask 只压舷侧法线, 保留甲板木纹)
+            sm=(cov>0)&(np.abs(nrm[...,0])>0.35)&(nrm[...,1]<0.65)
+            Image.fromarray((sm*255).astype(np.uint8)).save(f'{a.outdir}/hull_side_mask.png')
         big=upsample_idx(idx2,a.size)
         orig=Image.open(af).convert('RGB')
         out=compose(big,orig,a.mode)

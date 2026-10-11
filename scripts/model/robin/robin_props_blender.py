@@ -257,10 +257,10 @@ def plume(L, W, th, col, curve=0.14, edge=True, shaft=True, glow=False, round_ti
         return 1.35 * W * min(1.0, t / 0.22) ** 0.6 * (1.0 - t) ** 0.85 + 0.003
     if edge:
         pts = [(L * t, -curve * L * t * t + 0.5 * wv(t) + 0.003, th * 0.2) for t in [0.08 + 0.84 * i / 16 for i in range(17)]]
-        parts.append(tube(pts, [0.009 * (1 - 0.7 * i / 16) + 0.002 for i in range(17)], 'gold', seg=5))
+        parts.append(tube(pts, [0.012 * (1 - 0.7 * i / 16) + 0.002 for i in range(17)], 'gold', seg=5))
     if shaft:
         sp = [(L * t, -curve * L * t * t, th * (1 - (0.6 * t)) + 0.004) for t in [0.02 + 0.85 * i / 16 for i in range(17)]]
-        parts.append(tube(sp, [0.010 * (1 - 0.7 * i / 16) + 0.002 for i in range(17)], 'glow' if glow else 'gold', seg=5))
+        parts.append(tube(sp, [0.013 * (1 - 0.7 * i / 16) + 0.002 for i in range(17)], 'glow' if glow else 'gold', seg=5))
     return parts
 
 def build_wings():
@@ -279,7 +279,7 @@ def build_wings():
         DZ = float(os.environ.get('ROBIN_WING_DZ', '-0.60')); GAP = float(os.environ.get('ROBIN_WING_GAP', '0.45'))
         sh = Vector((1.19 + GAP, -0.80, 2.10 + DZ))
         tip = sh + Vector((0.62, -0.38, 0.22))      # 翼骨更短, 控制翼展/船宽
-        LS = float(os.environ.get('ROBIN_WING_LS', '0.70')); SW = 8   # 初级再收短、多后掠
+        LS = float(os.environ.get('ROBIN_WING_LS', '0.80')); SW = 8   # 初级再收短、多后掠; P5: LS 0.70→0.80(港口距离羽翼读小)
     else:
         DZ = float(os.environ.get('ROBIN_WING_DZ', '-0.40'))
         sh = Vector((0.82, -0.72, 2.10 + DZ)); tip = Vector((1.75, -1.05, 2.38 + DZ)); LS = 0.86; SW = 0
@@ -317,7 +317,7 @@ def build_wings():
     for t, L, el, sw, W in [(0.50, 1.45, 4, 46, 0.30), (0.60, 1.70, 7, 38, 0.31), (0.70, 1.95, 10, 30, 0.32),
                             (0.80, 2.20, 13, 22, 0.33), (0.90, 2.40, 16, 15, 0.33), (1.00, 2.50, 19, 8, 0.32)]:
         L *= LS; sw += SW   # A5b ×0.86; A7 悬浮 ×0.70 且多后掠, 控翼展
-        b = plume(L, W * 0.9, 0.055 * TK, 'feather_wp', curve=0.13, glow=(L > 2.0))
+        b = plume(L, W * 0.9, 0.055 * TK, 'feather_wp', curve=0.13, glow=True)   # P5: 全部初级发光羽轴(原 L>2.0 在 LS 0.70 下一根都没有)
         aim(b, tuple(arm(t) + Vector((0, 0, 0.03))), dvec(el, sw), UP(35), roll=0); P += b
     # 次级 ×6: 骨内半段, 短, periwinkle, 叠在初级下(低 0.06)
     for k, t in enumerate([0.0, 0.10, 0.20, 0.30, 0.40, 0.50]):
@@ -427,13 +427,13 @@ def turret_shell(hw, hl, cz, y0, y1, flare, open_deg=38, fin_len=0.5, scallops=1
 #     侧/后围板按段分件(分件缝)、顶沿内倒角; 白为主, 侧中板 periwinkle, 后板 violet; 金/发光只做后板徽记+短条点缀; 前方炮门全开。
 TURRET_PLAN = {   # 半轮廓 (z 前向, 半宽 w), 从后中线 → 前炮门边; H=围板高(≈0.7 炮塔高); g=贴合间隙
     'FGM049': dict(pts=[(-0.600, 0.0), (-0.600, 0.30), (-0.565, 0.500), (0.080, 0.505), (0.180, 0.440), (0.300, 0.370), (0.385, 0.300)],
-                   H=0.165, g=0.008, th=0.016, ch=0.020, panels=[None, 'white', 'peri', 'white', 'violet'], band=0.24,
+                   H=0.165, g=0.008, th=0.016, ch=0.020, panels=[None, 'white', 'peri', 'white', 'peri'], band=0.24,
                    roof=dict(x=0.27, y0=-0.53, y1=-0.14, z=0.243, th=0.010, gap=0.036, ch=0.012)),
     'FGS053': dict(pts=[(-0.235, 0.0), (-0.235, 0.07), (-0.185, 0.170), (-0.130, 0.215), (0.020, 0.235), (0.100, 0.210), (0.170, 0.160), (0.215, 0.105)],
-                   H=0.125, g=0.006, th=0.012, ch=0.014, panels=[None, 'white', 'peri', 'white', 'violet'], band=0.24,
+                   H=0.125, g=0.006, th=0.012, ch=0.014, panels=[None, 'white', 'peri', 'white', 'peri'], band=0.24,
                    roof=dict(x=0.095, y0=-0.150, y1=0.012, z=0.172, th=0.007, gap=0.022, ch=0.007, accents=False), rear_glow=False),   # T3: FGS_11 炮管回转 50°/310° 扫到 FGS_10 顶板点缀 → 副炮顶板不加点缀
     'FGS036': dict(pts=[(-0.180, 0.0), (-0.180, 0.06), (-0.155, 0.120), (-0.100, 0.145), (0.100, 0.150), (0.145, 0.115), (0.165, 0.070)],
-                   H=0.150, g=0.005, th=0.009, ch=0.012, y0=0.045, panels=[None, 'white', 'peri', 'white', 'violet'], band=0.24,
+                   H=0.150, g=0.005, th=0.009, ch=0.012, y0=0.045, panels=[None, 'white', 'peri', 'white', 'peri'], band=0.24,
                    roof=None),   # 不加顶板: 后排副炮(FGS_4/6)静止时炮管离本炮塔顶仅 ~0.01, 顶板会被扫到(turret_check)   # y0: 前副炮朝后时炮管从后副炮围板下缘下方掠过
 }
 
@@ -568,7 +568,7 @@ def wing_fan(root, S, d0, up, n_pri=3, n_sec=1, n_cov=1, glow_k=0):
     P = []; el0, sw0 = d0; R = Vector(root)
     for k in range(n_pri):   # 主翼初级 L 1.45–2.50, W≈0.30, th 0.055·TK, curve 0.13
         L = (2.2 - 0.35 * k) * S; W = 0.30 * 0.9 * (S ** 0.5) * 1.0
-        b = plume(L, W, 0.055 * WING_TK * (W / 0.27), 'feather_wp', curve=0.13, glow=(k == glow_k))
+        b = plume(L, W, 0.055 * WING_TK * (W / 0.27), 'feather_wp', curve=0.13, glow=True)   # P5: 与主翼同, 全部初级发光羽轴
         P += aim(b, tuple(R + Vector((0, -0.04 * k * S, 0.02 * k * S))), dvec(el0 - 7 * k, sw0 + 8 * k), up) or b
     for k in range(n_sec):
         L = 1.2 * S; W = 0.27 * (S ** 0.5)

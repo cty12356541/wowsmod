@@ -26,8 +26,13 @@ def build(out_dir, size=1024):
         t = np.clip((vv - t0) / (t1 - t0), 0, 1)[..., None]
         t = t * t * (3 - 2 * t)
         return a * (1 - t) + b * t
-    for k, (a, b) in enumerate([(W, P), (P, V)]):
-        blk = np.broadcast_to(grad(a, b, 0.35, 0.95), (size, 1, 3)).repeat(cw, 1).copy()
+    # P5: 羽片更白更亮(少浅紫) + 翻转安全: 渐变改为关于 v=0.5 对称(中段纯白, 两端淡 periwinkle 染), 根/梢翻转外观一致
+    #   列0 初级: 白, 两端 ≤22% periwinkle; 列1 次级: 白→periwinkle ≤45%(不再到紫)
+    def sgrad(a, b, kmax):
+        t = np.clip((np.abs(vv - 0.5) * 2 - 0.35) / 0.65, 0, 1)[..., None]; t = t * t * (3 - 2 * t)
+        return a * (1 - kmax * t) + b * (kmax * t)
+    for k, blkf in enumerate([lambda: sgrad(W, P, 0.22), lambda: sgrad(W, P, 0.45)]):
+        blk = np.broadcast_to(blkf(), (size, 1, 3)).repeat(cw, 1).copy()
         # 羽轴(中线)浅一档 + 两侧细羽纹
         shaft = np.abs(u - 0.5) < 0.025
         blk[:, shaft[0]] = blk[:, shaft[0]] * 0.82 + W * 0.18
@@ -45,9 +50,10 @@ def build(out_dir, size=1024):
     rows = np.arange(size); vrow = 1 - rows / size
     tt = np.clip((vrow - 0.62) / 0.36, 0, 1)[:, None]; uu = np.clip((u - 0.08) / 0.84, 0, 1)
     sm = lambda x: x * x * (3 - 2 * x)
-    f = 0.80 + 0.20 * sm(np.clip(tt / 0.45, 0, 1))
-    f = f * np.where(tt > 0.93, 1.07, 1.0) * np.where(tt < 0.05, 0.84, 1.0) * np.where(np.abs(uu - 0.5) > 0.46, 0.86, 1.0)
-    f = f * np.where(np.abs(tt - 0.5) < 2.0 / (0.36 * size), 0.84, 1.0)
+    # P5: 面板明暗加大(港口距离要读出分件): 底部 AO 0.62→1, 上沿倒角高光 1.18, 下沿/侧缘压暗 0.62/0.70, 中缝 0.60(加宽)
+    f = 0.62 + 0.38 * sm(np.clip(tt / 0.45, 0, 1))
+    f = f * np.where(tt > 0.92, 1.18, 1.0) * np.where(tt < 0.06, 0.62, 1.0) * np.where(np.abs(uu - 0.5) > 0.45, 0.70, 1.0)
+    f = f * np.where(np.abs(tt - 0.5) < 4.0 / (0.36 * size), 0.60, 1.0)
     py = tt * 0.36 * size; px = uu * 0.84 * cw
     for tr in (0.13, 0.86):
         cy = tr * 0.36 * size
