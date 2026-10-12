@@ -31,7 +31,7 @@ def build(out_dir, size=1024):
     def sgrad(a, b, kmax):
         t = np.clip((np.abs(vv - 0.5) * 2 - 0.35) / 0.65, 0, 1)[..., None]; t = t * t * (3 - 2 * t)
         return a * (1 - kmax * t) + b * (kmax * t)
-    for k, blkf in enumerate([lambda: sgrad(W, P, 0.22), lambda: sgrad(W, P, 0.45)]):
+    for k, blkf in enumerate([lambda: sgrad(W, P, 0.12), lambda: sgrad(W, P, 0.28)]):  # P6: 羽更白(少 peri 染)
         blk = np.broadcast_to(blkf(), (size, 1, 3)).repeat(cw, 1).copy()
         # 羽轴(中线)浅一档 + 两侧细羽纹
         shaft = np.abs(u - 0.5) < 0.025
@@ -50,10 +50,10 @@ def build(out_dir, size=1024):
     rows = np.arange(size); vrow = 1 - rows / size
     tt = np.clip((vrow - 0.62) / 0.36, 0, 1)[:, None]; uu = np.clip((u - 0.08) / 0.84, 0, 1)
     sm = lambda x: x * x * (3 - 2 * x)
-    # P5: 面板明暗加大(港口距离要读出分件): 底部 AO 0.62→1, 上沿倒角高光 1.18, 下沿/侧缘压暗 0.62/0.70, 中缝 0.60(加宽)
-    f = 0.62 + 0.38 * sm(np.clip(tt / 0.45, 0, 1))
-    f = f * np.where(tt > 0.92, 1.18, 1.0) * np.where(tt < 0.06, 0.62, 1.0) * np.where(np.abs(uu - 0.5) > 0.45, 0.70, 1.0)
-    f = f * np.where(np.abs(tt - 0.5) < 4.0 / (0.36 * size), 0.60, 1.0)
+    # P6: 面板 AO/倒角再加深(远距离分件可读): 底 AO 0.48, 顶高光 1.28, 侧缘 0.58, 中缝 0.42(更宽)
+    f = 0.48 + 0.52 * sm(np.clip(tt / 0.42, 0, 1))
+    f = f * np.where(tt > 0.90, 1.28, 1.0) * np.where(tt < 0.08, 0.48, 1.0) * np.where(np.abs(uu - 0.5) > 0.42, 0.58, 1.0)
+    f = f * np.where(np.abs(tt - 0.5) < 6.0 / (0.36 * size), 0.42, 1.0)
     py = tt * 0.36 * size; px = uu * 0.84 * cw
     for tr in (0.13, 0.86):
         cy = tr * 0.36 * size
