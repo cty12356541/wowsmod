@@ -141,18 +141,24 @@ function Row({ label, tip, children }: { label: string; tip?: string; children: 
 }
 
 function SimHud() {
-  const sn = useStore((s) => s.snap); const sim = useStore((s) => s.sim); if (!sn || !sim) return null;
+  const sn = useStore((s) => s.snap); const sim = useStore((s) => s.sim);
+  const [open, setOpen] = useState(() => localStorage.getItem('wm.hud') !== '0');
+  if (!sn || !sim) return null;
   const hullLod = sn.lod['hull/MidFront'] ?? 0; const mainLod = sn.lod['HP_FGM_1'] ?? 0;
+  const toggle = () => { const v = !open; setOpen(v); localStorage.setItem('wm.hud', v ? '1' : '0'); };
+  // 单行紧凑 HUD, 贴视口左下角; 可收起成一个小标签。“部分近似”并入行尾的 ≈ 标记(悬停看说明), 不再单独占右下角
   return (
-    <>
-      <div className="hud num">
-        <span className="k">{t('speed')}</span><span>{sn.speedKn.toFixed(1)} {t('kn')}</span>
+    <div className={'hud num' + (open ? '' : ' min')}>
+      <button className="hud-t" onClick={toggle} aria-label={open ? t('hudHide') : t('hudShow')} aria-expanded={open}>
+        <span>{sn.speedKn.toFixed(1)} {t('kn')}</span>
+      </button>
+      {open && <>
         <span className="k">{t('heading')}</span><span>{sn.heading.toFixed(0)}°</span>
         <span className="k">{t('rudderAngle')}</span><span>{(sn.rudder * (sim.ship.maxRudderAngle_deg || 30)).toFixed(0)}°</span>
         <span className="k">LOD</span><span>{t('hudLod', { h: hullLod < 0 ? '–' : hullLod, m: mainLod < 0 ? '–' : mainLod })}</span>
-      </div>
-      <Tip label={t('approxNote')} side="top"><span className="approx-tag">{t('approxShort')}</span></Tip>
-    </>
+      </>}
+      <Tip label={<>{t('approxShort')}：{t('approxNote')}</>} side="top"><span className="approx-tag" tabIndex={0} aria-label={t('approxShort')}>≈</span></Tip>
+    </div>
   );
 }
 
