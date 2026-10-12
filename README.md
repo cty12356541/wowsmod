@@ -64,7 +64,10 @@ cargo build --release                          # → target\release\wowsmod.exe(
 cargo test --release                           # 单元测试; 集成测试需要样本, 见下
 ```
 
-不带 Oodle 后端构建: `cargo build --release --no-default-features`(Oodle 条目会报"未编译 Oodle 后端")。
+## 需要自行下载的组件 / Optional external components
+
+- **Oodle**(解压游戏包里约 1/3 的条目): 本仓库不含任何 Oodle 实现或 DLL。运行时从本机加载 `oo2core*.dll`: 设 `WOWSMOD_OODLE=<dll 路径或所在目录>`, 或放到 `wowsmod.exe` 同目录; 莱服客户端是静态链接, 游戏目录里通常找不到。`wowsmod doctor` 的 `oodle` 字段显示查找结果。详见 `docs/OODLE.md`。开发可用 `--features oozextract`(GPL 移植, 产物不能以 MIT 分发)。
+- **Blender**(可选, 模型导入导出): 便携版放在 `tools/` 下或在 PATH 中。
 
 ## 测试与验收(可重跑)
 

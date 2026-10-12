@@ -412,7 +412,7 @@ fn cmd_doctor(cli: &Cli) -> Result<i32> {
         "oodle_license": {
             "default_feature_oozextract": false,
             "oozextract_risk": "oozextract 是 GPL(powzix/ooz) 的 Rust 移植; 默认未编译。开发可用 --features oozextract; 发布请用本机 Oodle(见 LICENSE_REPORT.md / help troubleshoot)",
-            "runtime_hint": "优先从本机游戏/用户提供的 oo2core*.dll 加载(WOWSMOD_OODLE_DLL); 勿分发游戏内 DLL"
+            "runtime_hint": "优先从本机游戏/用户提供的 oo2core*.dll 加载(WOWSMOD_OODLE=<dll 或所在目录>); 勿分发游戏内 DLL"
         },
         "oodle": oodle_rt::status(),
         "candidates": cands,
@@ -483,7 +483,6 @@ fn cmd_doctor(cli: &Cli) -> Result<i32> {
     if compression::oodle_backend().is_none() {
         println!("提示: 未找到本机 Oodle 运行库(oo2core*.dll); 设 WOWSMOD_OODLE=<dll 或目录> 或放到 exe 同目录。见 {}", oodle_rt::README_HINT);
         println!("提示: 默认未含 oozextract(许可证风险, 见 LICENSE_REPORT.md)。开发构建: cargo build --release --features oozextract");
-        println!("      或设置 WOWSMOD_OODLE_DLL=指向本机 oo2core*.dll(若已实现运行时加载)");
     } else if compression::oodle_backend().map(|b| b.name().contains("oozextract")).unwrap_or(false) {
         println!("注意: 当前后端为 oozextract(GPL 移植)。发布产物请改用本机 Oodle / 关闭该 feature。详见 LICENSE_REPORT.md");
     }
