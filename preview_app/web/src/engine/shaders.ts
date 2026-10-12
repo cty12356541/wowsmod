@@ -280,6 +280,15 @@ export const FRAG = {
     gl_FragColor.rgb *= 1.0 + 0.35 * cau * exp( -dep*2.5 ) * step( 0.001, dep );
     vec3 tr = exp( -L * vec3( 0.42, 0.13, 0.10 ) );
     gl_FragColor.rgb = gl_FragColor.rgb * tr + uWTint * ( 1.0 - exp( -L*0.35 ) ) * 0.18;
+    // 水线接触(1 单位≈15 m): 水下随深度快速沉入水体色; 水线上 ~1.5 m 湿带压暗; 水线处细白浪线(亮度随环境光)
+    float wmH = vWPos.y - uWL;
+    float wmSink = ( 1.0 - exp( -dep * 14.0 ) ) * step( 0.001, dep );
+    gl_FragColor.rgb = mix( gl_FragColor.rgb, uWTint * 0.55, wmSink * 0.85 );
+    float wmWet = exp( -max( wmH, 0.0 ) * 18.0 ) * step( 0.0, wmH );
+    gl_FragColor.rgb *= 1.0 - 0.28 * wmWet;
+    float wmFoam = 1.0 - smoothstep( 0.015, 0.06, abs( wmH - 0.015 ) );
+    float wmAmb = uGameOn > 0.5 ? clamp( dot( uFogCol, vec3( 0.33 ) ) * 1.4, 0.08, 1.0 ) : 0.9;
+    gl_FragColor.rgb = mix( gl_FragColor.rgb, vec3( 0.86, 0.9, 0.92 ) * wmAmb, wmFoam * 0.55 );
   }
   if ( uWLLine > 0.5 && uChannel < 0.5 ) {
     float wd = abs( vWPos.y - uWL ) / max( fwidth( vWPos.y ), 1e-5 );
