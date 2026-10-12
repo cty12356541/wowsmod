@@ -634,18 +634,13 @@ def wing_fan(root, S, d0, up, n_pri=3, n_sec=1, n_cov=1, glow_k=0):
     return P
 
 def build_bow():
-    """艏饰 P6: 与主翼同一造型语言(肩甲小根 + wing_fan 羽末梢)。尺度小于主翼(S≈0.48)。"""
-    S = float(os.environ.get('ROBIN_BOW_S', '0.48'))
-    # 小肩甲根(贴艏楼侧墙) → 羽扇
-    root_R = Vector((0.14, 8.24, 0.66))
-    wall_R = Vector((0.06, 8.30, 0.55))
-    P = []
-    P.append(shoulder_plate(wall_R, root_R, height=0.28 * S / 0.40, th=0.022, col='white', taper=0.55))
-    P += wing_fan(tuple(root_R), S, (30, 70), (0, 0.5, 1.0), n_pri=3, n_sec=1, n_cov=1)
+    """艏饰: 与主翼同一造型语言 wing_fan(plume); P5.1 尺度 S=0.40, 无肩甲(保持悬浮语系)。"""
+    S = float(os.environ.get('ROBIN_BOW_S', '0.40'))
+    P = wing_fan((0.14, 8.24, 0.66), S, (30, 70), (0, 0.5, 1.0), n_pri=3, n_sec=1, n_cov=1)
     for p in P: p.select_set(False)
     r = join(P, 'bowp_R'); l = mirror_x(r, 'bowp_L')
     o = octagram(0.16, 0.02, 'gold'); xform(o, loc=(0, 8.78, 0.72), rot=(90, 0, 0))
-    g = torus(0.21, 0.014, 64, 8, 'glow'); xform(g, loc=(0, 8.77, 0.72), rot=(90, 0, 0))  # P6: 发光环略粗
+    g = torus(0.21, 0.012, 64, 8, 'glow'); xform(g, loc=(0, 8.77, 0.72), rot=(90, 0, 0))
     t = torus(0.19, 0.022, 64, 8, 'gold'); xform(t, loc=(0, 8.775, 0.72), rot=(90, 0, 0))
     return [join([r, l, o, g, t], 'bow_crest')]
 
