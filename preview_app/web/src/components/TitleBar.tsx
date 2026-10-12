@@ -6,6 +6,11 @@ import { IconBtn, Menu, Seg, Tip } from './ui';
 export function TitleBar() {
   const s = useStore();
   const p = s.project; const lang = s.lang;
+  // 项目名取自 mod.toml [mod].name; 目录名(跳过 proj/project/mod 这类泛称, 取上一级)不同时一并显示, 便于区分从同一模板复制的项目
+  const dirParts = (p?.project.dir || '').split(/[\\/]+/).filter(Boolean);
+  const generic = /^(proj|project|mod|src|work)$/i;
+  const dirTail = dirParts.length ? (generic.test(dirParts[dirParts.length - 1]) && dirParts.length > 1 ? dirParts.slice(-3, -1).join('/') : dirParts[dirParts.length - 1]) : '';
+  const showDir = !!dirTail && dirTail.toLowerCase() !== (p?.project.name || '').toLowerCase();
   const shipName = p ? p.ship.name[lang] || p.ship.name.en || p.ship.code : '';
   const head = s.steps.find((x) => x.id === s.head);
   const inst = p?.install; const job = s.job;
@@ -24,7 +29,8 @@ export function TitleBar() {
       {p && (
         <div className="crumb">
           <span className="sep">/</span>
-          <b>{p.project.name}</b>
+          <Tip label={<>{t('projDir')}：{p.project.dir}</>}><b>{p.project.name}</b></Tip>
+          {showDir && <span className="faint">({dirTail})</span>}
           <span className="sep">·</span>
           <span>{shipName}{(p.ship.level != null || p.ship.species) && <> <span className="faint">{[p.ship.level != null ? t('tierShort', { n: p.ship.level }) : null, p.ship.species ? t('species_' + p.ship.species) : null].filter(Boolean).join(' · ')}</span></>}</span>
         </div>
