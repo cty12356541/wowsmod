@@ -19,6 +19,13 @@ for p in c['props']:
     print(a+f" | grep -E '\"ok\"|\"error\"' | head -2 | tr '\\n' ' '; echo ' <- {p['name']}'")
 P
 source /tmp/a7cmds.sh
+# T4: 炮塔壳烘焙法线/AO(与图集同 UV; 无则跳过)
+if [ -f "$P/prop_n.png" ]; then
+  for s in rb_shell_FGM049 rb_shell_FGS053 rb_shell_FGS036; do
+    $W --json tex import "$P/prop_n.png" --like ${s}_n.dds --project $D | grep -q '"ok": true' && echo "n $s ok" || echo "n $s FAIL"
+    [ -f "$P/prop_ao.png" ] && $W --json tex import "$P/prop_ao.png" --like ${s}_ao.dds --project $D | grep -q '"ok": true' && echo "ao $s ok" || true
+  done
+fi
 # 原壳降噪(可选, PRUNE=1): 舷侧小件 + 主甲板小件(见 workflow.layers.shape.refine.clean)
 if [ "${PRUNE:-0}" = 1 ]; then
   $W --json model prune --project $D --renderset '^(Bow|MidFront|MidBack|Stern)$' --facing side --max-size 0.08 --geom-dir /workspace/m3/game/content/gameplay/france | grep -E '"ok"' | head -1
