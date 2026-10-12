@@ -15,7 +15,7 @@ pub enum Error {
     Bounds { what: &'static str, offset: usize, len: usize, total: usize },
     #[error("解压失败 / decompression failed ({what}): {msg}")]
     Decompress { what: String, msg: String },
-    #[error("本构建未包含 Oodle 解压后端 / Oodle backend not compiled in: 请在 compression::set_oodle_backend 注册实现(见 docs/OODLE.md)")]
+    #[error("本构建未包含 Oodle 解压后端 / Oodle backend not compiled in: 设 WOWSMOD_OODLE=<本机 oo2core*.dll 或其所在目录>(见 README「需要自行下载的组件 / Optional external components」与 docs/OODLE.md)")]
     NoOodleBackend,
     #[error("不支持 / unsupported: {0}")]
     Unsupported(String),

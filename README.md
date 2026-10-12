@@ -125,3 +125,7 @@ MIT，见 `LICENSE`；第三方声明见 `NOTICE` 与 `THIRD_PARTY_LICENSES.md`�
 
 ## English summary
 `wowsmod` is an **unofficial** modding toolkit for Lesta's *World of Warships* (Мир кораблей): a Rust CLI plus an embedded React preview UI. Quickstart: download the Windows zip from Releases, unzip, run `wowsmod doctor` (use `--game <dir>` or `WOWSMOD_GAME` if needed), and point AI tools at `AGENTS.md`. You must own the game. Oodle is loaded at runtime from an `oo2core*.dll` already on your machine (auto-searched in the game dir / next to the exe, or set `WOWSMOD_OODLE`); the current Lesta client links Oodle statically, so you may need to point `WOWSMOD_OODLE` at a copy from other software you legally own. No DLL is shipped. Or build with `cargo build --release`. Start at `AGENTS.md`. Not affiliated with or endorsed by Lesta Games or Wargaming. You must own the game; **no game assets, Oodle binaries or third-party models are included** — they are read/fetched from your own installation at runtime. MIT licensed.
+
+## 需要自行下载的组件 / Optional external components
+- **Oodle**(解压游戏包里约 1/3 的条目): 本仓库不含任何 Oodle 实现或 DLL。运行时从本机加载 `oo2core*.dll`: 设 `WOWSMOD_OODLE=<dll 路径或所在目录>`, 或放到 `wowsmod.exe` 同目录; 莱服客户端是静态链接, 游戏目录里通常找不到。`wowsmod doctor` 的 `oodle` 字段显示查找结果。详见 `docs/OODLE.md`。
+- **Blender**(可选, 改外形时需要): 见上文「(b) Blender」。
