@@ -51,11 +51,15 @@ export function Slider({ value, min, max, step, onChange, label }: { value: numb
 
 export interface MenuItem { label?: React.ReactNode; onSelect?: () => void; checked?: boolean; kbd?: string; disabled?: boolean; sep?: boolean; heading?: React.ReactNode; icon?: React.ReactNode }
 export function Menu({ trigger, items, align = 'start' }: { trigger: React.ReactElement; items: MenuItem[]; align?: 'start' | 'end' | 'center' }) {
+  // 鼠标选中菜单项后不把焦点还给触发按钮: 否则触发按钮的 Tooltip 因 focus 打开并一直停留(键盘操作仍还焦点)
+  const byPointer = React.useRef(false);
   return (
     <DM.Root modal={false}>
       <DM.Trigger asChild>{trigger}</DM.Trigger>
       <DM.Portal>
-        <DM.Content className="menu" align={align} sideOffset={4} collisionPadding={8}>
+        <DM.Content className="menu" align={align} sideOffset={4} collisionPadding={8}
+          onPointerDown={() => { byPointer.current = true; }} onKeyDown={() => { byPointer.current = false; }}
+          onCloseAutoFocus={(e) => { if (byPointer.current) { e.preventDefault(); (document.activeElement as HTMLElement | null)?.blur?.(); } byPointer.current = false; }}>
           {items.map((it, i) => it.sep ? <DM.Separator key={i} className="menu-sep" /> : it.heading ? <DM.Label key={i} className="menu-label">{it.heading}</DM.Label> : (
             <DM.Item key={i} className="menu-item" disabled={it.disabled} onSelect={() => it.onSelect && it.onSelect()}>
               {it.checked !== undefined && <span className="ck">{it.checked ? <Check size={14} strokeWidth={2} /> : null}</span>}
