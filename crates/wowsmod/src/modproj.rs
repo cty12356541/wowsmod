@@ -221,6 +221,55 @@ impl Project {
     }
 }
 
+/// 改 mod 名: 目录 PnFMods/<旧>/ → PnFMods/<新>/, 明文文件(.mfm/.visual/.model/.xml/.txt/.py)与 compile.info 里的
+/// `PnFMods/<旧>/` 引用一并替换, 最后写 mod.toml。compile.info 是 base64+zlib JSON(游戏按它做路径替换),
+/// 只改明文不改它 → 游戏加载旧路径失败、港口卡在载入。
+pub fn rename_mod(p: &mut Project, new: &str) -> Result<Value> {
+    let old = p.cfg.meta.name.clone();
+    if new.is_empty() || new.contains(['/', '\\', ' ']) {
+        bail!("新名字不能为空或含 / \\ 空格");
+    }
+    if old == new {
+        bail!("新旧名字相同: {new}");
+    }
+    let base = p.assets().join("PnFMods");
+    let (src, dst) = (base.join(&old), base.join(new));
+    if dst.exists() {
+        bail!("{} 已存在", dst.display());
+    }
+    let (from, to) = (format!("PnFMods/{old}/"), format!("PnFMods/{new}/"));
+    let (mut n_text, mut n_ci) = (0, 0);
+    if src.is_dir() {
+        let mut files = Vec::new();
+        walk(&src, &mut files)?;
+        for f in &files {
+            let name = f.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+            let ext = f.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+            if name == "compile.info" {
+                let ci = std::fs::read_to_string(f)?;
+                let js = mfm::decode_compile_info(&ci)?;
+                if js.contains(&from) {
+                    std::fs::write(f, mfm::encode_compile_info(&ci, &js.replace(&from, &to))?)?;
+                    n_ci += 1;
+                }
+            } else if matches!(ext.as_str(), "mfm" | "visual" | "model" | "xml" | "txt" | "py") {
+                let d = std::fs::read(f)?;
+                if let Ok(t) = String::from_utf8(d) {
+                    if t.contains(&from) {
+                        std::fs::write(f, t.replace(&from, &to))?;
+                        n_text += 1;
+                    }
+                }
+            }
+        }
+        std::fs::rename(&src, &dst)?;
+    }
+    p.cfg.meta.name = new.to_string();
+    p.save_cfg()?;
+    Ok(json!({"ok": true, "old_mod_name": old, "new_mod_name": new, "text_files_changed": n_text, "compile_info_changed": n_ci,
+        "dir_renamed": dst.is_dir(), "note": "已安装的旧名请先 wowsmod uninstall <旧名>; edits/ 历史里的旧路径不改"}))
+}
+
 /// 导入 extractSources 产物(占位文件 + 明文 .mfm/.visual/.model + compile.info)并改名为本项目 mod 名。
 /// 文本文件里的 `PnFMods/<旧名>/` 统一替换为 `PnFMods/<新名>/`, compile.info 解码-替换-重编码。
 pub fn import_sdk(p: &Project, src: &Path, sdk_dir: Option<&Path>) -> Result<Value> {

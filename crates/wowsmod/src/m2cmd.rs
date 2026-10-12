@@ -226,6 +226,12 @@ pub enum ModCmd {
         #[arg(long)]
         clear: bool,
     },
+    /// 改 mod 名(SDK 路线): 改 mod.toml name、assets/res_mods/PnFMods/<旧名> 目录、明文文件与 compile.info 里的 PnFMods/<旧名>/ 引用。已安装的请先 uninstall 旧名
+    Rename {
+        dir: PathBuf,
+        /// 新 mod 名(PnFMods 下的目录名)
+        new_name: String,
+    },
 }
 
 fn open_proj(p: &Option<PathBuf>) -> Result<Option<Project>> {
@@ -717,6 +723,12 @@ pub fn cmd_mod(cli: &Cli, c: &ModCmd) -> Result<i32> {
             let j = json!({"ok": true, "no_redistribute": p.cfg.license.no_redistribute, "reasons": p.cfg.license.reasons, "added": added,
                 "note": if p.cfg.license.no_redistribute { "pack 默认拒绝; 本地 install 不受影响" } else { "未标记受限" }});
             emit_or_print(cli, &j);
+            Ok(0)
+        }
+        ModCmd::Rename { dir, new_name } => {
+            let mut p = Project::open(dir)?;
+            let r = crate::modproj::rename_mod(&mut p, new_name)?;
+            emit_or_print(cli, &r);
             Ok(0)
         }
         ModCmd::Status { dir } => {
