@@ -54,7 +54,7 @@ P2 v6 / regions_p2v6(15 区)。**r40d**(contactAO0.45 / goldHue14 / periHue6 / w
 
 ## 5. 已知残差
 
-**r40d 预览补偿**(写入 `gamelook.json`, 着色器读取; `fit_extras.py` 网格搜 gold×peri, AO/水固定): `contactAO` 朝下/掠射/水线接触近似、`waterOpa` 水面不透明度倍率、`goldHue` 橙金→黄、`periHue` 青紫→品红。夜 `sat≈0.06`。
+**r40d 预览补偿**(写入 `gamelook.json`, 着色器读取; `fit_extras.py` 网格搜 gold×peri, AO/水固定): `contactAO` 朝下/掠射/水线接触近似、`waterOpa` 水面不透明度倍率、`goldHue` 橙金→黄、`periHue` 青紫→品红。夜 `sat≈0.06`(r41 起改为 0.30, 见下)。
 
 - **金色**仍 10–12(low/clean): 港口偏黄橄榄, 贴图 port 金偏橙; 全局曲线 + goldHue 不够 → 定稿以港口为准, 或贴图金往黄绿挪。
 - **深紫(royal)** clean 9.1: 港口更红更饱和; periHue 惠 peri 多于 royal。
@@ -69,3 +69,11 @@ P2 v6 / regions_p2v6(15 区)。**r40d**(contactAO0.45 / goldHue14 / periHue6 / w
 ## 附: 没有游戏客户端的盒子上预览带外带件的项目
 预览装配需要 GameParams 和原版 geometry。可以设 `WOWSMOD_GP=<船条目 JSON>` 和 `WOWSMOD_GEOM_DIR=<原版 .geometry 目录>`, 预览会把它们转给 `assemble --gp/--geom-dir`。
 船条目 JSON 可以从 GameParams_py3.data 解出来(zlib 反序 + pickle), 例如 `./work/e2e/calib/gp_bour.json`。
+
+## r41 夜景发光 + 水线接触(2026-10-12)
+
+- **夜景 sat 0.06 → 0.30**: 0.06 让 P5.1 道具(翅膀/光环/徽章)和紫色涂装几乎全灰, 与 §1 记的“饱和度约为白天的 0.2”(1.565×0.2≈0.31)也不一致。改回实测比例。
+- **自发光豁免去饱和**: 着色器按 `totalEmissiveRadiance / 像素辐亮度` 求发光占比 `wmEF`, 饱和度在 `sat` 与 `max(sat,1)` 之间按 smoothstep(0.05,0.6) 插值。发光线、发光道具在夜里保持原色, 非发光表面仍按港口分级。白天 sat>1 不受影响。
+- **夜 bloom**: bloomT 0.6→0.85、bloomS 0.6→0.5。试过 0.45/0.75: 夜里白色上层建筑整片泛光、轮廓糊掉, 弃用; 抬高阈值后只剩发光线和高光处有光晕(仅中/高画质; 低画质无 bloom, 夜景判断请用中或高画质)。
+- **水线接触(预览侧, 不进贴图)**: 水下部分随深度快速沉入水体色(tint×0.55, 最多 85%); 水线上约 1.5 m 湿带压暗 28%; 水线处细浅色浪线(亮度随 fogCol 环境亮度, 夜里自动变暗)。只影响 `env=water`。
+- 仍**未做夜景分区 ΔE**; 日景 15 区 ΔE 不受影响(改动只作用于夜或水下/水线带, 拟合区域都在水线以上)。
