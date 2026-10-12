@@ -50,29 +50,62 @@ def build(out_dir, size=1024):
     rows = np.arange(size); vrow = 1 - rows / size
     tt = np.clip((vrow - 0.62) / 0.36, 0, 1)[:, None]; uu = np.clip((u - 0.08) / 0.84, 0, 1)
     sm = lambda x: x * x * (3 - 2 * x)
-    # P6: 面板 AO/倒角再加深(远距离分件可读): 底 AO 0.48, 顶高光 1.28, 侧缘 0.58, 中缝 0.42(更宽)
-    f = 0.48 + 0.52 * sm(np.clip(tt / 0.42, 0, 1))
-    f = f * np.where(tt > 0.90, 1.28, 1.0) * np.where(tt < 0.08, 0.48, 1.0) * np.where(np.abs(uu - 0.5) > 0.42, 0.58, 1.0)
-    f = f * np.where(np.abs(tt - 0.5) < 6.0 / (0.36 * size), 0.42, 1.0)
+    # T4: 面板 AO/倒角再加深(远距分件可读) + 凸框明暗: 底 AO 0.36, 顶高光 1.34, 侧缘 0.48, 中缝 0.32 更宽; 边框抬亮
+    f = 0.36 + 0.64 * sm(np.clip(tt / 0.40, 0, 1))
+    f = f * np.where(tt > 0.90, 1.34, 1.0) * np.where(tt < 0.08, 0.40, 1.0) * np.where(np.abs(uu - 0.5) > 0.40, 0.48, 1.0)
+    f = f * np.where(np.abs(tt - 0.5) < 8.0 / (0.36 * size), 0.32, 1.0)
+    # 凸框带(距边 8–14%): 抬亮模拟几何凸框
+    edge_band = ((np.abs(uu - 0.5) > 0.36) & (np.abs(uu - 0.5) < 0.44)) | ((tt < 0.14) | (tt > 0.86)) & (tt > 0.04) & (tt < 0.96)
+    f = f * np.where(edge_band, 1.10, 1.0)
     py = tt * 0.36 * size; px = uu * 0.84 * cw
     for tr in (0.13, 0.86):
         cy = tr * 0.36 * size
         for k_ in range(10):
             cx = (0.05 + 0.1 * k_) * 0.84 * cw
-            d = np.sqrt((px - cx) ** 2 + (py - cy) ** 2); f = f * np.where(d < 2.6, 0.80, np.where(d < 3.6, 1.05, 1.0))
+            d = np.sqrt((px - cx) ** 2 + (py - cy) ** 2); f = f * np.where(d < 2.8, 0.72, np.where(d < 4.0, 1.12, 1.0))
     rng = np.random.default_rng(7); mot = rng.normal(0, 1, (size // 32 + 1, cw // 32 + 1))
     mot = np.kron(mot, np.ones((32, 32)))[:size, :cw]
     from PIL import ImageFilter
     mot = np.asarray(Image.fromarray(((mot * 40) + 128).clip(0, 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(10)), float) / 40 - 3.2
-    f = f * (1 + 0.025 * mot)
+    f = f * (1 + 0.030 * mot)
+    # 高度场 → 法线(切线空间, R=X G=Y B≈1; A=128 对齐引擎扁法线约定) + AO 图
+    height = np.zeros((size, size), float)
     top = vrow >= 0.61
+    for k in range(2, 6):
+        height[top, k * cw:(k + 1) * cw] = f[top]
+        height[::-1][top, k * cw:(k + 1) * cw] = f[top]
+    # sobel
+    hx = np.zeros_like(height); hy = np.zeros_like(height)
+    hx[:, 1:-1] = (height[:, 2:] - height[:, :-2]) * 0.5
+    hy[1:-1, :] = (height[2:, :] - height[:-2, :]) * 0.5
+    # 强度放大使远距凹凸可读; Y 取反(DirectX 风格, 与引擎扁法线抽样一致)
+    strength = 4.5
+    nx = -hx * strength; ny = hy * strength; nz = np.ones_like(height)
+    inv = 1.0 / np.sqrt(nx * nx + ny * ny + nz * nz)
+    nrm = np.stack([(nx * inv + 1) * 0.5, (ny * inv + 1) * 0.5, (nz * inv + 1) * 0.5, np.full_like(height, 0.5)], -1)
+    # 非面板区保持扁法线
+    flat = ~((vrow >= 0.61) | (vrow <= 0.39))[:, None] | False
+    # 列 0,1,6,7 与中带纯色区: 扁
+    nflat = np.array([0.5, 0.5, 1.0, 0.5])
+    for k in (0, 1, 6, 7):
+        nrm[:, k * cw:(k + 1) * cw] = nflat
+    mid = (vrow > 0.39) & (vrow < 0.61)
+    nrm[mid] = nflat
+    ao = np.clip(height, 0, 1)
+    ao_img = np.zeros((size, size, 3), float)
+    ao_img[:] = 255.0  # 默认无遮挡
+    for k in range(2, 6):
+        band = np.zeros((size, cw), float); band[top] = f[top]; band[::-1][top] = f[top]
+        ao_img[:, k * cw:(k + 1) * cw] = (band * 255)[..., None]
     for k, c in zip(range(2, 6), [W, P, V, N]):
         img[top, k * cw:(k + 1) * cw] = (c[None, None, :] * f[top][..., None]).clip(0, 255)
         img[::-1][top, k * cw:(k + 1) * cw] = img[top, k * cw:(k + 1) * cw]   # 下带 = 上带上下镜像
     mask[:, 7 * cw:] = 1.0
     Image.fromarray(np.clip(img, 0, 255).astype(np.uint8)).save(f'{out_dir}/prop_atlas.png')
     Image.fromarray((mask * 255).astype(np.uint8)).save(f'{out_dir}/prop_glow.png')
-    json.dump(dict(cols=COLS, cell=cw, size=size), open(f'{out_dir}/prop_atlas.json', 'w'))
+    Image.fromarray(np.clip(nrm * 255, 0, 255).astype(np.uint8)).save(f'{out_dir}/prop_n.png')
+    Image.fromarray(np.clip(ao_img, 0, 255).astype(np.uint8)).save(f'{out_dir}/prop_ao.png')
+    json.dump(dict(cols=COLS, cell=cw, size=size, has_n=True, has_ao=True), open(f'{out_dir}/prop_atlas.json', 'w'))
 
 if __name__ == '__main__':
     build(sys.argv[1] if len(sys.argv) > 1 else '.')

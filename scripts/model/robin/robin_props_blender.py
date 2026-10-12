@@ -477,14 +477,15 @@ def turret_shell(hw, hl, cz, y0, y1, flare, open_deg=38, fin_len=0.5, scallops=1
 # v2: 由 geometry.glb 实测的炮塔平面轮廓(半宽 w(z), 已排除炮管/玻璃)生成贴合装甲板:
 #     侧/后围板按段分件(分件缝)、顶沿内倒角; 白为主, 侧中板 periwinkle, 后板 violet; 金/发光只做后板徽记+短条点缀; 前方炮门全开。
 TURRET_PLAN = {   # 半轮廓 (z 前向, 半宽 w), 从后中线 → 前炮门边; H=围板高(≈0.7 炮塔高); g=贴合间隙
+    # T4: 倒角更大(ch↑)、板略厚(th↑ 仍向外)、缝更深; g 不变保贴合; 仍无前板/无整盒
     'FGM049': dict(pts=[(-0.600, 0.0), (-0.600, 0.30), (-0.565, 0.500), (0.080, 0.505), (0.180, 0.440), (0.300, 0.370), (0.385, 0.300)],
-                   H=0.165, g=0.008, th=0.016, ch=0.020, panels=[None, 'white', 'peri', 'white', 'peri'], band=0.24,
-                   roof=dict(x=0.27, y0=-0.53, y1=-0.14, z=0.243, th=0.010, gap=0.036, ch=0.012)),
+                   H=0.165, g=0.008, th=0.018, ch=0.028, panels=[None, 'white', 'peri', 'white', 'peri'], band=0.24,
+                   roof=dict(x=0.27, y0=-0.53, y1=-0.14, z=0.243, th=0.011, gap=0.036, ch=0.018)),
     'FGS053': dict(pts=[(-0.235, 0.0), (-0.235, 0.07), (-0.185, 0.170), (-0.130, 0.215), (0.020, 0.235), (0.100, 0.210), (0.170, 0.160), (0.215, 0.105)],
-                   H=0.125, g=0.006, th=0.012, ch=0.014, panels=[None, 'white', 'peri', 'white', 'peri'], band=0.24,
-                   roof=dict(x=0.095, y0=-0.150, y1=0.012, z=0.172, th=0.007, gap=0.022, ch=0.007, accents=False), rear_glow=False),   # T3: FGS_11 炮管回转 50°/310° 扫到 FGS_10 顶板点缀 → 副炮顶板不加点缀
+                   H=0.125, g=0.006, th=0.014, ch=0.020, panels=[None, 'white', 'peri', 'white', 'peri'], band=0.24,
+                   roof=dict(x=0.095, y0=-0.150, y1=0.012, z=0.172, th=0.008, gap=0.022, ch=0.012, accents=False), rear_glow=False),   # T3: FGS_11 炮管回转 50°/310° 扫到 FGS_10 顶板点缀 → 副炮顶板不加点缀
     'FGS036': dict(pts=[(-0.180, 0.0), (-0.180, 0.06), (-0.155, 0.120), (-0.100, 0.145), (0.100, 0.150), (0.145, 0.115), (0.165, 0.070)],
-                   H=0.150, g=0.005, th=0.009, ch=0.012, y0=0.045, panels=[None, 'white', 'peri', 'white', 'peri'], band=0.24,
+                   H=0.150, g=0.005, th=0.011, ch=0.018, y0=0.045, panels=[None, 'white', 'peri', 'white', 'peri'], band=0.24,
                    roof=None),   # 不加顶板: 后排副炮(FGS_4/6)静止时炮管离本炮塔顶仅 ~0.01, 顶板会被扫到(turret_check)   # y0: 前副炮朝后时炮管从后副炮围板下缘下方掠过
 }
 
@@ -500,9 +501,10 @@ def _resample(poly, n):
     return out, L[-1]
 
 SEAL = float(os.environ.get("RB_SEAL", "0.006"))   # T3: 内缘插入炮塔本体的深度(封住上下沿间隙 → 港口 SSAO 不再压出黑缝)
-def armor_panel(seg_pts, g, th, H, ch, col, y0=0.012):
-    """一段局部装甲板: seg_pts 平面折线(Blender X, Y), 法向外; 外面=轮廓+g+th; 上下沿内缘插入本体 SEAL(封缝);
-    上沿外侧倒角 ch、下沿外侧小倒角; UV u=沿弧长, v=高(→ 图集 pnl_ 面板细节区)。"""
+def armor_panel(seg_pts, g, th, H, ch, col, y0=0.012, rivets=True):
+    """一段局部装甲板(T4): seg_pts 平面折线(Blender X, Y), 法向外; 外面=轮廓+g+th; 上下沿内缘插入本体 SEAL(封缝);
+    更大上/下倒角; 外表面凸框(边框抬高)制造分件立体; 可选几何铆钉; UV u=沿弧长, v=高(→ 图集 pnl_)。
+    返回 [主面板, …铆钉] 列表(调用方一并 join)。"""
     bm = bmesh.new(); uvl = bm.loops.layers.uv.new('UVMap')
     n = len(seg_pts)
     nors = []
@@ -511,16 +513,32 @@ def armor_panel(seg_pts, g, th, H, ch, col, y0=0.012):
         t = (b - a).normalized(); nrm = Vector((t.y, -t.x)); nors.append(nrm)   # 右手: 沿逆时针走时外法向
     L = [0.0]
     for i in range(1, n): L.append(L[-1] + (seg_pts[i] - seg_pts[i - 1]).length)
-    cb = min(ch * 0.5, (H - y0) * 0.15)
+    # T4: 倒角更大(下 0.65ch / 上 ch 全用), 外表面加一层凸框(step)
+    cb = min(ch * 0.65, (H - y0) * 0.18)
+    step = max(th * 0.28, 0.0035)   # 凸框外抬量(远距可读, 不胀到邻炮)
     rows = []; uvs = []
     for i, p in enumerate(seg_pts):
         nn = nors[i]
-        pin = p - nn * SEAL; pout = p + nn * (g + th); pmid = p + nn * (g + th - cb)
-        rows.append([bm.verts.new((pin.x, pin.y, y0)), bm.verts.new((pmid.x, pmid.y, y0)), bm.verts.new((pout.x, pout.y, y0 + cb)),
-                     bm.verts.new((pout.x, pout.y, H - ch)), bm.verts.new((pout.x - nn.x * ch * 0.6, pout.y - nn.y * ch * 0.6, H)),
-                     bm.verts.new((pin.x, pin.y, H))])
+        pin = p - nn * SEAL
+        pout = p + nn * (g + th)
+        pmid = p + nn * (g + th - cb)
+        # 凸框外缘(外抬 step); 中段内凹区仍在 pout
+        pframe = p + nn * (g + th + step)
+        # 截面 8 点: 内底 / 下外起点 / 下倒角外 / 凸框下沿 / 凸框上沿 / 上倒角起点 / 上倒角顶 / 内顶
+        z_lo = y0 + cb; z_hi = H - ch
+        z_f0 = z_lo + 0.10 * (z_hi - z_lo); z_f1 = z_hi - 0.10 * (z_hi - z_lo)
+        rows.append([
+            bm.verts.new((pin.x, pin.y, y0)),
+            bm.verts.new((pmid.x, pmid.y, y0)),
+            bm.verts.new((pout.x, pout.y, z_lo)),
+            bm.verts.new((pframe.x, pframe.y, z_f0)),
+            bm.verts.new((pframe.x, pframe.y, z_f1)),
+            bm.verts.new((pout.x, pout.y, z_hi)),
+            bm.verts.new((pout.x - nn.x * ch * 0.75, pout.y - nn.y * ch * 0.75, H)),
+            bm.verts.new((pin.x, pin.y, H)),
+        ])
         uvs.append(L[i] / max(L[-1], 1e-6))
-    hv = [0.0, 0.0, cb, H - y0 - ch, H - y0, H - y0]
+    hv = [0.0, 0.0, cb, z_f0 - y0, z_f1 - y0, H - y0 - ch, H - y0, H - y0]
     vv = [min(max(h / max(H - y0, 1e-6), 0), 1) for h in hv]
     m = len(rows[0])
     for i in range(n - 1):
@@ -534,10 +552,29 @@ def armor_panel(seg_pts, g, th, H, ch, col, y0=0.012):
         f = bm.faces.new(r)
         for lp in f.loops: lp[uvl].uv = (0.5, 0.5)
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
-    return new_obj('armor', bm, ['pnl_' + col])
+    out = [new_obj('armor', bm, ['pnl_' + col])]
+    # T4 几何铆钉: 上/下凸框各一排, 沿弧长等距; 半径随板厚, 略外露
+    if rivets and L[-1] > 1e-4:
+        rr = max(0.0022, min(0.0045, th * 0.28))
+        n_riv = max(3, min(9, int(L[-1] / 0.055) + 1))
+        for tr in (0.14, 0.86):
+            zz = y0 + tr * (H - y0)
+            for k in range(n_riv):
+                t = (0.12 + 0.76 * k / max(n_riv - 1, 1))
+                # 沿折线插值位置
+                target = t * L[-1]; j = 1
+                while j < len(L) and L[j] < target: j += 1
+                f = 0 if L[j] == L[j - 1] else (target - L[j - 1]) / (L[j] - L[j - 1])
+                p = seg_pts[j - 1].lerp(seg_pts[j], f)
+                nn = nors[min(j, n - 1)].lerp(nors[max(j - 1, 0)], 1 - f).normalized()
+                c = p + nn * (g + th + step + rr * 0.55)
+                o = sphere(rr, col=col, seg=8)
+                xform(o, loc=(c.x, c.y, zz)); out.append(o)
+    return out
 
-def turret_armor(pts, H, g, th, ch, panels, seam=0.014, seg_per=6, y0=0.012):
-    """整圈围板: 右半轮廓镜像成 左炮门边→后→右炮门边, 按 panels(从后中向前, 左右对称)分件, 件间留缝。"""
+def turret_armor(pts, H, g, th, ch, panels, seam=0.022, seg_per=6, y0=0.012):
+    """整圈围板: 右半轮廓镜像成 左炮门边→后→右炮门边, 按 panels(从后中向前, 左右对称)分件, 件间留缝。
+    T4: 默认缝 0.022(更深分件可读)。"""
     right = [Vector((w, z)) for z, w in pts]                       # 后中 → 右前
     left = [Vector((-v.x, v.y)) for v in reversed(right)]          # 左前 → 后中
     loop = left[:-1] + right                                       # 左前 → 后 → 右前(逆时针: 外法向向外)
@@ -554,7 +591,7 @@ def turret_armor(pts, H, g, th, ch, panels, seam=0.014, seg_per=6, y0=0.012):
         pc = seq[k]
         if pc is None: continue   # T3: 前侧不做板(保留原炮塔前脸细节)
         col, hk = (pc if isinstance(pc, tuple) else (pc, 1.0))
-        parts.append(armor_panel(seg, g, th, H * hk, ch, col, y0=y0))
+        parts.extend(armor_panel(seg, g, th, H * hk, ch, col, y0=y0))
     return parts, pts_all
 
 def roof_plate(x, y0, y1, z, th, gap, ch, col='white', accents=True):
@@ -600,8 +637,8 @@ def build_shells():
             wz = max(w for z, w in pts) + g + th * 0.6
             L = 0.18 * (pts[-1][0] - pts[0][0])
             gt = tube([(sx * wz, zc - L / 2, H - ch * 0.5), (sx * wz, zc + L / 2, H - ch * 0.5)], [0.003 + 0.002 * s_] * 2, 'gold', seg=5); ps.append(gt)
-            # P6: 侧板上沿内侧加发光短缝(白天炮塔分缝可读)
-            gls = tube([(sx * (wz + 0.004), zc - L / 2, H - ch * 0.35), (sx * (wz + 0.004), zc + L / 2, H - ch * 0.35)], [0.0045 + 0.003 * s_] * 2, 'glow', seg=5); ps.append(gls)
+            # T4: 侧板上沿发光短缝(克制但远距可读; 略细于 P6)
+            gls = tube([(sx * (wz + 0.004), zc - L / 2, H - ch * 0.35), (sx * (wz + 0.004), zc + L / 2, H - ch * 0.35)], [0.0035 + 0.0025 * s_] * 2, 'glow', seg=5); ps.append(gls)
         out.append(join(ps, 'shell_' + k))
     return out
 
