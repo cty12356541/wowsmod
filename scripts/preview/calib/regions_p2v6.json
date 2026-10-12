@@ -1,0 +1,436 @@
+{
+ "_doc": "P2 v6 (painter r21 d541f39, mode half) 港口实拍 ↔ 工作台同设计对照。port 区域=像素框(原图坐标)+可选色相过滤; 工作台区域=albedo 通道按贴图色类分割 ∩ 朝向(side/top)。",
+ "project": "./work/e2e/calib/proj_p2v6",
+ "palette": {
+  "white": "#F4F0E8",
+  "peri": "#8F8BC8",
+  "peri_d": "#6A5BA8",
+  "navy": "#172565",
+  "deck": "#2A1C55",
+  "dhwhite": "#E8E4EE",
+  "turret": "#F5F2F8",
+  "violet": "#7546C2",
+  "glow": "#A5B5EA",
+  "gold": "#D8B868",
+  "roof": "#CFCBEA",
+  "royal": "#573C9F"
+ },
+ "colmode": {
+  "white": "half",
+  "dhwhite": "raw",
+  "turret": "raw",
+  "roof": "raw",
+  "navy": "raw",
+  "deck": "raw",
+  "peri": "half",
+  "peri_d": "half",
+  "royal": "half",
+  "violet": "half",
+  "glow": "half",
+  "gold": "port"
+ },
+ "shots": [
+  {
+   "name": "low",
+   "port": "./work/e2e/robin/p2/port_v6/port6_low.png",
+   "crop": [
+    1300,
+    820,
+    2400,
+    1250
+   ],
+   "query": "view=custom&az=62&el=3&fov=50&tgt=-0.3,0.8,-5&dist=6.5",
+   "el": 3,
+   "facing": "side",
+   "regions": {
+    "navy": {
+     "boxes": [
+      [
+       1977,
+       1056,
+       2052,
+       1088
+      ]
+     ],
+     "wb_boxes": [
+      [
+       0,
+       380,
+       1280,
+       520
+      ]
+     ]
+    },
+    "royal": {
+     "boxes": [
+      [
+       1364,
+       1073,
+       1472,
+       1091
+      ]
+     ],
+     "flt": {
+      "hue": [
+       250,
+       300
+      ],
+      "smin": 0.35
+     },
+     "wb_boxes": [
+      [
+       0,
+       380,
+       1280,
+       520
+      ]
+     ]
+    },
+    "white": {
+     "boxes": [
+      [
+       1935,
+       884,
+       2030,
+       912
+      ]
+     ],
+     "flt": {
+      "smax": 0.25
+     },
+     "wb_class": [
+      "white",
+      "dhwhite",
+      "turret"
+     ],
+     "wb_boxes": [
+      [
+       300,
+       380,
+       1100,
+       520
+      ]
+     ],
+     "w": 0.3,
+     "_note": "艏外飘上沿: 港口呈海青灰, 疑为 _mg 金属/外飘朝向造成的反射, 全局光照无法同时解释 → 拟合降权 0.3, 验收仍计入"
+    },
+    "gold": {
+     "boxes": [
+      [
+       1837,
+       890,
+       1987,
+       922
+      ]
+     ],
+     "flt": {
+      "hue": [
+       40,
+       80
+      ],
+      "smin": 0.25
+     },
+     "erode": 0,
+     "wb_boxes": [
+      [
+       0,
+       380,
+       1280,
+       520
+      ]
+     ],
+     "w": 0.3
+    },
+    "peri": {
+     "boxes": [
+      [
+       1858,
+       970,
+       1987,
+       1008
+      ]
+     ],
+     "flt": {
+      "hue": [
+       230,
+       280
+      ]
+     },
+     "wb_boxes": [
+      [
+       0,
+       380,
+       1280,
+       520
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "clean",
+   "port": "./work/e2e/robin/p2/port_v6/port6_clean.png",
+   "crop": [
+    1300,
+    550,
+    2600,
+    1000
+   ],
+   "query": "view=custom&az=70&el=5&fov=40&tgt=0,0.8,-4.5&dist=10",
+   "el": 5,
+   "facing": "side",
+   "regions": {
+    "navy": {
+     "boxes": [
+      [
+       1681,
+       918,
+       1833,
+       956
+      ]
+     ],
+     "wb_boxes": [
+      [
+       0,
+       330,
+       1280,
+       560
+      ]
+     ]
+    },
+    "royal": {
+     "boxes": [
+      [
+       1351,
+       877,
+       1478,
+       899
+      ]
+     ],
+     "flt": {
+      "hue": [
+       250,
+       300
+      ],
+      "smin": 0.35
+     },
+     "wb_boxes": [
+      [
+       0,
+       330,
+       1280,
+       560
+      ]
+     ]
+    },
+    "white": {
+     "boxes": [
+      [
+       1871,
+       763,
+       2011,
+       776
+      ]
+     ],
+     "flt": {
+      "smax": 0.3
+     },
+     "wb_class": [
+      "white",
+      "dhwhite",
+      "turret"
+     ],
+     "wb_boxes": [
+      [
+       0,
+       330,
+       1280,
+       560
+      ]
+     ]
+    },
+    "gold": {
+     "boxes": [
+      [
+       1871,
+       776,
+       2061,
+       794
+      ]
+     ],
+     "flt": {
+      "hue": [
+       40,
+       80
+      ],
+      "smin": 0.25
+     },
+     "erode": 0,
+     "wb_boxes": [
+      [
+       0,
+       330,
+       1280,
+       560
+      ]
+     ]
+    },
+    "peri": {
+     "boxes": [
+      [
+       1871,
+       804,
+       2011,
+       848
+      ]
+     ],
+     "flt": {
+      "hue": [
+       230,
+       280
+      ]
+     },
+     "wb_boxes": [
+      [
+       0,
+       330,
+       1280,
+       560
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "high",
+   "port": "./work/e2e/robin/p2/port_v6/port6_high.png",
+   "crop": [
+    1300,
+    300,
+    2560,
+    1250
+   ],
+   "query": "view=custom&az=60&el=70&fov=40&tgt=0,0.8,-3.8&dist=7",
+   "el": 70,
+   "facing": "top",
+   "regions": {
+    "deck": {
+     "boxes": [
+      [
+       2149,
+       1038,
+       2272,
+       1087
+      ]
+     ],
+     "flt": {
+      "hue": [
+       240,
+       290
+      ],
+      "smin": 0.25
+     }
+    },
+    "turret": {
+     "boxes": [
+      [
+       1937,
+       876,
+       2011,
+       937
+      ]
+     ],
+     "flt": {
+      "smax": 0.2
+     },
+     "wb_class": [
+      "turret",
+      "dhwhite",
+      "white"
+     ],
+     "wb_boxes": [
+      [
+       350,
+       0,
+       1280,
+       720
+      ]
+     ]
+    },
+    "gold": {
+     "boxes": [
+      [
+       1669,
+       964,
+       1891,
+       1038
+      ]
+     ],
+     "flt": {
+      "hue": [
+       40,
+       80
+      ],
+      "smin": 0.25
+     },
+     "erode": 0
+    },
+    "dhwhite": {
+     "boxes": [
+      [
+       1509,
+       706,
+       1608,
+       792
+      ]
+     ],
+     "flt": {
+      "smax": 0.2
+     },
+     "wb_class": [
+      "turret",
+      "dhwhite",
+      "white"
+     ],
+     "wb_boxes": [
+      [
+       0,
+       0,
+       330,
+       260
+      ]
+     ]
+    },
+    "peri": {
+     "boxes": [
+      [
+       1694,
+       645,
+       1743,
+       670
+      ]
+     ],
+     "flt": {
+      "hue": [
+       240,
+       290
+      ]
+     }
+    }
+   }
+  }
+ ],
+ "port_albedo": {
+  "slope": [
+   0.7091,
+   1.1475,
+   1.1523
+  ],
+  "toe": [
+   0.0249,
+   0.0294,
+   0.0137
+  ],
+  "_doc": "画师 to_tex 用的港口反照率线性模型(r20 3 点拟合)"
+ }
+}

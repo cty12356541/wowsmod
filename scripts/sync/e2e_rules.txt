@@ -1,0 +1,22 @@
+# ./work/e2e → <WORK_DIR>\e2e : 报告/分析/设计书/对比图/脚本; 大文件和可再生成的中间件不镜像
++ *.md
++ *.json
++ *.txt
++ *.tsv
++ *.py
++ *.ps1
++ *.sh
++ *.toml
++ *.patch
++ *.log
++ *.png
++ *.jpg
++ *.jpeg
++ *.webp
+- sync/*
+- */.wowsmod/*
+- refs/firefly_mod/x/*
+- refs/mods/*
+- refs/frames/*/deep/*
+- robin/extracted/*
+max_mb 5

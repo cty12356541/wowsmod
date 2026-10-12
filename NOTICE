@@ -1,0 +1,15 @@
+wowsmod
+Copyright (c) 2026 Elizabeth Rivera16. Licensed under the MIT License (see LICENSE).
+
+Unofficial project. Not affiliated with Lesta Games or Wargaming. "World of
+Warships" / "Мир кораблей" and related marks belong to their owners. No game
+assets are distributed.
+
+Third-party components (full list: THIRD_PARTY_LICENSES.md):
+- Rust crates: MIT / Apache-2.0 / BSD-2/3 / Zlib / 0BSD / Unlicense / ISC;
+  option-ext (MPL-2.0, unmodified); unicode-ident (Unicode-3.0 data).
+- Embedded preview frontend (preview_web/, built from preview_app/web):
+  three.js, React and others under MIT/ISC/Apache-2.0/BSD/0BSD;
+  caniuse-lite (CC-BY-4.0, build-time only).
+- Oodle: NOT included. The optional `oozextract` feature (a Rust port of the
+  GPL-3.0 powzix/ooz) is excluded from release builds and from this repository.

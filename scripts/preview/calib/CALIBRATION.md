@@ -1,0 +1,71 @@
+# 游戏对齐(港口)校准 —— 工作台「游戏内」预览
+
+目标: 工作台的 `look=game`(`wowsmod render --look game-day|game-night`)尽量接近莱服 26.x 港口实拍。定稿在 game-day 里做, 港口只用来确认。
+展台模式(`--look studio`, 浅色清透影棚)保留, 仍是默认的展示风格。UI 里用工具栏「游戏内 | 展台」切换, 默认是游戏内。
+
+## 1. 差异来源(按影响从大到小)
+
+| 来源 | 港口实拍 | 旧工作台(展台) | 结论 |
+|---|---|---|---|
+| 色调曲线/曝光 | 强压缩: 暗色被提亮 4–9×(甲板 #2A1C55 线性 0.023 → 屏上 0.18), 白色接近顶到 255 | Khronos Neutral, 接近线性 | **主因**。改成逐通道 `min(tmS·x^p/(x^p+1),1)`, p≈0.74, tmS≈1.66 |
+| 背光面的环境光 | 菲律宾港口太阳在左舷略偏前, 右舷全在阴影里, 只受天光和海面光; 白色呈海青灰 (129,153,162) | 影棚柔光箱把右舷也打亮成奶白 | 改成 IBL(蓝天/青海)+ 半球光, 不再用柔光箱 |
+| 金色 | 受光面黄 (255,240,156), 背光面橄榄 (117,116,55) | 橙 (248,194,149) | 曲线肩部让 R 先到顶, 金色会偏黄; 剩下的残差见 §4 |
+| 太阳方向/强度 | 左舷前上方 sunDir (-0.62,0.74,-0.25) | 影棚顶光 | 已对齐(阴影朝向和港口顶视图一致) |
+| _mg 解释 | — | 文档写的是 R=光泽、G=金属 | 两种读法都拟合过, 差别 ≤0.2 ΔE, 判断不了; 预设用的是 mgSwap=1(稍好) |
+| 雾/空气透视 | 远处有轻微雾感 | 无 | fogDen 0.0015, 影响很小 |
+| 发光/泛光 | 白天几乎看不到 | — | 白天 emisK 2、bloomT 0.95; 夜晚另算 |
+| 水线 | 游戏水面约在 y≈0.02 | WL=0 | **不是差异来源**(之前怀疑过, 实测排除) |
+| 夜景(黑桃城) | 接近黑白调色: 饱和度约为白天的 0.2, 亮度不低于白天 | — | 只做了粗调(见 §3) |
+
+## 2. 模型与参数(只作用于船体着色器, 背景/水面另行设色)
+
+```
+x  = max(辐亮度 · gain − toe, 0)
+y  = min(tmS · x^tmP / (x^tmP + 1), 1)       // 逐通道
+y  = mix(luma(y), y, sat)                     // 饱和度
+y  = mix(y, fogCol, 1 − exp(−距离 · fogDen))
+```
+合成阶段不再套 Neutral, 输出就是显示线性值, 再做 sRGB 编码。
+参数放在前端 `src/engine/gamelook.json`(副本见本目录 `game_look.json`)。day 由拟合得到:
+sun #fff0e4 ×1.395, envI 0.95(IBL 主导), hemi 0.10, toe (0.0025,0.0059,0), tmP 0.738, tmS 1.661, sat 1.565, mgSwap 1。
+
+## 3. 拟合方法(可复用)
+
+`fit_game_look.py --spec regions_p2v6.json --work <dir> basis|fit|apply|eval`
+1. **basis**: 每个机位出 albedo、normal 两个通道, 再出 4 张原始辐亮度基图(太阳/天空半球/地面半球/环境, 通过 `gl={"raw":k,...}` 关掉色调映射)。光照对辐亮度是线性的, 所以离线组合这几张图就能代替反复出图。
+2. **fit**: 区域取法——港口那边用像素框加色相过滤; 工作台那边用 albedo 色类 ∩ 朝向(侧面/顶面)∩ 受光/背光。目标函数是 ΔE2000 均值。优化用自写的 Nelder–Mead, 只依赖 numpy 和 Pillow。
+3. **apply**: 把结果写回 gamelook.json, 然后重新构建前端、嵌入并编 release。
+4. **eval**: 真实出图, 用同一套掩码量 ΔE2000, 出 `triptych.py` 三联图(旧工作台 / game-day / 港口)。
+新增实拍时: 在 regions json 里加一个 shot(港口框 + 工作台机位 `fov`/`tgt`/`az`/`el`), 然后重跑 basis→fit→apply→eval。
+数据: P2 v6 设计(画师 r21 d541f39, mode half)的港口截图 port6_low/clean/high, 3 个机位共 15 个区域。
+
+## 4. 验收(ΔE2000, 区域均值; 同设计、同港口、机位近似)
+
+P2 v6 / regions_p2v6(15 区)。**r40d**(contactAO0.45 / goldHue14 / periHue6 / waterOpa1.45):
+
+| 区域 | 旧工作台 studio | 校准后 game-day |
+|---|---|---|
+| low 海军蓝/皇家紫/白带/金/淡紫 | 4.8 / 3.6 / 29.6 / 33.4 / 14.3 | 6.2 / 6.7 / 8.3 / 12.2 / 4.7 |
+| clean 同上 | 5.7 / 5.3 / 27.4 / 31.8 / 19.6 | 7.1 / 9.1 / 5.6 / 10.7 / 3.2 |
+| high 甲板/主炮白顶/金线/上层白/淡紫 | 14.6 / 0.5 / 17.4 / 13.6 / 13.0 | 3.3 / 7.1 / 6.3 / 6.4 / 6.3 |
+| **均值(15 区)** | **15.64** | **6.87** |
+
+三联与数字: `./work/e2e/calib/wysiwyg_r40/`(`triptych_{low,clean,high}.jpg`, `p51_triptych_{a1,b1,m1}.jpg`, `deltaE_table.png`, `summary.json`)。P5.1 同角对照港口 `port_P5`。
+
+## 5. 已知残差
+
+**r40d 预览补偿**(写入 `gamelook.json`, 着色器读取; `fit_extras.py` 网格搜 gold×peri, AO/水固定): `contactAO` 朝下/掠射/水线接触近似、`waterOpa` 水面不透明度倍率、`goldHue` 橙金→黄、`periHue` 青紫→品红。夜 `sat≈0.06`。
+
+- **金色**仍 10–12(low/clean): 港口偏黄橄榄, 贴图 port 金偏橙; 全局曲线 + goldHue 不够 → 定稿以港口为准, 或贴图金往黄绿挪。
+- **深紫(royal)** clean 9.1: 港口更红更饱和; periHue 惠 peri 多于 royal。
+- **受光白顶** ~7: 港口近顶白, 工作台略灰。
+- **外带件**: contactAO 近似檐下/朝下压暗(对照 P5 m1 炮塔近景); **真·屏幕空间 AO 仍无**, 港口有 SSAO。
+- **水体**: waterOpa1.45 抬近场不透明(仍见水下轮廓); 港口更浑。
+- **peri/青紫**: 预览 periHue=6 后 peri 区 14→4.7 / 20→3.2; 若 port-albedo 与预览仍不一致, 贴图流程反推: 港口 peri 更品/少青, 画师 `_a` peri 可略偏品红或降青通道。
+- **夜景**: 按黑桃城 `port_night_*` / P5 n0 粗调 sat≈0.06+亮度; **无同设计夜景掩码, 未做分区 ΔE**(机位/船不同, 只作家观感对照 `p51_night_cmp.jpg`)。
+- 港口光照随进入变化; 本次正午晴天。换港口/时段需重跑 basis→fit→`fit_extras`→eval。
+
+
+## 附: 没有游戏客户端的盒子上预览带外带件的项目
+预览装配需要 GameParams 和原版 geometry。可以设 `WOWSMOD_GP=<船条目 JSON>` 和 `WOWSMOD_GEOM_DIR=<原版 .geometry 目录>`, 预览会把它们转给 `assemble --gp/--geom-dir`。
+船条目 JSON 可以从 GameParams_py3.data 解出来(zlib 反序 + pickle), 例如 `./work/e2e/calib/gp_bour.json`。

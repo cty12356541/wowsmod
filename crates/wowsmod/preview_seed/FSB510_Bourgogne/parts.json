@@ -1,0 +1,3439 @@
+{
+ "parts": [
+  {
+   "id": "hull/Bow",
+   "group": "hull",
+   "section": "Bow",
+   "label": "Bow",
+   "source": "FSB025_Bourgogne_1945_Bow.geometry",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 8.0,
+     "verts": 33584,
+     "tris": 28772
+    },
+    {
+     "lod": 1,
+     "extent": 15.0,
+     "verts": 30741,
+     "tris": 23356
+    },
+    {
+     "lod": 2,
+     "extent": 40.0,
+     "verts": 6595,
+     "tris": 5503
+    },
+    {
+     "lod": 3,
+     "extent": 400.0,
+     "verts": 2614,
+     "tris": 2227
+    }
+   ],
+   "verts": 33584,
+   "tris": 28772,
+   "materials": [
+    "C011_Grid_9_alpha.mfm",
+    "FSB025_Bourgogne_1945_DeckHouse.mfm",
+    "FSB025_Bourgogne_1945_Hull.mfm",
+    "FSB025_Bourgogne_1945_Hull_wire.mfm"
+   ]
+  },
+  {
+   "id": "hull/MidBack",
+   "group": "hull",
+   "section": "MidBack",
+   "label": "MidBack",
+   "source": "FSB025_Bourgogne_1945_MidBack.geometry",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 8.0,
+     "verts": 43376,
+     "tris": 33251
+    },
+    {
+     "lod": 1,
+     "extent": 15.0,
+     "verts": 35571,
+     "tris": 25946
+    },
+    {
+     "lod": 2,
+     "extent": 40.0,
+     "verts": 16734,
+     "tris": 12359
+    },
+    {
+     "lod": 3,
+     "extent": 400.0,
+     "verts": 4878,
+     "tris": 3544
+    }
+   ],
+   "verts": 43376,
+   "tris": 33251,
+   "materials": [
+    "C004_Grid_1_alpha.mfm",
+    "FSB025_Bourgogne_1945_DeckHouse.mfm",
+    "FSB025_Bourgogne_1945_DeckHouse_skinned.mfm",
+    "FSB025_Bourgogne_1945_Hull.mfm",
+    "FSB025_Bourgogne_1945_Hull_skinned.mfm",
+    "FSB025_Bourgogne_1945_Hull_wire.mfm",
+    "FSB025_Bourgogne_1945_Hull_wire_skinned.mfm"
+   ]
+  },
+  {
+   "id": "hull/MidFront",
+   "group": "hull",
+   "section": "MidFront",
+   "label": "MidFront",
+   "source": "FSB025_Bourgogne_1945_MidFront.geometry",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 8.0,
+     "verts": 72375,
+     "tris": 52788
+    },
+    {
+     "lod": 1,
+     "extent": 15.0,
+     "verts": 55927,
+     "tris": 38877
+    },
+    {
+     "lod": 2,
+     "extent": 40.0,
+     "verts": 23237,
+     "tris": 15595
+    },
+    {
+     "lod": 3,
+     "extent": 400.0,
+     "verts": 7443,
+     "tris": 4924
+    }
+   ],
+   "verts": 72375,
+   "tris": 52788,
+   "materials": [
+    "C004_Grid_1_alpha.mfm",
+    "FSB025_Bourgogne_1945_DeckHouse.mfm",
+    "FSB025_Bourgogne_1945_Hull.mfm",
+    "FSB025_Bourgogne_1945_Hull_wire.mfm",
+    "transparent_glass_alpha.mfm"
+   ]
+  },
+  {
+   "id": "hull/Stern",
+   "group": "hull",
+   "section": "Stern",
+   "label": "Stern",
+   "source": "FSB025_Bourgogne_1945_Stern.geometry",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 8.0,
+     "verts": 13221,
+     "tris": 11034
+    },
+    {
+     "lod": 1,
+     "extent": 15.0,
+     "verts": 11437,
+     "tris": 8746
+    },
+    {
+     "lod": 2,
+     "extent": 40.0,
+     "verts": 3697,
+     "tris": 2859
+    },
+    {
+     "lod": 3,
+     "extent": 400.0,
+     "verts": 2028,
+     "tris": 1609
+    }
+   ],
+   "verts": 13221,
+   "tris": 11034,
+   "materials": [
+    "C011_Grid_9_alpha.mfm",
+    "FSB025_Bourgogne_1945_DeckHouse.mfm",
+    "FSB025_Bourgogne_1945_Hull.mfm",
+    "FSB025_Bourgogne_1945_Hull_wire.mfm"
+   ]
+  },
+  {
+   "id": "HP_FGM_1",
+   "group": "main",
+   "hp": "HP_FGM_1",
+   "model": "FGM049_380mm_45_Mle_1935",
+   "module": "A1_Artillery",
+   "section": "MidFront",
+   "label": "HP_FGM_1",
+   "verts": 4902,
+   "tris": 4356,
+   "materials": [
+    "C035_Gun_Barrel_skinned.mfm",
+    "FGM049_380mm_45_Mle_1935_skinned.mfm"
+   ],
+   "caliber_mm": 380,
+   "barrels": 4,
+   "source": "content/gameplay/france/gun/main/FGM049_380mm_45_Mle_1935/FGM049_380mm_45_Mle_1935.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 3.0,
+     "verts": 4902,
+     "tris": 4356
+    },
+    {
+     "lod": 1,
+     "extent": 12.0,
+     "verts": 3922,
+     "tris": 3312
+    },
+    {
+     "lod": 2,
+     "extent": 40.0,
+     "verts": 1660,
+     "tris": 1449
+    },
+    {
+     "lod": 3,
+     "extent": 200.0,
+     "verts": 413,
+     "tris": 274
+    }
+   ],
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ]
+  },
+  {
+   "id": "HP_FGM_2",
+   "group": "main",
+   "hp": "HP_FGM_2",
+   "model": "FGM049_380mm_45_Mle_1935",
+   "module": "A1_Artillery",
+   "section": "MidFront",
+   "label": "HP_FGM_2",
+   "verts": 4902,
+   "tris": 4356,
+   "materials": [
+    "C035_Gun_Barrel_skinned.mfm",
+    "FGM049_380mm_45_Mle_1935_skinned.mfm"
+   ],
+   "caliber_mm": 380,
+   "barrels": 4,
+   "source": "content/gameplay/france/gun/main/FGM049_380mm_45_Mle_1935/FGM049_380mm_45_Mle_1935.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 3.0,
+     "verts": 4902,
+     "tris": 4356
+    },
+    {
+     "lod": 1,
+     "extent": 12.0,
+     "verts": 3922,
+     "tris": 3312
+    },
+    {
+     "lod": 2,
+     "extent": 40.0,
+     "verts": 1660,
+     "tris": 1449
+    },
+    {
+     "lod": 3,
+     "extent": 200.0,
+     "verts": 413,
+     "tris": 274
+    }
+   ],
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ]
+  },
+  {
+   "id": "HP_FGM_3",
+   "group": "main",
+   "hp": "HP_FGM_3",
+   "model": "FGM049_380mm_45_Mle_1935",
+   "module": "A1_Artillery",
+   "section": "MidBack",
+   "label": "HP_FGM_3",
+   "verts": 4902,
+   "tris": 4356,
+   "materials": [
+    "C035_Gun_Barrel_skinned.mfm",
+    "FGM049_380mm_45_Mle_1935_skinned.mfm"
+   ],
+   "caliber_mm": 380,
+   "barrels": 4,
+   "source": "content/gameplay/france/gun/main/FGM049_380mm_45_Mle_1935/FGM049_380mm_45_Mle_1935.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 3.0,
+     "verts": 4902,
+     "tris": 4356
+    },
+    {
+     "lod": 1,
+     "extent": 12.0,
+     "verts": 3922,
+     "tris": 3312
+    },
+    {
+     "lod": 2,
+     "extent": 40.0,
+     "verts": 1660,
+     "tris": 1449
+    },
+    {
+     "lod": 3,
+     "extent": 200.0,
+     "verts": 413,
+     "tris": 274
+    }
+   ],
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ]
+  },
+  {
+   "id": "HP_FGS_1",
+   "group": "secondary",
+   "hp": "HP_FGS_1",
+   "model": "FGS053_152_55_Mle_1950",
+   "module": "A_ATBA",
+   "section": "MidFront",
+   "label": "HP_FGS_1",
+   "verts": 2863,
+   "tris": 2419,
+   "materials": [
+    "FGS053_152_55_Mle_1950_skinned.mfm",
+    "transparent_glass_alpha_skinned.mfm"
+   ],
+   "caliber_mm": 152,
+   "barrels": 3,
+   "source": "content/gameplay/france/gun/secondary/FGS053_152_55_Mle_1950/FGS053_152_55_Mle_1950.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 6.0,
+     "verts": 2863,
+     "tris": 2419
+    },
+    {
+     "lod": 1,
+     "extent": 12.0,
+     "verts": 1917,
+     "tris": 1432
+    },
+    {
+     "lod": 2,
+     "extent": 35.0,
+     "verts": 370,
+     "tris": 278
+    },
+    {
+     "lod": 3,
+     "extent": 200.0,
+     "verts": 133,
+     "tris": 92
+    }
+   ],
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ]
+  },
+  {
+   "id": "HP_FGS_2",
+   "group": "secondary",
+   "hp": "HP_FGS_2",
+   "model": "FGS036_127mm_54_5_1948",
+   "module": "A_ATBA",
+   "section": "MidFront",
+   "label": "HP_FGS_2",
+   "verts": 4596,
+   "tris": 3846,
+   "materials": [
+    "C035_Gun_Barrel_skinned.mfm",
+    "FGS036_127mm_54_5_1948_skinned.mfm",
+    "transparent_glass_dark_alpha_skinned.mfm"
+   ],
+   "caliber_mm": 127,
+   "barrels": 2,
+   "source": "content/gameplay/france/gun/secondary/FGS036_127mm_54_5_1948/FGS036_127mm_54_5_1948.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 3.0,
+     "verts": 4596,
+     "tris": 3846
+    },
+    {
+     "lod": 1,
+     "extent": 6.0,
+     "verts": 3832,
+     "tris": 2994
+    },
+    {
+     "lod": 2,
+     "extent": 20.0,
+     "verts": 1209,
+     "tris": 902
+    },
+    {
+     "lod": 3,
+     "extent": 150.0,
+     "verts": 185,
+     "tris": 132
+    }
+   ],
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ]
+  },
+  {
+   "id": "HP_FGS_3",
+   "group": "secondary",
+   "hp": "HP_FGS_3",
+   "model": "FGS036_127mm_54_5_1948",
+   "module": "A_ATBA",
+   "section": "MidFront",
+   "label": "HP_FGS_3",
+   "verts": 4596,
+   "tris": 3846,
+   "materials": [
+    "C035_Gun_Barrel_skinned.mfm",
+    "FGS036_127mm_54_5_1948_skinned.mfm",
+    "transparent_glass_dark_alpha_skinned.mfm"
+   ],
+   "caliber_mm": 127,
+   "barrels": 2,
+   "source": "content/gameplay/france/gun/secondary/FGS036_127mm_54_5_1948/FGS036_127mm_54_5_1948.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 3.0,
+     "verts": 4596,
+     "tris": 3846
+    },
+    {
+     "lod": 1,
+     "extent": 6.0,
+     "verts": 3832,
+     "tris": 2994
+    },
+    {
+     "lod": 2,
+     "extent": 20.0,
+     "verts": 1209,
+     "tris": 902
+    },
+    {
+     "lod": 3,
+     "extent": 150.0,
+     "verts": 185,
+     "tris": 132
+    }
+   ],
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ]
+  },
+  {
+   "id": "HP_FGS_4",
+   "group": "secondary",
+   "hp": "HP_FGS_4",
+   "model": "FGS036_127mm_54_5_1948",
+   "module": "A_ATBA",
+   "section": "MidFront",
+   "label": "HP_FGS_4",
+   "verts": 4596,
+   "tris": 3846,
+   "materials": [
+    "C035_Gun_Barrel_skinned.mfm",
+    "FGS036_127mm_54_5_1948_skinned.mfm",
+    "transparent_glass_dark_alpha_skinned.mfm"
+   ],
+   "caliber_mm": 127,
+   "barrels": 2,
+   "source": "content/gameplay/france/gun/secondary/FGS036_127mm_54_5_1948/FGS036_127mm_54_5_1948.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 3.0,
+     "verts": 4596,
+     "tris": 3846
+    },
+    {
+     "lod": 1,
+     "extent": 6.0,
+     "verts": 3832,
+     "tris": 2994
+    },
+    {
+     "lod": 2,
+     "extent": 20.0,
+     "verts": 1209,
+     "tris": 902
+    },
+    {
+     "lod": 3,
+     "extent": 150.0,
+     "verts": 185,
+     "tris": 132
+    }
+   ],
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ]
+  },
+  {
+   "id": "HP_FGS_5",
+   "group": "secondary",
+   "hp": "HP_FGS_5",
+   "model": "FGS036_127mm_54_5_1948",
+   "module": "A_ATBA",
+   "section": "MidFront",
+   "label": "HP_FGS_5",
+   "verts": 4596,
+   "tris": 3846,
+   "materials": [
+    "C035_Gun_Barrel_skinned.mfm",
+    "FGS036_127mm_54_5_1948_skinned.mfm",
+    "transparent_glass_dark_alpha_skinned.mfm"
+   ],
+   "caliber_mm": 127,
+   "barrels": 2,
+   "source": "content/gameplay/france/gun/secondary/FGS036_127mm_54_5_1948/FGS036_127mm_54_5_1948.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 3.0,
+     "verts": 4596,
+     "tris": 3846
+    },
+    {
+     "lod": 1,
+     "extent": 6.0,
+     "verts": 3832,
+     "tris": 2994
+    },
+    {
+     "lod": 2,
+     "extent": 20.0,
+     "verts": 1209,
+     "tris": 902
+    },
+    {
+     "lod": 3,
+     "extent": 150.0,
+     "verts": 185,
+     "tris": 132
+    }
+   ],
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ]
+  },
+  {
+   "id": "HP_FGS_6",
+   "group": "secondary",
+   "hp": "HP_FGS_6",
+   "model": "FGS036_127mm_54_5_1948",
+   "module": "A_ATBA",
+   "section": "MidBack",
+   "label": "HP_FGS_6",
+   "verts": 4596,
+   "tris": 3846,
+   "materials": [
+    "C035_Gun_Barrel_skinned.mfm",
+    "FGS036_127mm_54_5_1948_skinned.mfm",
+    "transparent_glass_dark_alpha_skinned.mfm"
+   ],
+   "caliber_mm": 127,
+   "barrels": 2,
+   "source": "content/gameplay/france/gun/secondary/FGS036_127mm_54_5_1948/FGS036_127mm_54_5_1948.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 3.0,
+     "verts": 4596,
+     "tris": 3846
+    },
+    {
+     "lod": 1,
+     "extent": 6.0,
+     "verts": 3832,
+     "tris": 2994
+    },
+    {
+     "lod": 2,
+     "extent": 20.0,
+     "verts": 1209,
+     "tris": 902
+    },
+    {
+     "lod": 3,
+     "extent": 150.0,
+     "verts": 185,
+     "tris": 132
+    }
+   ],
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ]
+  },
+  {
+   "id": "HP_FGS_7",
+   "group": "secondary",
+   "hp": "HP_FGS_7",
+   "model": "FGS036_127mm_54_5_1948",
+   "module": "A_ATBA",
+   "section": "MidBack",
+   "label": "HP_FGS_7",
+   "verts": 4596,
+   "tris": 3846,
+   "materials": [
+    "C035_Gun_Barrel_skinned.mfm",
+    "FGS036_127mm_54_5_1948_skinned.mfm",
+    "transparent_glass_dark_alpha_skinned.mfm"
+   ],
+   "caliber_mm": 127,
+   "barrels": 2,
+   "source": "content/gameplay/france/gun/secondary/FGS036_127mm_54_5_1948/FGS036_127mm_54_5_1948.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 3.0,
+     "verts": 4596,
+     "tris": 3846
+    },
+    {
+     "lod": 1,
+     "extent": 6.0,
+     "verts": 3832,
+     "tris": 2994
+    },
+    {
+     "lod": 2,
+     "extent": 20.0,
+     "verts": 1209,
+     "tris": 902
+    },
+    {
+     "lod": 3,
+     "extent": 150.0,
+     "verts": 185,
+     "tris": 132
+    }
+   ],
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ]
+  },
+  {
+   "id": "HP_FGS_8",
+   "group": "secondary",
+   "hp": "HP_FGS_8",
+   "model": "FGS036_127mm_54_5_1948",
+   "module": "A_ATBA",
+   "section": "MidBack",
+   "label": "HP_FGS_8",
+   "verts": 4596,
+   "tris": 3846,
+   "materials": [
+    "C035_Gun_Barrel_skinned.mfm",
+    "FGS036_127mm_54_5_1948_skinned.mfm",
+    "transparent_glass_dark_alpha_skinned.mfm"
+   ],
+   "caliber_mm": 127,
+   "barrels": 2,
+   "source": "content/gameplay/france/gun/secondary/FGS036_127mm_54_5_1948/FGS036_127mm_54_5_1948.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 3.0,
+     "verts": 4596,
+     "tris": 3846
+    },
+    {
+     "lod": 1,
+     "extent": 6.0,
+     "verts": 3832,
+     "tris": 2994
+    },
+    {
+     "lod": 2,
+     "extent": 20.0,
+     "verts": 1209,
+     "tris": 902
+    },
+    {
+     "lod": 3,
+     "extent": 150.0,
+     "verts": 185,
+     "tris": 132
+    }
+   ],
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ]
+  },
+  {
+   "id": "HP_FGS_9",
+   "group": "secondary",
+   "hp": "HP_FGS_9",
+   "model": "FGS036_127mm_54_5_1948",
+   "module": "A_ATBA",
+   "section": "MidBack",
+   "label": "HP_FGS_9",
+   "verts": 4596,
+   "tris": 3846,
+   "materials": [
+    "C035_Gun_Barrel_skinned.mfm",
+    "FGS036_127mm_54_5_1948_skinned.mfm",
+    "transparent_glass_dark_alpha_skinned.mfm"
+   ],
+   "caliber_mm": 127,
+   "barrels": 2,
+   "source": "content/gameplay/france/gun/secondary/FGS036_127mm_54_5_1948/FGS036_127mm_54_5_1948.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 3.0,
+     "verts": 4596,
+     "tris": 3846
+    },
+    {
+     "lod": 1,
+     "extent": 6.0,
+     "verts": 3832,
+     "tris": 2994
+    },
+    {
+     "lod": 2,
+     "extent": 20.0,
+     "verts": 1209,
+     "tris": 902
+    },
+    {
+     "lod": 3,
+     "extent": 150.0,
+     "verts": 185,
+     "tris": 132
+    }
+   ],
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ]
+  },
+  {
+   "id": "HP_FGS_10",
+   "group": "secondary",
+   "hp": "HP_FGS_10",
+   "model": "FGS053_152_55_Mle_1950",
+   "module": "A_ATBA",
+   "section": "MidBack",
+   "label": "HP_FGS_10",
+   "verts": 2863,
+   "tris": 2419,
+   "materials": [
+    "FGS053_152_55_Mle_1950_skinned.mfm",
+    "transparent_glass_alpha_skinned.mfm"
+   ],
+   "caliber_mm": 152,
+   "barrels": 3,
+   "source": "content/gameplay/france/gun/secondary/FGS053_152_55_Mle_1950/FGS053_152_55_Mle_1950.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 6.0,
+     "verts": 2863,
+     "tris": 2419
+    },
+    {
+     "lod": 1,
+     "extent": 12.0,
+     "verts": 1917,
+     "tris": 1432
+    },
+    {
+     "lod": 2,
+     "extent": 35.0,
+     "verts": 370,
+     "tris": 278
+    },
+    {
+     "lod": 3,
+     "extent": 200.0,
+     "verts": 133,
+     "tris": 92
+    }
+   ],
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ]
+  },
+  {
+   "id": "HP_FGS_11",
+   "group": "secondary",
+   "hp": "HP_FGS_11",
+   "model": "FGS053_152_55_Mle_1950",
+   "module": "A_ATBA",
+   "section": "MidBack",
+   "label": "HP_FGS_11",
+   "verts": 2863,
+   "tris": 2419,
+   "materials": [
+    "FGS053_152_55_Mle_1950_skinned.mfm",
+    "transparent_glass_alpha_skinned.mfm"
+   ],
+   "caliber_mm": 152,
+   "barrels": 3,
+   "source": "content/gameplay/france/gun/secondary/FGS053_152_55_Mle_1950/FGS053_152_55_Mle_1950.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 6.0,
+     "verts": 2863,
+     "tris": 2419
+    },
+    {
+     "lod": 1,
+     "extent": 12.0,
+     "verts": 1917,
+     "tris": 1432
+    },
+    {
+     "lod": 2,
+     "extent": 35.0,
+     "verts": 370,
+     "tris": 278
+    },
+    {
+     "lod": 3,
+     "extent": 200.0,
+     "verts": 133,
+     "tris": 92
+    }
+   ],
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ]
+  },
+  {
+   "id": "HP_FGA_1",
+   "group": "aa",
+   "hp": "HP_FGA_1",
+   "model": "FGA041_20mm_Oerlikon_MK20_Twin",
+   "module": "A_AirDefense",
+   "section": "MidFront",
+   "label": "HP_FGA_1",
+   "verts": 1315,
+   "tris": 878,
+   "materials": [
+    "FGA014_20mm_Oerlikon_MK4.mfm"
+   ],
+   "caliber_mm": 20,
+   "barrels": 2,
+   "source": "content/gameplay/france/gun/aaircraft/FGA041_20mm_Oerlikon_MK20_Twin/FGA041_20mm_Oerlikon_MK20_Twin.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 2.0,
+     "verts": 1315,
+     "tris": 878
+    },
+    {
+     "lod": 1,
+     "extent": 4.0,
+     "verts": 674,
+     "tris": 408
+    },
+    {
+     "lod": 2,
+     "extent": 10.0,
+     "verts": 291,
+     "tris": 147
+    },
+    {
+     "lod": 3,
+     "extent": 50.0,
+     "verts": 106,
+     "tris": 54
+    }
+   ],
+   "bones": []
+  },
+  {
+   "id": "HP_FGA_2",
+   "group": "aa",
+   "hp": "HP_FGA_2",
+   "model": "FGA041_20mm_Oerlikon_MK20_Twin",
+   "module": "A_AirDefense",
+   "section": "MidFront",
+   "label": "HP_FGA_2",
+   "verts": 1315,
+   "tris": 878,
+   "materials": [
+    "FGA014_20mm_Oerlikon_MK4.mfm"
+   ],
+   "caliber_mm": 20,
+   "barrels": 2,
+   "source": "content/gameplay/france/gun/aaircraft/FGA041_20mm_Oerlikon_MK20_Twin/FGA041_20mm_Oerlikon_MK20_Twin.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 2.0,
+     "verts": 1315,
+     "tris": 878
+    },
+    {
+     "lod": 1,
+     "extent": 4.0,
+     "verts": 674,
+     "tris": 408
+    },
+    {
+     "lod": 2,
+     "extent": 10.0,
+     "verts": 291,
+     "tris": 147
+    },
+    {
+     "lod": 3,
+     "extent": 50.0,
+     "verts": 106,
+     "tris": 54
+    }
+   ],
+   "bones": []
+  },
+  {
+   "id": "HP_FGA_3",
+   "group": "aa",
+   "hp": "HP_FGA_3",
+   "model": "FGA041_20mm_Oerlikon_MK20_Twin",
+   "module": "A_AirDefense",
+   "section": "MidFront",
+   "label": "HP_FGA_3",
+   "verts": 1315,
+   "tris": 878,
+   "materials": [
+    "FGA014_20mm_Oerlikon_MK4.mfm"
+   ],
+   "caliber_mm": 20,
+   "barrels": 2,
+   "source": "content/gameplay/france/gun/aaircraft/FGA041_20mm_Oerlikon_MK20_Twin/FGA041_20mm_Oerlikon_MK20_Twin.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 2.0,
+     "verts": 1315,
+     "tris": 878
+    },
+    {
+     "lod": 1,
+     "extent": 4.0,
+     "verts": 674,
+     "tris": 408
+    },
+    {
+     "lod": 2,
+     "extent": 10.0,
+     "verts": 291,
+     "tris": 147
+    },
+    {
+     "lod": 3,
+     "extent": 50.0,
+     "verts": 106,
+     "tris": 54
+    }
+   ],
+   "bones": []
+  },
+  {
+   "id": "HP_FGA_4",
+   "group": "aa",
+   "hp": "HP_FGA_4",
+   "model": "FGA041_20mm_Oerlikon_MK20_Twin",
+   "module": "A_AirDefense",
+   "section": "MidFront",
+   "label": "HP_FGA_4",
+   "verts": 1315,
+   "tris": 878,
+   "materials": [
+    "FGA014_20mm_Oerlikon_MK4.mfm"
+   ],
+   "caliber_mm": 20,
+   "barrels": 2,
+   "source": "content/gameplay/france/gun/aaircraft/FGA041_20mm_Oerlikon_MK20_Twin/FGA041_20mm_Oerlikon_MK20_Twin.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 2.0,
+     "verts": 1315,
+     "tris": 878
+    },
+    {
+     "lod": 1,
+     "extent": 4.0,
+     "verts": 674,
+     "tris": 408
+    },
+    {
+     "lod": 2,
+     "extent": 10.0,
+     "verts": 291,
+     "tris": 147
+    },
+    {
+     "lod": 3,
+     "extent": 50.0,
+     "verts": 106,
+     "tris": 54
+    }
+   ],
+   "bones": []
+  },
+  {
+   "id": "HP_FGA_5",
+   "group": "aa",
+   "hp": "HP_FGA_5",
+   "model": "FGA056_57mm_60_2_25",
+   "module": "A_AirDefense",
+   "section": "MidFront",
+   "label": "HP_FGA_5",
+   "verts": 3525,
+   "tris": 2662,
+   "materials": [
+    "FGA056_57mm_60_2_25_skinned.mfm",
+    "transparent_glass_alpha_skinned.mfm"
+   ],
+   "caliber_mm": 57,
+   "barrels": 2,
+   "source": "content/gameplay/france/gun/aaircraft/FGA056_57mm_60_2_25/FGA056_57mm_60_2_25.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 3.0,
+     "verts": 3525,
+     "tris": 2662
+    },
+    {
+     "lod": 1,
+     "extent": 8.0,
+     "verts": 2589,
+     "tris": 1675
+    },
+    {
+     "lod": 2,
+     "extent": 30.0,
+     "verts": 856,
+     "tris": 569
+    },
+    {
+     "lod": 3,
+     "extent": 120.0,
+     "verts": 147,
+     "tris": 79
+    }
+   ],
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ]
+  },
+  {
+   "id": "HP_FGA_6",
+   "group": "aa",
+   "hp": "HP_FGA_6",
+   "model": "FGA056_57mm_60_2_25",
+   "module": "A_AirDefense",
+   "section": "MidFront",
+   "label": "HP_FGA_6",
+   "verts": 3525,
+   "tris": 2662,
+   "materials": [
+    "FGA056_57mm_60_2_25_skinned.mfm",
+    "transparent_glass_alpha_skinned.mfm"
+   ],
+   "caliber_mm": 57,
+   "barrels": 2,
+   "source": "content/gameplay/france/gun/aaircraft/FGA056_57mm_60_2_25/FGA056_57mm_60_2_25.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 3.0,
+     "verts": 3525,
+     "tris": 2662
+    },
+    {
+     "lod": 1,
+     "extent": 8.0,
+     "verts": 2589,
+     "tris": 1675
+    },
+    {
+     "lod": 2,
+     "extent": 30.0,
+     "verts": 856,
+     "tris": 569
+    },
+    {
+     "lod": 3,
+     "extent": 120.0,
+     "verts": 147,
+     "tris": 79
+    }
+   ],
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ]
+  },
+  {
+   "id": "HP_FGA_7",
+   "group": "aa",
+   "hp": "HP_FGA_7",
+   "model": "FGA014_20mm_Oerlikon_MK4",
+   "module": "A_AirDefense",
+   "section": "MidFront",
+   "label": "HP_FGA_7",
+   "verts": 895,
+   "tris": 643,
+   "materials": [
+    "FGA014_20mm_Oerlikon_MK4.mfm"
+   ],
+   "caliber_mm": 20,
+   "barrels": 1,
+   "source": "content/gameplay/france/gun/aaircraft/FGA014_20mm_Oerlikon_MK4/FGA014_20mm_Oerlikon_MK4.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 8.0,
+     "verts": 895,
+     "tris": 643
+    },
+    {
+     "lod": 1,
+     "extent": 20.0,
+     "verts": 506,
+     "tris": 301
+    },
+    {
+     "lod": 2,
+     "extent": 40.0,
+     "verts": 234,
+     "tris": 112
+    },
+    {
+     "lod": 3,
+     "extent": 100.0,
+     "verts": 76,
+     "tris": 36
+    }
+   ],
+   "bones": []
+  },
+  {
+   "id": "HP_FGA_8",
+   "group": "aa",
+   "hp": "HP_FGA_8",
+   "model": "FGA014_20mm_Oerlikon_MK4",
+   "module": "A_AirDefense",
+   "section": "MidFront",
+   "label": "HP_FGA_8",
+   "verts": 895,
+   "tris": 643,
+   "materials": [
+    "FGA014_20mm_Oerlikon_MK4.mfm"
+   ],
+   "caliber_mm": 20,
+   "barrels": 1,
+   "source": "content/gameplay/france/gun/aaircraft/FGA014_20mm_Oerlikon_MK4/FGA014_20mm_Oerlikon_MK4.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 8.0,
+     "verts": 895,
+     "tris": 643
+    },
+    {
+     "lod": 1,
+     "extent": 20.0,
+     "verts": 506,
+     "tris": 301
+    },
+    {
+     "lod": 2,
+     "extent": 40.0,
+     "verts": 234,
+     "tris": 112
+    },
+    {
+     "lod": 3,
+     "extent": 100.0,
+     "verts": 76,
+     "tris": 36
+    }
+   ],
+   "bones": []
+  },
+  {
+   "id": "HP_FGA_9",
+   "group": "aa",
+   "hp": "HP_FGA_9",
+   "model": "FGA014_20mm_Oerlikon_MK4",
+   "module": "A_AirDefense",
+   "section": "MidFront",
+   "label": "HP_FGA_9",
+   "verts": 895,
+   "tris": 643,
+   "materials": [
+    "FGA014_20mm_Oerlikon_MK4.mfm"
+   ],
+   "caliber_mm": 20,
+   "barrels": 1,
+   "source": "content/gameplay/france/gun/aaircraft/FGA014_20mm_Oerlikon_MK4/FGA014_20mm_Oerlikon_MK4.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 8.0,
+     "verts": 895,
+     "tris": 643
+    },
+    {
+     "lod": 1,
+     "extent": 20.0,
+     "verts": 506,
+     "tris": 301
+    },
+    {
+     "lod": 2,
+     "extent": 40.0,
+     "verts": 234,
+     "tris": 112
+    },
+    {
+     "lod": 3,
+     "extent": 100.0,
+     "verts": 76,
+     "tris": 36
+    }
+   ],
+   "bones": []
+  },
+  {
+   "id": "HP_FGA_10",
+   "group": "aa",
+   "hp": "HP_FGA_10",
+   "model": "FGA014_20mm_Oerlikon_MK4",
+   "module": "A_AirDefense",
+   "section": "MidFront",
+   "label": "HP_FGA_10",
+   "verts": 895,
+   "tris": 643,
+   "materials": [
+    "FGA014_20mm_Oerlikon_MK4.mfm"
+   ],
+   "caliber_mm": 20,
+   "barrels": 1,
+   "source": "content/gameplay/france/gun/aaircraft/FGA014_20mm_Oerlikon_MK4/FGA014_20mm_Oerlikon_MK4.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 8.0,
+     "verts": 895,
+     "tris": 643
+    },
+    {
+     "lod": 1,
+     "extent": 20.0,
+     "verts": 506,
+     "tris": 301
+    },
+    {
+     "lod": 2,
+     "extent": 40.0,
+     "verts": 234,
+     "tris": 112
+    },
+    {
+     "lod": 3,
+     "extent": 100.0,
+     "verts": 76,
+     "tris": 36
+    }
+   ],
+   "bones": []
+  },
+  {
+   "id": "HP_FGA_11",
+   "group": "aa",
+   "hp": "HP_FGA_11",
+   "model": "FGA056_57mm_60_2_25",
+   "module": "A_AirDefense",
+   "section": "MidFront",
+   "label": "HP_FGA_11",
+   "verts": 3525,
+   "tris": 2662,
+   "materials": [
+    "FGA056_57mm_60_2_25_skinned.mfm",
+    "transparent_glass_alpha_skinned.mfm"
+   ],
+   "caliber_mm": 57,
+   "barrels": 2,
+   "source": "content/gameplay/france/gun/aaircraft/FGA056_57mm_60_2_25/FGA056_57mm_60_2_25.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 3.0,
+     "verts": 3525,
+     "tris": 2662
+    },
+    {
+     "lod": 1,
+     "extent": 8.0,
+     "verts": 2589,
+     "tris": 1675
+    },
+    {
+     "lod": 2,
+     "extent": 30.0,
+     "verts": 856,
+     "tris": 569
+    },
+    {
+     "lod": 3,
+     "extent": 120.0,
+     "verts": 147,
+     "tris": 79
+    }
+   ],
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ]
+  },
+  {
+   "id": "HP_FGA_12",
+   "group": "aa",
+   "hp": "HP_FGA_12",
+   "model": "FGA056_57mm_60_2_25",
+   "module": "A_AirDefense",
+   "section": "MidFront",
+   "label": "HP_FGA_12",
+   "verts": 3525,
+   "tris": 2662,
+   "materials": [
+    "FGA056_57mm_60_2_25_skinned.mfm",
+    "transparent_glass_alpha_skinned.mfm"
+   ],
+   "caliber_mm": 57,
+   "barrels": 2,
+   "source": "content/gameplay/france/gun/aaircraft/FGA056_57mm_60_2_25/FGA056_57mm_60_2_25.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 3.0,
+     "verts": 3525,
+     "tris": 2662
+    },
+    {
+     "lod": 1,
+     "extent": 8.0,
+     "verts": 2589,
+     "tris": 1675
+    },
+    {
+     "lod": 2,
+     "extent": 30.0,
+     "verts": 856,
+     "tris": 569
+    },
+    {
+     "lod": 3,
+     "extent": 120.0,
+     "verts": 147,
+     "tris": 79
+    }
+   ],
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ]
+  },
+  {
+   "id": "HP_FGA_13",
+   "group": "aa",
+   "hp": "HP_FGA_13",
+   "model": "FGA056_57mm_60_2_25",
+   "module": "A_AirDefense",
+   "section": "MidBack",
+   "label": "HP_FGA_13",
+   "verts": 3525,
+   "tris": 2662,
+   "materials": [
+    "FGA056_57mm_60_2_25_skinned.mfm",
+    "transparent_glass_alpha_skinned.mfm"
+   ],
+   "caliber_mm": 57,
+   "barrels": 2,
+   "source": "content/gameplay/france/gun/aaircraft/FGA056_57mm_60_2_25/FGA056_57mm_60_2_25.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 3.0,
+     "verts": 3525,
+     "tris": 2662
+    },
+    {
+     "lod": 1,
+     "extent": 8.0,
+     "verts": 2589,
+     "tris": 1675
+    },
+    {
+     "lod": 2,
+     "extent": 30.0,
+     "verts": 856,
+     "tris": 569
+    },
+    {
+     "lod": 3,
+     "extent": 120.0,
+     "verts": 147,
+     "tris": 79
+    }
+   ],
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ]
+  },
+  {
+   "id": "HP_FGA_14",
+   "group": "aa",
+   "hp": "HP_FGA_14",
+   "model": "FGA056_57mm_60_2_25",
+   "module": "A_AirDefense",
+   "section": "MidBack",
+   "label": "HP_FGA_14",
+   "verts": 3525,
+   "tris": 2662,
+   "materials": [
+    "FGA056_57mm_60_2_25_skinned.mfm",
+    "transparent_glass_alpha_skinned.mfm"
+   ],
+   "caliber_mm": 57,
+   "barrels": 2,
+   "source": "content/gameplay/france/gun/aaircraft/FGA056_57mm_60_2_25/FGA056_57mm_60_2_25.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 3.0,
+     "verts": 3525,
+     "tris": 2662
+    },
+    {
+     "lod": 1,
+     "extent": 8.0,
+     "verts": 2589,
+     "tris": 1675
+    },
+    {
+     "lod": 2,
+     "extent": 30.0,
+     "verts": 856,
+     "tris": 569
+    },
+    {
+     "lod": 3,
+     "extent": 120.0,
+     "verts": 147,
+     "tris": 79
+    }
+   ],
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ]
+  },
+  {
+   "id": "HP_FGA_15",
+   "group": "aa",
+   "hp": "HP_FGA_15",
+   "model": "FGA056_57mm_60_2_25",
+   "module": "A_AirDefense",
+   "section": "MidBack",
+   "label": "HP_FGA_15",
+   "verts": 3525,
+   "tris": 2662,
+   "materials": [
+    "FGA056_57mm_60_2_25_skinned.mfm",
+    "transparent_glass_alpha_skinned.mfm"
+   ],
+   "caliber_mm": 57,
+   "barrels": 2,
+   "source": "content/gameplay/france/gun/aaircraft/FGA056_57mm_60_2_25/FGA056_57mm_60_2_25.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 3.0,
+     "verts": 3525,
+     "tris": 2662
+    },
+    {
+     "lod": 1,
+     "extent": 8.0,
+     "verts": 2589,
+     "tris": 1675
+    },
+    {
+     "lod": 2,
+     "extent": 30.0,
+     "verts": 856,
+     "tris": 569
+    },
+    {
+     "lod": 3,
+     "extent": 120.0,
+     "verts": 147,
+     "tris": 79
+    }
+   ],
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ]
+  },
+  {
+   "id": "HP_FGA_16",
+   "group": "aa",
+   "hp": "HP_FGA_16",
+   "model": "FGA056_57mm_60_2_25",
+   "module": "A_AirDefense",
+   "section": "MidBack",
+   "label": "HP_FGA_16",
+   "verts": 3525,
+   "tris": 2662,
+   "materials": [
+    "FGA056_57mm_60_2_25_skinned.mfm",
+    "transparent_glass_alpha_skinned.mfm"
+   ],
+   "caliber_mm": 57,
+   "barrels": 2,
+   "source": "content/gameplay/france/gun/aaircraft/FGA056_57mm_60_2_25/FGA056_57mm_60_2_25.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 3.0,
+     "verts": 3525,
+     "tris": 2662
+    },
+    {
+     "lod": 1,
+     "extent": 8.0,
+     "verts": 2589,
+     "tris": 1675
+    },
+    {
+     "lod": 2,
+     "extent": 30.0,
+     "verts": 856,
+     "tris": 569
+    },
+    {
+     "lod": 3,
+     "extent": 120.0,
+     "verts": 147,
+     "tris": 79
+    }
+   ],
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ]
+  },
+  {
+   "id": "HP_FGA_17",
+   "group": "aa",
+   "hp": "HP_FGA_17",
+   "model": "FGA056_57mm_60_2_25",
+   "module": "A_AirDefense",
+   "section": "MidBack",
+   "label": "HP_FGA_17",
+   "verts": 3525,
+   "tris": 2662,
+   "materials": [
+    "FGA056_57mm_60_2_25_skinned.mfm",
+    "transparent_glass_alpha_skinned.mfm"
+   ],
+   "caliber_mm": 57,
+   "barrels": 2,
+   "source": "content/gameplay/france/gun/aaircraft/FGA056_57mm_60_2_25/FGA056_57mm_60_2_25.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 3.0,
+     "verts": 3525,
+     "tris": 2662
+    },
+    {
+     "lod": 1,
+     "extent": 8.0,
+     "verts": 2589,
+     "tris": 1675
+    },
+    {
+     "lod": 2,
+     "extent": 30.0,
+     "verts": 856,
+     "tris": 569
+    },
+    {
+     "lod": 3,
+     "extent": 120.0,
+     "verts": 147,
+     "tris": 79
+    }
+   ],
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ]
+  },
+  {
+   "id": "HP_FGA_18",
+   "group": "aa",
+   "hp": "HP_FGA_18",
+   "model": "FGA056_57mm_60_2_25",
+   "module": "A_AirDefense",
+   "section": "MidBack",
+   "label": "HP_FGA_18",
+   "verts": 3525,
+   "tris": 2662,
+   "materials": [
+    "FGA056_57mm_60_2_25_skinned.mfm",
+    "transparent_glass_alpha_skinned.mfm"
+   ],
+   "caliber_mm": 57,
+   "barrels": 2,
+   "source": "content/gameplay/france/gun/aaircraft/FGA056_57mm_60_2_25/FGA056_57mm_60_2_25.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 3.0,
+     "verts": 3525,
+     "tris": 2662
+    },
+    {
+     "lod": 1,
+     "extent": 8.0,
+     "verts": 2589,
+     "tris": 1675
+    },
+    {
+     "lod": 2,
+     "extent": 30.0,
+     "verts": 856,
+     "tris": 569
+    },
+    {
+     "lod": 3,
+     "extent": 120.0,
+     "verts": 147,
+     "tris": 79
+    }
+   ],
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ]
+  },
+  {
+   "id": "HP_FGA_19",
+   "group": "aa",
+   "hp": "HP_FGA_19",
+   "model": "FGA056_57mm_60_2_25",
+   "module": "A_AirDefense",
+   "section": "MidBack",
+   "label": "HP_FGA_19",
+   "verts": 3525,
+   "tris": 2662,
+   "materials": [
+    "FGA056_57mm_60_2_25_skinned.mfm",
+    "transparent_glass_alpha_skinned.mfm"
+   ],
+   "caliber_mm": 57,
+   "barrels": 2,
+   "source": "content/gameplay/france/gun/aaircraft/FGA056_57mm_60_2_25/FGA056_57mm_60_2_25.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 3.0,
+     "verts": 3525,
+     "tris": 2662
+    },
+    {
+     "lod": 1,
+     "extent": 8.0,
+     "verts": 2589,
+     "tris": 1675
+    },
+    {
+     "lod": 2,
+     "extent": 30.0,
+     "verts": 856,
+     "tris": 569
+    },
+    {
+     "lod": 3,
+     "extent": 120.0,
+     "verts": 147,
+     "tris": 79
+    }
+   ],
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ]
+  },
+  {
+   "id": "HP_FGA_20",
+   "group": "aa",
+   "hp": "HP_FGA_20",
+   "model": "FGA056_57mm_60_2_25",
+   "module": "A_AirDefense",
+   "section": "MidBack",
+   "label": "HP_FGA_20",
+   "verts": 3525,
+   "tris": 2662,
+   "materials": [
+    "FGA056_57mm_60_2_25_skinned.mfm",
+    "transparent_glass_alpha_skinned.mfm"
+   ],
+   "caliber_mm": 57,
+   "barrels": 2,
+   "source": "content/gameplay/france/gun/aaircraft/FGA056_57mm_60_2_25/FGA056_57mm_60_2_25.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 3.0,
+     "verts": 3525,
+     "tris": 2662
+    },
+    {
+     "lod": 1,
+     "extent": 8.0,
+     "verts": 2589,
+     "tris": 1675
+    },
+    {
+     "lod": 2,
+     "extent": 30.0,
+     "verts": 856,
+     "tris": 569
+    },
+    {
+     "lod": 3,
+     "extent": 120.0,
+     "verts": 147,
+     "tris": 79
+    }
+   ],
+   "bones": [
+    "yaw",
+    "pitch",
+    "recoil"
+   ]
+  },
+  {
+   "id": "HP_FGA_21",
+   "group": "aa",
+   "hp": "HP_FGA_21",
+   "model": "FGA041_20mm_Oerlikon_MK20_Twin",
+   "module": "A_AirDefense",
+   "section": "MidBack",
+   "label": "HP_FGA_21",
+   "verts": 1315,
+   "tris": 878,
+   "materials": [
+    "FGA014_20mm_Oerlikon_MK4.mfm"
+   ],
+   "caliber_mm": 20,
+   "barrels": 2,
+   "source": "content/gameplay/france/gun/aaircraft/FGA041_20mm_Oerlikon_MK20_Twin/FGA041_20mm_Oerlikon_MK20_Twin.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 2.0,
+     "verts": 1315,
+     "tris": 878
+    },
+    {
+     "lod": 1,
+     "extent": 4.0,
+     "verts": 674,
+     "tris": 408
+    },
+    {
+     "lod": 2,
+     "extent": 10.0,
+     "verts": 291,
+     "tris": 147
+    },
+    {
+     "lod": 3,
+     "extent": 50.0,
+     "verts": 106,
+     "tris": 54
+    }
+   ],
+   "bones": []
+  },
+  {
+   "id": "HP_FGA_22",
+   "group": "aa",
+   "hp": "HP_FGA_22",
+   "model": "FGA041_20mm_Oerlikon_MK20_Twin",
+   "module": "A_AirDefense",
+   "section": "MidBack",
+   "label": "HP_FGA_22",
+   "verts": 1315,
+   "tris": 878,
+   "materials": [
+    "FGA014_20mm_Oerlikon_MK4.mfm"
+   ],
+   "caliber_mm": 20,
+   "barrels": 2,
+   "source": "content/gameplay/france/gun/aaircraft/FGA041_20mm_Oerlikon_MK20_Twin/FGA041_20mm_Oerlikon_MK20_Twin.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 2.0,
+     "verts": 1315,
+     "tris": 878
+    },
+    {
+     "lod": 1,
+     "extent": 4.0,
+     "verts": 674,
+     "tris": 408
+    },
+    {
+     "lod": 2,
+     "extent": 10.0,
+     "verts": 291,
+     "tris": 147
+    },
+    {
+     "lod": 3,
+     "extent": 50.0,
+     "verts": 106,
+     "tris": 54
+    }
+   ],
+   "bones": []
+  },
+  {
+   "id": "HP_FGA_23",
+   "group": "aa",
+   "hp": "HP_FGA_23",
+   "model": "FGA041_20mm_Oerlikon_MK20_Twin",
+   "module": "A_AirDefense",
+   "section": "MidBack",
+   "label": "HP_FGA_23",
+   "verts": 1315,
+   "tris": 878,
+   "materials": [
+    "FGA014_20mm_Oerlikon_MK4.mfm"
+   ],
+   "caliber_mm": 20,
+   "barrels": 2,
+   "source": "content/gameplay/france/gun/aaircraft/FGA041_20mm_Oerlikon_MK20_Twin/FGA041_20mm_Oerlikon_MK20_Twin.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 2.0,
+     "verts": 1315,
+     "tris": 878
+    },
+    {
+     "lod": 1,
+     "extent": 4.0,
+     "verts": 674,
+     "tris": 408
+    },
+    {
+     "lod": 2,
+     "extent": 10.0,
+     "verts": 291,
+     "tris": 147
+    },
+    {
+     "lod": 3,
+     "extent": 50.0,
+     "verts": 106,
+     "tris": 54
+    }
+   ],
+   "bones": []
+  },
+  {
+   "id": "HP_FGA_24",
+   "group": "aa",
+   "hp": "HP_FGA_24",
+   "model": "FGA041_20mm_Oerlikon_MK20_Twin",
+   "module": "A_AirDefense",
+   "section": "MidBack",
+   "label": "HP_FGA_24",
+   "verts": 1315,
+   "tris": 878,
+   "materials": [
+    "FGA014_20mm_Oerlikon_MK4.mfm"
+   ],
+   "caliber_mm": 20,
+   "barrels": 2,
+   "source": "content/gameplay/france/gun/aaircraft/FGA041_20mm_Oerlikon_MK20_Twin/FGA041_20mm_Oerlikon_MK20_Twin.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 2.0,
+     "verts": 1315,
+     "tris": 878
+    },
+    {
+     "lod": 1,
+     "extent": 4.0,
+     "verts": 674,
+     "tris": 408
+    },
+    {
+     "lod": 2,
+     "extent": 10.0,
+     "verts": 291,
+     "tris": 147
+    },
+    {
+     "lod": 3,
+     "extent": 50.0,
+     "verts": 106,
+     "tris": 54
+    }
+   ],
+   "bones": []
+  },
+  {
+   "id": "HP_FD_1",
+   "group": "director",
+   "hp": "HP_FD_1",
+   "model": "FD026_Tele_57",
+   "module": "A_Directors",
+   "section": "MidFront",
+   "label": "HP_FD_1",
+   "verts": 1379,
+   "tris": 1134,
+   "materials": [
+    "FD026_Tele_57_skinned.mfm"
+   ],
+   "caliber_mm": null,
+   "barrels": null,
+   "source": "content/gameplay/france/director/FD026_Tele_57/FD026_Tele_57.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 4.0,
+     "verts": 1379,
+     "tris": 1134
+    },
+    {
+     "lod": 1,
+     "extent": 12.0,
+     "verts": 913,
+     "tris": 664
+    },
+    {
+     "lod": 2,
+     "extent": 24.0,
+     "verts": 510,
+     "tris": 344
+    },
+    {
+     "lod": 3,
+     "extent": 120.0,
+     "verts": 106,
+     "tris": 65
+    }
+   ],
+   "bones": [
+    "yaw"
+   ]
+  },
+  {
+   "id": "HP_FD_2",
+   "group": "director",
+   "hp": "HP_FD_2",
+   "model": "FD026_Tele_57",
+   "module": "A_Directors",
+   "section": "MidFront",
+   "label": "HP_FD_2",
+   "verts": 1379,
+   "tris": 1134,
+   "materials": [
+    "FD026_Tele_57_skinned.mfm"
+   ],
+   "caliber_mm": null,
+   "barrels": null,
+   "source": "content/gameplay/france/director/FD026_Tele_57/FD026_Tele_57.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 4.0,
+     "verts": 1379,
+     "tris": 1134
+    },
+    {
+     "lod": 1,
+     "extent": 12.0,
+     "verts": 913,
+     "tris": 664
+    },
+    {
+     "lod": 2,
+     "extent": 24.0,
+     "verts": 510,
+     "tris": 344
+    },
+    {
+     "lod": 3,
+     "extent": 120.0,
+     "verts": 106,
+     "tris": 65
+    }
+   ],
+   "bones": [
+    "yaw"
+   ]
+  },
+  {
+   "id": "HP_FD_3",
+   "group": "director",
+   "hp": "HP_FD_3",
+   "model": "FD067_OPL_4_metre_100mm_L",
+   "module": "A_Directors",
+   "section": "MidFront",
+   "label": "HP_FD_3",
+   "verts": 4230,
+   "tris": 3058,
+   "materials": [
+    "C005_Grid_2_alpha.mfm",
+    "FD061_OPL_4_metre_100mm.mfm",
+    "FD061_OPL_4_metre_100mm_wire.mfm"
+   ],
+   "caliber_mm": null,
+   "barrels": null,
+   "source": "content/gameplay/france/director/FD067_OPL_4_metre_100mm_L/FD067_OPL_4_metre_100mm_L.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 3.0,
+     "verts": 4230,
+     "tris": 3058
+    },
+    {
+     "lod": 1,
+     "extent": 8.0,
+     "verts": 2890,
+     "tris": 1936
+    },
+    {
+     "lod": 2,
+     "extent": 18.0,
+     "verts": 1113,
+     "tris": 666
+    },
+    {
+     "lod": 3,
+     "extent": 80.0,
+     "verts": 227,
+     "tris": 136
+    }
+   ],
+   "bones": []
+  },
+  {
+   "id": "HP_FD_4",
+   "group": "director",
+   "hp": "HP_FD_4",
+   "model": "FD061_OPL_4_metre_100mm",
+   "module": "A_Directors",
+   "section": "MidFront",
+   "label": "HP_FD_4",
+   "verts": 4230,
+   "tris": 3058,
+   "materials": [
+    "C005_Grid_2_alpha.mfm",
+    "FD061_OPL_4_metre_100mm.mfm",
+    "FD061_OPL_4_metre_100mm_wire.mfm"
+   ],
+   "caliber_mm": null,
+   "barrels": null,
+   "source": "content/gameplay/france/director/FD061_OPL_4_metre_100mm/FD061_OPL_4_metre_100mm.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 3.0,
+     "verts": 4230,
+     "tris": 3058
+    },
+    {
+     "lod": 1,
+     "extent": 8.0,
+     "verts": 2890,
+     "tris": 1936
+    },
+    {
+     "lod": 2,
+     "extent": 15.0,
+     "verts": 1113,
+     "tris": 666
+    },
+    {
+     "lod": 3,
+     "extent": 90.0,
+     "verts": 227,
+     "tris": 136
+    }
+   ],
+   "bones": []
+  },
+  {
+   "id": "HP_FD_5",
+   "group": "director",
+   "hp": "HP_FD_5",
+   "model": "FD038_Ster_Shell_Sight",
+   "module": "A_Directors",
+   "section": "MidFront",
+   "label": "HP_FD_5",
+   "verts": 771,
+   "tris": 588,
+   "materials": [
+    "FD038_Ster_Shell_Sight.mfm"
+   ],
+   "caliber_mm": null,
+   "barrels": null,
+   "source": "content/gameplay/france/director/FD038_Ster_Shell_Sight/FD038_Ster_Shell_Sight.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 2.0,
+     "verts": 771,
+     "tris": 588
+    },
+    {
+     "lod": 1,
+     "extent": 3.0,
+     "verts": 618,
+     "tris": 415
+    },
+    {
+     "lod": 2,
+     "extent": 10.0,
+     "verts": 243,
+     "tris": 154
+    },
+    {
+     "lod": 3,
+     "extent": 20.0,
+     "verts": 49,
+     "tris": 23
+    }
+   ],
+   "bones": []
+  },
+  {
+   "id": "HP_FD_6",
+   "group": "director",
+   "hp": "HP_FD_6",
+   "model": "FD038_Ster_Shell_Sight",
+   "module": "A_Directors",
+   "section": "MidFront",
+   "label": "HP_FD_6",
+   "verts": 771,
+   "tris": 588,
+   "materials": [
+    "FD038_Ster_Shell_Sight.mfm"
+   ],
+   "caliber_mm": null,
+   "barrels": null,
+   "source": "content/gameplay/france/director/FD038_Ster_Shell_Sight/FD038_Ster_Shell_Sight.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 2.0,
+     "verts": 771,
+     "tris": 588
+    },
+    {
+     "lod": 1,
+     "extent": 3.0,
+     "verts": 618,
+     "tris": 415
+    },
+    {
+     "lod": 2,
+     "extent": 10.0,
+     "verts": 243,
+     "tris": 154
+    },
+    {
+     "lod": 3,
+     "extent": 20.0,
+     "verts": 49,
+     "tris": 23
+    }
+   ],
+   "bones": []
+  },
+  {
+   "id": "HP_FD_7",
+   "group": "director",
+   "hp": "HP_FD_7",
+   "model": "FD033_Rangefinder",
+   "module": "A_Directors",
+   "section": "MidFront",
+   "label": "HP_FD_7",
+   "verts": 1978,
+   "tris": 1353,
+   "materials": [
+    "FD033_Rangefinder.mfm"
+   ],
+   "caliber_mm": null,
+   "barrels": null,
+   "source": "content/gameplay/france/director/FD033_Rangefinder/FD033_Rangefinder.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 4.0,
+     "verts": 1978,
+     "tris": 1353
+    },
+    {
+     "lod": 1,
+     "extent": 10.0,
+     "verts": 1078,
+     "tris": 722
+    },
+    {
+     "lod": 2,
+     "extent": 35.0,
+     "verts": 445,
+     "tris": 326
+    },
+    {
+     "lod": 3,
+     "extent": 200.0,
+     "verts": 73,
+     "tris": 53
+    }
+   ],
+   "bones": []
+  },
+  {
+   "id": "HP_FD_8",
+   "group": "director",
+   "hp": "HP_FD_8",
+   "model": "FD034_8m_Rangefinder",
+   "module": "A_Directors",
+   "section": "MidFront",
+   "label": "HP_FD_8",
+   "verts": 2754,
+   "tris": 2051,
+   "materials": [
+    "FD034_8m_Rangefinder.mfm"
+   ],
+   "caliber_mm": null,
+   "barrels": null,
+   "source": "content/gameplay/france/director/FD034_8m_Rangefinder/FD034_8m_Rangefinder.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 3.0,
+     "verts": 2754,
+     "tris": 2051
+    },
+    {
+     "lod": 1,
+     "extent": 10.0,
+     "verts": 1986,
+     "tris": 1402
+    },
+    {
+     "lod": 2,
+     "extent": 35.0,
+     "verts": 595,
+     "tris": 443
+    },
+    {
+     "lod": 3,
+     "extent": 200.0,
+     "verts": 141,
+     "tris": 95
+    }
+   ],
+   "bones": []
+  },
+  {
+   "id": "HP_FD_9",
+   "group": "director",
+   "hp": "HP_FD_9",
+   "model": "FD026_Tele_57",
+   "module": "A_Directors",
+   "section": "MidBack",
+   "label": "HP_FD_9",
+   "verts": 1379,
+   "tris": 1134,
+   "materials": [
+    "FD026_Tele_57_skinned.mfm"
+   ],
+   "caliber_mm": null,
+   "barrels": null,
+   "source": "content/gameplay/france/director/FD026_Tele_57/FD026_Tele_57.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 4.0,
+     "verts": 1379,
+     "tris": 1134
+    },
+    {
+     "lod": 1,
+     "extent": 12.0,
+     "verts": 913,
+     "tris": 664
+    },
+    {
+     "lod": 2,
+     "extent": 24.0,
+     "verts": 510,
+     "tris": 344
+    },
+    {
+     "lod": 3,
+     "extent": 120.0,
+     "verts": 106,
+     "tris": 65
+    }
+   ],
+   "bones": [
+    "yaw"
+   ]
+  },
+  {
+   "id": "HP_FD_10",
+   "group": "director",
+   "hp": "HP_FD_10",
+   "model": "FD026_Tele_57",
+   "module": "A_Directors",
+   "section": "MidBack",
+   "label": "HP_FD_10",
+   "verts": 1379,
+   "tris": 1134,
+   "materials": [
+    "FD026_Tele_57_skinned.mfm"
+   ],
+   "caliber_mm": null,
+   "barrels": null,
+   "source": "content/gameplay/france/director/FD026_Tele_57/FD026_Tele_57.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 4.0,
+     "verts": 1379,
+     "tris": 1134
+    },
+    {
+     "lod": 1,
+     "extent": 12.0,
+     "verts": 913,
+     "tris": 664
+    },
+    {
+     "lod": 2,
+     "extent": 24.0,
+     "verts": 510,
+     "tris": 344
+    },
+    {
+     "lod": 3,
+     "extent": 120.0,
+     "verts": 106,
+     "tris": 65
+    }
+   ],
+   "bones": [
+    "yaw"
+   ]
+  },
+  {
+   "id": "HP_FD_11",
+   "group": "director",
+   "hp": "HP_FD_11",
+   "model": "FD067_OPL_4_metre_100mm_L",
+   "module": "A_Directors",
+   "section": "MidBack",
+   "label": "HP_FD_11",
+   "verts": 4230,
+   "tris": 3058,
+   "materials": [
+    "C005_Grid_2_alpha.mfm",
+    "FD061_OPL_4_metre_100mm.mfm",
+    "FD061_OPL_4_metre_100mm_wire.mfm"
+   ],
+   "caliber_mm": null,
+   "barrels": null,
+   "source": "content/gameplay/france/director/FD067_OPL_4_metre_100mm_L/FD067_OPL_4_metre_100mm_L.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 3.0,
+     "verts": 4230,
+     "tris": 3058
+    },
+    {
+     "lod": 1,
+     "extent": 8.0,
+     "verts": 2890,
+     "tris": 1936
+    },
+    {
+     "lod": 2,
+     "extent": 18.0,
+     "verts": 1113,
+     "tris": 666
+    },
+    {
+     "lod": 3,
+     "extent": 80.0,
+     "verts": 227,
+     "tris": 136
+    }
+   ],
+   "bones": []
+  },
+  {
+   "id": "HP_FD_12",
+   "group": "director",
+   "hp": "HP_FD_12",
+   "model": "FD061_OPL_4_metre_100mm",
+   "module": "A_Directors",
+   "section": "MidBack",
+   "label": "HP_FD_12",
+   "verts": 4230,
+   "tris": 3058,
+   "materials": [
+    "C005_Grid_2_alpha.mfm",
+    "FD061_OPL_4_metre_100mm.mfm",
+    "FD061_OPL_4_metre_100mm_wire.mfm"
+   ],
+   "caliber_mm": null,
+   "barrels": null,
+   "source": "content/gameplay/france/director/FD061_OPL_4_metre_100mm/FD061_OPL_4_metre_100mm.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 3.0,
+     "verts": 4230,
+     "tris": 3058
+    },
+    {
+     "lod": 1,
+     "extent": 8.0,
+     "verts": 2890,
+     "tris": 1936
+    },
+    {
+     "lod": 2,
+     "extent": 15.0,
+     "verts": 1113,
+     "tris": 666
+    },
+    {
+     "lod": 3,
+     "extent": 90.0,
+     "verts": 227,
+     "tris": 136
+    }
+   ],
+   "bones": []
+  },
+  {
+   "id": "HP_FD_13",
+   "group": "director",
+   "hp": "HP_FD_13",
+   "model": "FD034_8m_Rangefinder",
+   "module": "A_Directors",
+   "section": "MidBack",
+   "label": "HP_FD_13",
+   "verts": 2754,
+   "tris": 2051,
+   "materials": [
+    "FD034_8m_Rangefinder.mfm"
+   ],
+   "caliber_mm": null,
+   "barrels": null,
+   "source": "content/gameplay/france/director/FD034_8m_Rangefinder/FD034_8m_Rangefinder.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 3.0,
+     "verts": 2754,
+     "tris": 2051
+    },
+    {
+     "lod": 1,
+     "extent": 10.0,
+     "verts": 1986,
+     "tris": 1402
+    },
+    {
+     "lod": 2,
+     "extent": 35.0,
+     "verts": 595,
+     "tris": 443
+    },
+    {
+     "lod": 3,
+     "extent": 200.0,
+     "verts": 141,
+     "tris": 95
+    }
+   ],
+   "bones": []
+  },
+  {
+   "id": "HP_FD_14",
+   "group": "director",
+   "hp": "HP_FD_14",
+   "model": "FD033_Rangefinder",
+   "module": "A_Directors",
+   "section": "MidBack",
+   "label": "HP_FD_14",
+   "verts": 1978,
+   "tris": 1353,
+   "materials": [
+    "FD033_Rangefinder.mfm"
+   ],
+   "caliber_mm": null,
+   "barrels": null,
+   "source": "content/gameplay/france/director/FD033_Rangefinder/FD033_Rangefinder.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 4.0,
+     "verts": 1978,
+     "tris": 1353
+    },
+    {
+     "lod": 1,
+     "extent": 10.0,
+     "verts": 1078,
+     "tris": 722
+    },
+    {
+     "lod": 2,
+     "extent": 35.0,
+     "verts": 445,
+     "tris": 326
+    },
+    {
+     "lod": 3,
+     "extent": 200.0,
+     "verts": 73,
+     "tris": 53
+    }
+   ],
+   "bones": []
+  },
+  {
+   "id": "HP_FD_15",
+   "group": "director",
+   "hp": "HP_FD_15",
+   "model": "FD026_Tele_57",
+   "module": "A_Directors",
+   "section": "MidBack",
+   "label": "HP_FD_15",
+   "verts": 1379,
+   "tris": 1134,
+   "materials": [
+    "FD026_Tele_57_skinned.mfm"
+   ],
+   "caliber_mm": null,
+   "barrels": null,
+   "source": "content/gameplay/france/director/FD026_Tele_57/FD026_Tele_57.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 4.0,
+     "verts": 1379,
+     "tris": 1134
+    },
+    {
+     "lod": 1,
+     "extent": 12.0,
+     "verts": 913,
+     "tris": 664
+    },
+    {
+     "lod": 2,
+     "extent": 24.0,
+     "verts": 510,
+     "tris": 344
+    },
+    {
+     "lod": 3,
+     "extent": 120.0,
+     "verts": 106,
+     "tris": 65
+    }
+   ],
+   "bones": [
+    "yaw"
+   ]
+  },
+  {
+   "id": "HP_FD_16",
+   "group": "director",
+   "hp": "HP_FD_16",
+   "model": "FD026_Tele_57",
+   "module": "A_Directors",
+   "section": "MidBack",
+   "label": "HP_FD_16",
+   "verts": 1379,
+   "tris": 1134,
+   "materials": [
+    "FD026_Tele_57_skinned.mfm"
+   ],
+   "caliber_mm": null,
+   "barrels": null,
+   "source": "content/gameplay/france/director/FD026_Tele_57/FD026_Tele_57.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 4.0,
+     "verts": 1379,
+     "tris": 1134
+    },
+    {
+     "lod": 1,
+     "extent": 12.0,
+     "verts": 913,
+     "tris": 664
+    },
+    {
+     "lod": 2,
+     "extent": 24.0,
+     "verts": 510,
+     "tris": 344
+    },
+    {
+     "lod": 3,
+     "extent": 120.0,
+     "verts": 106,
+     "tris": 65
+    }
+   ],
+   "bones": [
+    "yaw"
+   ]
+  },
+  {
+   "id": "HP_BRS_2",
+   "group": "radar",
+   "hp": "HP_BRS_2",
+   "model": "BRS040_Type_251_surface_radar",
+   "module": "A_Radars",
+   "section": "MidFront",
+   "label": "HP_BRS_2",
+   "verts": 134,
+   "tris": 90,
+   "materials": [
+    "BRS038_Radar_Type_79.mfm",
+    "BRS038_Radar_Type_79_wire.mfm",
+    "C001_Net_alpha.mfm"
+   ],
+   "caliber_mm": null,
+   "barrels": null,
+   "source": "content/gameplay/uk/radar/search/BRS040_Type_251_surface_radar/BRS040_Type_251_surface_radar.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 2.0,
+     "verts": 134,
+     "tris": 90
+    },
+    {
+     "lod": 1,
+     "extent": 10.0,
+     "verts": 77,
+     "tris": 49
+    }
+   ],
+   "bones": []
+  },
+  {
+   "id": "HP_BRS_3",
+   "group": "radar",
+   "hp": "HP_BRS_3",
+   "model": "BRS040_Type_251_surface_radar",
+   "module": "A_Radars",
+   "section": "MidFront",
+   "label": "HP_BRS_3",
+   "verts": 134,
+   "tris": 90,
+   "materials": [
+    "BRS038_Radar_Type_79.mfm",
+    "BRS038_Radar_Type_79_wire.mfm",
+    "C001_Net_alpha.mfm"
+   ],
+   "caliber_mm": null,
+   "barrels": null,
+   "source": "content/gameplay/uk/radar/search/BRS040_Type_251_surface_radar/BRS040_Type_251_surface_radar.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 2.0,
+     "verts": 134,
+     "tris": 90
+    },
+    {
+     "lod": 1,
+     "extent": 10.0,
+     "verts": 77,
+     "tris": 49
+    }
+   ],
+   "bones": []
+  },
+  {
+   "id": "HP_BRS_4",
+   "group": "radar",
+   "hp": "HP_BRS_4",
+   "model": "BRS040_Type_251_surface_radar",
+   "module": "A_Radars",
+   "section": "MidFront",
+   "label": "HP_BRS_4",
+   "verts": 134,
+   "tris": 90,
+   "materials": [
+    "BRS038_Radar_Type_79.mfm",
+    "BRS038_Radar_Type_79_wire.mfm",
+    "C001_Net_alpha.mfm"
+   ],
+   "caliber_mm": null,
+   "barrels": null,
+   "source": "content/gameplay/uk/radar/search/BRS040_Type_251_surface_radar/BRS040_Type_251_surface_radar.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 2.0,
+     "verts": 134,
+     "tris": 90
+    },
+    {
+     "lod": 1,
+     "extent": 10.0,
+     "verts": 77,
+     "tris": 49
+    }
+   ],
+   "bones": []
+  },
+  {
+   "id": "HP_BRS_5",
+   "group": "radar",
+   "hp": "HP_BRS_5",
+   "model": "BRS040_Type_251_surface_radar",
+   "module": "A_Radars",
+   "section": "MidFront",
+   "label": "HP_BRS_5",
+   "verts": 134,
+   "tris": 90,
+   "materials": [
+    "BRS038_Radar_Type_79.mfm",
+    "BRS038_Radar_Type_79_wire.mfm",
+    "C001_Net_alpha.mfm"
+   ],
+   "caliber_mm": null,
+   "barrels": null,
+   "source": "content/gameplay/uk/radar/search/BRS040_Type_251_surface_radar/BRS040_Type_251_surface_radar.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 2.0,
+     "verts": 134,
+     "tris": 90
+    },
+    {
+     "lod": 1,
+     "extent": 10.0,
+     "verts": 77,
+     "tris": 49
+    }
+   ],
+   "bones": []
+  },
+  {
+   "id": "HP_FRS_1",
+   "group": "radar",
+   "hp": "HP_FRS_1",
+   "model": "FRS023_DRBV_20A",
+   "module": "A_Radars",
+   "section": "MidFront",
+   "label": "HP_FRS_1",
+   "verts": 2828,
+   "tris": 1920,
+   "materials": [
+    "C004_Grid_1_alpha_skinned.mfm",
+    "FRS023_DRBV_20A_skinned.mfm"
+   ],
+   "caliber_mm": null,
+   "barrels": null,
+   "source": "content/gameplay/france/radar/search/FRS023_DRBV_20A/FRS023_DRBV_20A.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 3.0,
+     "verts": 2828,
+     "tris": 1920
+    },
+    {
+     "lod": 1,
+     "extent": 8.0,
+     "verts": 2046,
+     "tris": 1232
+    },
+    {
+     "lod": 2,
+     "extent": 35.0,
+     "verts": 577,
+     "tris": 355
+    },
+    {
+     "lod": 3,
+     "extent": 80.0,
+     "verts": 192,
+     "tris": 100
+    }
+   ],
+   "bones": [
+    "yaw"
+   ]
+  },
+  {
+   "id": "HP_FRS_2",
+   "group": "radar",
+   "hp": "HP_FRS_2",
+   "model": "FRS036_Radar_SM",
+   "module": "A_Radars",
+   "section": "MidBack",
+   "label": "HP_FRS_2",
+   "verts": 1719,
+   "tris": 1611,
+   "materials": [
+    "C004_Grid_1_alpha_skinned.mfm",
+    "FRS036_Radar_SM_skinned.mfm"
+   ],
+   "caliber_mm": null,
+   "barrels": null,
+   "source": "content/gameplay/france/radar/search/FRS036_Radar_SM/FRS036_Radar_SM.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 5.0,
+     "verts": 1719,
+     "tris": 1611
+    },
+    {
+     "lod": 1,
+     "extent": 9.0,
+     "verts": 1139,
+     "tris": 925
+    },
+    {
+     "lod": 2,
+     "extent": 13.0,
+     "verts": 551,
+     "tris": 342
+    },
+    {
+     "lod": 3,
+     "extent": 50.0,
+     "verts": 120,
+     "tris": 57
+    }
+   ],
+   "bones": [
+    "yaw"
+   ]
+  },
+  {
+   "id": "HP_FRS_3",
+   "group": "radar",
+   "hp": "HP_FRS_3",
+   "model": "FRS030_Radar_SG",
+   "module": "A_Radars",
+   "section": "MidBack",
+   "label": "HP_FRS_3",
+   "verts": 1357,
+   "tris": 971,
+   "materials": [
+    "FRS030_Radar_SG_skinned.mfm"
+   ],
+   "caliber_mm": null,
+   "barrels": null,
+   "source": "content/gameplay/france/radar/search/FRS030_Radar_SG/FRS030_Radar_SG.model",
+   "lods": [
+    {
+     "lod": 0,
+     "extent": 6.0,
+     "verts": 1357,
+     "tris": 971
+    },
+    {
+     "lod": 1,
+     "extent": 12.0,
+     "verts": 868,
+     "tris": 553
+    },
+    {
+     "lod": 2,
+     "extent": 25.0,
+     "verts": 236,
+     "tris": 126
+    },
+    {
+     "lod": 3,
+     "extent": 80.0,
+     "verts": 91,
+     "tris": 43
+    }
+   ],
+   "bones": [
+    "yaw"
+   ]
+  }
+ ],
+ "textures": {
+  "default_ao": {
+   "name": "default_ao",
+   "slot": "ao",
+   "width": 4,
+   "height": 4,
+   "source_dds": "default_ao.dds"
+  },
+  "BRS038_Radar_Type_79_a": {
+   "name": "BRS038_Radar_Type_79_a",
+   "slot": "a",
+   "width": 256,
+   "height": 128,
+   "source_dds": "BRS038_Radar_Type_79_a.dds"
+  },
+  "BRS038_Radar_Type_79_mg": {
+   "name": "BRS038_Radar_Type_79_mg",
+   "slot": "mg",
+   "width": 256,
+   "height": 128,
+   "source_dds": "BRS038_Radar_Type_79_mg.dds"
+  },
+  "BRS038_Radar_Type_79_n": {
+   "name": "BRS038_Radar_Type_79_n",
+   "slot": "n",
+   "width": 256,
+   "height": 128,
+   "source_dds": "BRS038_Radar_Type_79_n.dds"
+  },
+  "C001_Net_alpha_a": {
+   "name": "C001_Net_alpha_a",
+   "slot": "a",
+   "width": 512,
+   "height": 512,
+   "source_dds": "C001_Net_alpha_a.dds"
+  },
+  "C004_Grid_1_alpha_a": {
+   "name": "C004_Grid_1_alpha_a",
+   "slot": "a",
+   "width": 64,
+   "height": 64,
+   "source_dds": "C004_Grid_1_alpha_a.dds"
+  },
+  "C005_Grid_2_alpha_a": {
+   "name": "C005_Grid_2_alpha_a",
+   "slot": "a",
+   "width": 64,
+   "height": 64,
+   "source_dds": "C005_Grid_2_alpha_a.dds"
+  },
+  "C011_Grid_9_alpha_a": {
+   "name": "C011_Grid_9_alpha_a",
+   "slot": "a",
+   "width": 32,
+   "height": 32,
+   "source_dds": "C011_Grid_9_alpha_a.dds"
+  },
+  "C035_Gun_Barrel_ao": {
+   "name": "C035_Gun_Barrel_ao",
+   "slot": "ao",
+   "width": 8,
+   "height": 16,
+   "source_dds": "C035_Gun_Barrel_ao.dds"
+  },
+  "C035_Gun_Barrel_a": {
+   "name": "C035_Gun_Barrel_a",
+   "slot": "a",
+   "width": 32,
+   "height": 64,
+   "source_dds": "C035_Gun_Barrel_a.dds"
+  },
+  "C035_Gun_Barrel_mg": {
+   "name": "C035_Gun_Barrel_mg",
+   "slot": "mg",
+   "width": 32,
+   "height": 64,
+   "source_dds": "C035_Gun_Barrel_mg.dds"
+  },
+  "C035_Gun_Barrel_n": {
+   "name": "C035_Gun_Barrel_n",
+   "slot": "n",
+   "width": 32,
+   "height": 64,
+   "source_dds": "C035_Gun_Barrel_n.dds"
+  },
+  "FD026_Tele_57_a": {
+   "name": "FD026_Tele_57_a",
+   "slot": "a",
+   "width": 256,
+   "height": 256,
+   "source_dds": "FD026_Tele_57_a.dds"
+  },
+  "FD026_Tele_57_mg": {
+   "name": "FD026_Tele_57_mg",
+   "slot": "mg",
+   "width": 256,
+   "height": 256,
+   "source_dds": "FD026_Tele_57_mg.dds"
+  },
+  "FD026_Tele_57_n": {
+   "name": "FD026_Tele_57_n",
+   "slot": "n",
+   "width": 256,
+   "height": 256,
+   "source_dds": "FD026_Tele_57_n.dds"
+  },
+  "FD033_Rangefinder_a": {
+   "name": "FD033_Rangefinder_a",
+   "slot": "a",
+   "width": 1024,
+   "height": 1024,
+   "source_dds": "FD033_Rangefinder_a.dds"
+  },
+  "FD033_Rangefinder_mg": {
+   "name": "FD033_Rangefinder_mg",
+   "slot": "mg",
+   "width": 1024,
+   "height": 1024,
+   "source_dds": "FD033_Rangefinder_mg.dds"
+  },
+  "FD033_Rangefinder_n": {
+   "name": "FD033_Rangefinder_n",
+   "slot": "n",
+   "width": 1024,
+   "height": 1024,
+   "source_dds": "FD033_Rangefinder_n.dds"
+  },
+  "FD034_8m_Rangefinder_a": {
+   "name": "FD034_8m_Rangefinder_a",
+   "slot": "a",
+   "width": 512,
+   "height": 512,
+   "source_dds": "FD034_8m_Rangefinder_a.dds"
+  },
+  "FD034_8m_Rangefinder_mg": {
+   "name": "FD034_8m_Rangefinder_mg",
+   "slot": "mg",
+   "width": 512,
+   "height": 512,
+   "source_dds": "FD034_8m_Rangefinder_mg.dds"
+  },
+  "FD034_8m_Rangefinder_n": {
+   "name": "FD034_8m_Rangefinder_n",
+   "slot": "n",
+   "width": 512,
+   "height": 512,
+   "source_dds": "FD034_8m_Rangefinder_n.dds"
+  },
+  "FD038_Ster_Shell_Sight_a": {
+   "name": "FD038_Ster_Shell_Sight_a",
+   "slot": "a",
+   "width": 256,
+   "height": 128,
+   "source_dds": "FD038_Ster_Shell_Sight_a.dds"
+  },
+  "BD018_Ster_Shell_Sight_mg": {
+   "name": "BD018_Ster_Shell_Sight_mg",
+   "slot": "mg",
+   "width": 256,
+   "height": 128,
+   "source_dds": "BD018_Ster_Shell_Sight_mg.dds"
+  },
+  "BD018_Ster_Shell_Sight_n": {
+   "name": "BD018_Ster_Shell_Sight_n",
+   "slot": "n",
+   "width": 256,
+   "height": 128,
+   "source_dds": "BD018_Ster_Shell_Sight_n.dds"
+  },
+  "FD061_OPL_4_metre_100mm_a": {
+   "name": "FD061_OPL_4_metre_100mm_a",
+   "slot": "a",
+   "width": 512,
+   "height": 512,
+   "source_dds": "FD061_OPL_4_metre_100mm_a.dds"
+  },
+  "FD061_OPL_4_metre_100mm_mg": {
+   "name": "FD061_OPL_4_metre_100mm_mg",
+   "slot": "mg",
+   "width": 512,
+   "height": 512,
+   "source_dds": "FD061_OPL_4_metre_100mm_mg.dds"
+  },
+  "FD061_OPL_4_metre_100mm_n": {
+   "name": "FD061_OPL_4_metre_100mm_n",
+   "slot": "n",
+   "width": 512,
+   "height": 512,
+   "source_dds": "FD061_OPL_4_metre_100mm_n.dds"
+  },
+  "AGA003_20mm_Oerlikon_MK4_ao": {
+   "name": "AGA003_20mm_Oerlikon_MK4_ao",
+   "slot": "ao",
+   "width": 32,
+   "height": 32,
+   "source_dds": "AGA003_20mm_Oerlikon_MK4_ao.dds"
+  },
+  "FGA014_20mm_Oerlikon_MK4_a": {
+   "name": "FGA014_20mm_Oerlikon_MK4_a",
+   "slot": "a",
+   "width": 128,
+   "height": 128,
+   "source_dds": "FGA014_20mm_Oerlikon_MK4_a.dds"
+  },
+  "AGA003_20mm_Oerlikon_MK4_mg": {
+   "name": "AGA003_20mm_Oerlikon_MK4_mg",
+   "slot": "mg",
+   "width": 128,
+   "height": 128,
+   "source_dds": "AGA003_20mm_Oerlikon_MK4_mg.dds"
+  },
+  "AGA003_20mm_Oerlikon_MK4_n": {
+   "name": "AGA003_20mm_Oerlikon_MK4_n",
+   "slot": "n",
+   "width": 256,
+   "height": 256,
+   "source_dds": "AGA003_20mm_Oerlikon_MK4_n.dds"
+  },
+  "FGA056_57mm_60_2_25_ao": {
+   "name": "FGA056_57mm_60_2_25_ao",
+   "slot": "ao",
+   "width": 128,
+   "height": 128,
+   "source_dds": "FGA056_57mm_60_2_25_ao.dds"
+  },
+  "FGA056_57mm_60_2_25_a": {
+   "name": "FGA056_57mm_60_2_25_a",
+   "slot": "a",
+   "width": 512,
+   "height": 512,
+   "source_dds": "FGA056_57mm_60_2_25_a.dds"
+  },
+  "FGA056_57mm_60_2_25_mg": {
+   "name": "FGA056_57mm_60_2_25_mg",
+   "slot": "mg",
+   "width": 512,
+   "height": 512,
+   "source_dds": "FGA056_57mm_60_2_25_mg.dds"
+  },
+  "FGA056_57mm_60_2_25_n": {
+   "name": "FGA056_57mm_60_2_25_n",
+   "slot": "n",
+   "width": 512,
+   "height": 512,
+   "source_dds": "FGA056_57mm_60_2_25_n.dds"
+  },
+  "FGM049_380mm_45_Mle_1935_ao": {
+   "name": "FGM049_380mm_45_Mle_1935_ao",
+   "slot": "ao",
+   "width": 256,
+   "height": 256,
+   "source_dds": "FGM049_380mm_45_Mle_1935_ao.dds"
+  },
+  "FGM049_380mm_45_Mle_1935_a": {
+   "name": "FGM049_380mm_45_Mle_1935_a",
+   "slot": "a",
+   "width": 1024,
+   "height": 1024,
+   "source_dds": "FGM049_380mm_45_Mle_1935_a.dds"
+  },
+  "FGM049_380mm_45_Mle_1935_mg": {
+   "name": "FGM049_380mm_45_Mle_1935_mg",
+   "slot": "mg",
+   "width": 1024,
+   "height": 1024,
+   "source_dds": "FGM049_380mm_45_Mle_1935_mg.dds"
+  },
+  "FGM049_380mm_45_Mle_1935_n": {
+   "name": "FGM049_380mm_45_Mle_1935_n",
+   "slot": "n",
+   "width": 1024,
+   "height": 1024,
+   "source_dds": "FGM049_380mm_45_Mle_1935_n.dds"
+  },
+  "FGS036_127mm_54_5_1948_ao": {
+   "name": "FGS036_127mm_54_5_1948_ao",
+   "slot": "ao",
+   "width": 128,
+   "height": 128,
+   "source_dds": "FGS036_127mm_54_5_1948_ao.dds"
+  },
+  "FGS036_127mm_54_5_1948_a": {
+   "name": "FGS036_127mm_54_5_1948_a",
+   "slot": "a",
+   "width": 512,
+   "height": 512,
+   "source_dds": "FGS036_127mm_54_5_1948_a.dds"
+  },
+  "FGS036_127mm_54_5_1948_mg": {
+   "name": "FGS036_127mm_54_5_1948_mg",
+   "slot": "mg",
+   "width": 512,
+   "height": 512,
+   "source_dds": "FGS036_127mm_54_5_1948_mg.dds"
+  },
+  "FGS036_127mm_54_5_1948_n": {
+   "name": "FGS036_127mm_54_5_1948_n",
+   "slot": "n",
+   "width": 512,
+   "height": 512,
+   "source_dds": "FGS036_127mm_54_5_1948_n.dds"
+  },
+  "FGS053_152_55_Mle_1950_ao": {
+   "name": "FGS053_152_55_Mle_1950_ao",
+   "slot": "ao",
+   "width": 128,
+   "height": 128,
+   "source_dds": "FGS053_152_55_Mle_1950_ao.dds"
+  },
+  "FGS053_152_55_Mle_1950_a": {
+   "name": "FGS053_152_55_Mle_1950_a",
+   "slot": "a",
+   "width": 512,
+   "height": 512,
+   "source_dds": "FGS053_152_55_Mle_1950_a.dds"
+  },
+  "FGS053_152_55_Mle_1950_mg": {
+   "name": "FGS053_152_55_Mle_1950_mg",
+   "slot": "mg",
+   "width": 512,
+   "height": 512,
+   "source_dds": "FGS053_152_55_Mle_1950_mg.dds"
+  },
+  "FGS053_152_55_Mle_1950_n": {
+   "name": "FGS053_152_55_Mle_1950_n",
+   "slot": "n",
+   "width": 512,
+   "height": 512,
+   "source_dds": "FGS053_152_55_Mle_1950_n.dds"
+  },
+  "FRS023_DRBV_20A_a": {
+   "name": "FRS023_DRBV_20A_a",
+   "slot": "a",
+   "width": 256,
+   "height": 256,
+   "source_dds": "FRS023_DRBV_20A_a.dds"
+  },
+  "FRS023_DRBV_20A_mg": {
+   "name": "FRS023_DRBV_20A_mg",
+   "slot": "mg",
+   "width": 256,
+   "height": 256,
+   "source_dds": "FRS023_DRBV_20A_mg.dds"
+  },
+  "FRS023_DRBV_20A_n": {
+   "name": "FRS023_DRBV_20A_n",
+   "slot": "n",
+   "width": 256,
+   "height": 256,
+   "source_dds": "FRS023_DRBV_20A_n.dds"
+  },
+  "FRS030_Radar_SG_a": {
+   "name": "FRS030_Radar_SG_a",
+   "slot": "a",
+   "width": 128,
+   "height": 128,
+   "source_dds": "FRS030_Radar_SG_a.dds"
+  },
+  "ARS114_Radar_SG_mg": {
+   "name": "ARS114_Radar_SG_mg",
+   "slot": "mg",
+   "width": 128,
+   "height": 128,
+   "source_dds": "ARS114_Radar_SG_mg.dds"
+  },
+  "ARS114_Radar_SG_n": {
+   "name": "ARS114_Radar_SG_n",
+   "slot": "n",
+   "width": 128,
+   "height": 128,
+   "source_dds": "ARS114_Radar_SG_n.dds"
+  },
+  "FRS036_Radar_SM_a": {
+   "name": "FRS036_Radar_SM_a",
+   "slot": "a",
+   "width": 256,
+   "height": 256,
+   "source_dds": "FRS036_Radar_SM_a.dds"
+  },
+  "FRS036_Radar_SM_mg": {
+   "name": "FRS036_Radar_SM_mg",
+   "slot": "mg",
+   "width": 256,
+   "height": 256,
+   "source_dds": "FRS036_Radar_SM_mg.dds"
+  },
+  "FRS036_Radar_SM_n": {
+   "name": "FRS036_Radar_SM_n",
+   "slot": "n",
+   "width": 256,
+   "height": 256,
+   "source_dds": "FRS036_Radar_SM_n.dds"
+  },
+  "FSB025_Bourgogne_1945_DeckHouse_ao": {
+   "name": "FSB025_Bourgogne_1945_DeckHouse_ao",
+   "slot": "ao",
+   "width": 512,
+   "height": 512,
+   "source_dds": "FSB025_Bourgogne_1945_DeckHouse_ao.dds"
+  },
+  "FSB025_Bourgogne_1945_DeckHouse_a": {
+   "name": "FSB025_Bourgogne_1945_DeckHouse_a",
+   "slot": "a",
+   "width": 2048,
+   "height": 2048,
+   "source_dds": "FSB025_Bourgogne_1945_DeckHouse_a.dds"
+  },
+  "FSB025_Bourgogne_1945_DeckHouse_mg": {
+   "name": "FSB025_Bourgogne_1945_DeckHouse_mg",
+   "slot": "mg",
+   "width": 2048,
+   "height": 2048,
+   "source_dds": "FSB025_Bourgogne_1945_DeckHouse_mg.dds"
+  },
+  "FSB025_Bourgogne_1945_DeckHouse_n": {
+   "name": "FSB025_Bourgogne_1945_DeckHouse_n",
+   "slot": "n",
+   "width": 2048,
+   "height": 2048,
+   "source_dds": "FSB025_Bourgogne_1945_DeckHouse_n.dds"
+  },
+  "FSB025_Bourgogne_1945_Hull_ao": {
+   "name": "FSB025_Bourgogne_1945_Hull_ao",
+   "slot": "ao",
+   "width": 512,
+   "height": 512,
+   "source_dds": "FSB025_Bourgogne_1945_Hull_ao.dds"
+  },
+  "FSB025_Bourgogne_1945_Hull_a": {
+   "name": "FSB025_Bourgogne_1945_Hull_a",
+   "slot": "a",
+   "width": 2048,
+   "height": 2048,
+   "source_dds": "FSB025_Bourgogne_1945_Hull_a.dds"
+  },
+  "FSB025_Bourgogne_1945_Hull_mg": {
+   "name": "FSB025_Bourgogne_1945_Hull_mg",
+   "slot": "mg",
+   "width": 2048,
+   "height": 2048,
+   "source_dds": "FSB025_Bourgogne_1945_Hull_mg.dds"
+  },
+  "FSB025_Bourgogne_1945_Hull_n": {
+   "name": "FSB025_Bourgogne_1945_Hull_n",
+   "slot": "n",
+   "width": 2048,
+   "height": 2048,
+   "source_dds": "FSB025_Bourgogne_1945_Hull_n.dds"
+  },
+  "transparent_glass_dark_alpha_a": {
+   "name": "transparent_glass_dark_alpha_a",
+   "slot": "a",
+   "width": 64,
+   "height": 64,
+   "source_dds": "transparent_glass_dark_alpha_a.dds"
+  }
+ }
+}

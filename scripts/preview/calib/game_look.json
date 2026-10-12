@@ -1,0 +1,114 @@
+{
+ "_doc": "游戏对齐(港口)光照预设。由 wowsmod scripts/preview/calib/fit_game_look.py 拟合生成, 勿手改; 见 CALIBRATION.md",
+ "version": 8,
+ "day": {
+  "sunDir": [
+   -0.62,
+   0.74,
+   -0.25
+  ],
+  "sun": "#fff0e4",
+  "sunI": 1.395,
+  "hemiSky": "#a0ffa7",
+  "hemiGround": "#225458",
+  "hemi": 0.0987,
+  "envI": 0.9516,
+  "zenith": "#6f9fd8",
+  "horizon": "#d6e4ef",
+  "below": "#1f5c63",
+  "exposure": 1.0,
+  "gain": [
+   1.0,
+   1.0,
+   1.0
+  ],
+  "toe": [
+   0.00249,
+   0.00585,
+   0.0
+  ],
+  "sat": 1.5652,
+  "fogCol": "#c9d9e6",
+  "fogDen": 0.0015,
+  "emisK": 2.0,
+  "bloomT": 0.95,
+  "bloomS": 0.25,
+  "mgSwap": 1,
+  "deep": "#13505a",
+  "shallow": "#2f8a8f",
+  "tint": "#2c7c84",
+  "shadow": 0.22,
+  "tmP": 0.738,
+  "tmS": 1.72,
+  "contactAO": 0.45,
+  "waterOpa": 1.45,
+  "goldHue": 14,
+  "periHue": 6
+ },
+ "night": {
+  "sunDir": [
+   0.35,
+   0.8,
+   0.45
+  ],
+  "sun": "#dfe6f0",
+  "sunI": 2.6,
+  "hemiSky": "#9aa4b2",
+  "hemiGround": "#3a4048",
+  "hemi": 1.1,
+  "envI": 1.2,
+  "zenith": "#15181d",
+  "horizon": "#3a3f47",
+  "below": "#0b0d10",
+  "exposure": 1.05,
+  "gain": [
+   1.0,
+   1.0,
+   1.0
+  ],
+  "toe": [
+   0.00249,
+   0.00585,
+   0.0
+  ],
+  "sat": 0.06,
+  "fogCol": "#2a2e35",
+  "fogDen": 0.002,
+  "emisK": 5.0,
+  "bloomT": 0.6,
+  "bloomS": 0.6,
+  "mgSwap": 1,
+  "deep": "#0a0d11",
+  "shallow": "#1c2229",
+  "tint": "#1a2028",
+  "shadow": 0.3,
+  "tmP": 0.738,
+  "tmS": 1.6611,
+  "_doc": "夜(黑桃城): 港口夜景近黑白分级。仅按 n0(日)/port_night_fq_clean(夜) 同机位统计粗调: 饱和度≈日的 0.2-0.3、整体亮度不低于日; 响应曲线沿用 day 拟合值。未做 ΔE 验收(无同设计夜景贴图)。",
+  "contactAO": 0.6,
+  "waterOpa": 1.35,
+  "goldHue": 6.3,
+  "periHue": 2.4
+ },
+ "_fit": {
+  "spec": "regions_p2v6.json",
+  "loss_day": 6.87,
+  "regions": 15,
+  "note": "r40d: contactAO0.45 goldHue14 periHue6 waterOpa1.45 tmS1.72; night sat0.06≈黑桃城; eval after_r40 studio15.64→game6.87"
+ },
+ "_preview_extras": {
+  "note": "contactAO/goldHue/periHue/waterOpa: 预览侧补偿(见 CALIBRATION.md §5); 不进贴图"
+ },
+ "_fit_extras": {
+  "baseline_mean": 6.895,
+  "best_mean": 6.87,
+  "baseline_focus": 9.341,
+  "best_focus": 7.396,
+  "best": {
+   "contactAO": 0.45,
+   "goldHue": 14,
+   "periHue": 6,
+   "waterOpa": 1.45
+  }
+ }
+}

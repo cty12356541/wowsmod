@@ -1,0 +1,48 @@
+name: release
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: preview_app/web/package-lock.json
+      - name: Build preview web
+        working-directory: preview_app/web
+        run: |
+          npm ci
+          npm run build
+      - name: Embed preview
+        shell: pwsh
+        run: |
+          Remove-Item -Recurse -Force crates/wowsmod/preview_web -ErrorAction SilentlyContinue
+          Copy-Item -Recurse preview_app/web/dist crates/wowsmod/preview_web
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - name: Build
+        run: cargo build --release --locked --target x86_64-pc-windows-msvc
+      - name: Test
+        run: cargo test --locked --target x86_64-pc-windows-msvc
+      - name: Package
+        shell: pwsh
+        run: |
+          $v = "${{ github.ref_name }}"
+          $d = "wowsmod-$v-windows-x64"
+          New-Item -ItemType Directory $d | Out-Null
+          Copy-Item target/x86_64-pc-windows-msvc/release/wowsmod.exe $d/
+          Copy-Item README.md,AGENTS.md,LICENSE,NOTICE,THIRD_PARTY_LICENSES.md $d/
+          Copy-Item -Recurse docs,styles $d/
+          Compress-Archive -Path $d -DestinationPath "$d.zip"
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: wowsmod-*-windows-x64.zip

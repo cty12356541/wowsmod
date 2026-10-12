@@ -1,0 +1,31 @@
+[package]
+name = "wowsmod-formats"
+description = "莱服《战舰世界》(Мир кораблей) 资源格式库: idx/pkg/Oodle/geometry/assets.bin/GLB"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = []
+# Oodle 解压后端不随本仓库提供; 通过 compression::set_oodle_backend 在运行时注册(见 docs/OODLE.md)。
+
+[dependencies]
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+meshopt-rs = { version = "=0.1.2", features = ["experimental"] }
+half = "2"
+crc32fast = "1"
+miniz_oxide = "0.8"
+globset = "0.4"
+# 贴图: BC1–5/BC7 纯 CPU 编解码(MIT), PNG(MIT/Apache), 并行(MIT/Apache)
+block_compression = { version = "=0.10.0", default-features = false, features = ["bc15", "bc7"] }
+png = "0.17"
+rayon = "1"
+# 遮罩按材质/网格名筛选(MIT/Apache)
+regex = "1"
+
+[dev-dependencies]
+
+sha2 = "0.10"
+crc32fast = "1"

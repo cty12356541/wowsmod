@@ -1,0 +1,102 @@
+{
+ "fit": {
+  "sun": "#fff0e4",
+  "sunI": 1.395,
+  "hemiSky": "#a0ffa7",
+  "hemiGround": "#225458",
+  "hemi": 0.0987,
+  "envI": 0.9516,
+  "gain": [
+   1.0,
+   1.0,
+   1.0
+  ],
+  "toe": [
+   0.00249,
+   0.00585,
+   0.0
+  ],
+  "tmP": 0.738,
+  "sat": 1.5652,
+  "tmS": 1.6611,
+  "mgSwap": 1
+ },
+ "loss": 6.768930059009339,
+ "regions": [
+  {
+   "shot": "low",
+   "cls": "navy",
+   "n": 14733
+  },
+  {
+   "shot": "low",
+   "cls": "royal",
+   "n": 5877
+  },
+  {
+   "shot": "low",
+   "cls": "white",
+   "n": 4189
+  },
+  {
+   "shot": "low",
+   "cls": "gold",
+   "n": 1245
+  },
+  {
+   "shot": "low",
+   "cls": "peri",
+   "n": 10950
+  },
+  {
+   "shot": "clean",
+   "cls": "navy",
+   "n": 6589
+  },
+  {
+   "shot": "clean",
+   "cls": "royal",
+   "n": 5424
+  },
+  {
+   "shot": "clean",
+   "cls": "white",
+   "n": 8071
+  },
+  {
+   "shot": "clean",
+   "cls": "gold",
+   "n": 1256
+  },
+  {
+   "shot": "clean",
+   "cls": "peri",
+   "n": 12702
+  },
+  {
+   "shot": "high",
+   "cls": "deck",
+   "n": 96637
+  },
+  {
+   "shot": "high",
+   "cls": "turret",
+   "n": 20625
+  },
+  {
+   "shot": "high",
+   "cls": "gold",
+   "n": 3794
+  },
+  {
+   "shot": "high",
+   "cls": "dhwhite",
+   "n": 894
+  },
+  {
+   "shot": "high",
+   "cls": "peri",
+   "n": 3401
+  }
+ ]
+}
