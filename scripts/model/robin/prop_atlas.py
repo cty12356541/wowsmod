@@ -31,7 +31,7 @@ def build(out_dir, size=1024):
     def sgrad(a, b, kmax):
         t = np.clip((np.abs(vv - 0.5) * 2 - 0.35) / 0.65, 0, 1)[..., None]; t = t * t * (3 - 2 * t)
         return a * (1 - kmax * t) + b * (kmax * t)
-    for k, blkf in enumerate([lambda: sgrad(W, P, 0.12), lambda: sgrad(W, P, 0.28)]):  # P6: 羽更白(少 peri 染)
+    for k, blkf in enumerate([lambda: sgrad(W, P, 0.18), lambda: sgrad(W, P, 0.38)]):  # P5.1: 白亮+末端鲜明 peri 点缀
         blk = np.broadcast_to(blkf(), (size, 1, 3)).repeat(cw, 1).copy()
         # 羽轴(中线)浅一档 + 两侧细羽纹
         shaft = np.abs(u - 0.5) < 0.025

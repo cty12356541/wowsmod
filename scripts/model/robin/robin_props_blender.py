@@ -261,7 +261,7 @@ def plume(L, W, th, col, curve=0.14, edge=True, shaft=True, glow=False, round_ti
     if shaft:
         sp = [(L * t, -curve * L * t * t, th * (1 - (0.6 * t)) + 0.004) for t in [0.02 + 0.85 * i / 16 for i in range(17)]]
         # P6: 发光羽轴加粗(白天发光占比目标≈标杆 7%)
-        parts.append(tube(sp, [0.020 * (1 - 0.65 * i / 16) + 0.004 for i in range(17)], 'glow' if glow else 'gold', seg=5))
+        parts.append(tube(sp, [0.016 * (1 - 0.7 * i / 16) + 0.003 for i in range(17)], 'glow' if glow else 'gold', seg=5))  # P5.1: 羽轴略粗于 P5, 不及 P6
     return parts
 
 def shoulder_plate(p0, p1, height, th, col='white', taper=0.55):
@@ -300,13 +300,13 @@ def build_wings():
     取代 A7 悬浮光点挂饰 —— 标杆好看核心是外带件从船身长出来、成片有厚度。
     MODE=plate(默认) | float(旧悬浮) | attach(A5 薄壁+套筒, 无肩甲)。"""
     P = []
-    MODE = os.environ.get('ROBIN_WING_MODE', 'plate')
+    MODE = os.environ.get('ROBIN_WING_MODE', 'float')  # P5.1: 回到悬浮结构(用户否决 P6 大肩甲)
     TK = float(os.environ.get('ROBIN_WING_TK', '0.45'))
     if MODE == 'float':
         DZ = float(os.environ.get('ROBIN_WING_DZ', '-0.60')); GAP = float(os.environ.get('ROBIN_WING_GAP', '0.45'))
         sh = Vector((1.19 + GAP, -0.80, 2.10 + DZ))
         tip = sh + Vector((0.62, -0.38, 0.22))
-        LS = float(os.environ.get('ROBIN_WING_LS', '0.80')); SW = 8
+        LS = float(os.environ.get('ROBIN_WING_LS', '0.88')); SW = 6  # P5.1: 略放大(碰撞须 0)
     elif MODE == 'plate':
         # P6: 肩甲贴墙(x≈0.50) → 套筒外口(x≈1.08) → 翼骨外延; 挂点舷楼中部偏上, 避开副炮回转包络
         DZ = float(os.environ.get('ROBIN_WING_DZ', '-0.25'))
@@ -365,7 +365,7 @@ def build_wings():
     # 翼骨: 细白, 下沿发光(P6 加粗)
     m = 14
     P.append(tube([tuple(arm(i / m)) for i in range(m + 1)], [0.090 * (1 - 0.55 * i / m) + 0.022 for i in range(m + 1)], 'white', seg=12))
-    P.append(tube([tuple(arm(i / m) + Vector((0, 0.0, -0.080 * (1 - 0.55 * i / m)))) for i in range(m + 1)], [0.014] * (m + 1), 'glow', seg=5))
+    P.append(tube([tuple(arm(i / m) + Vector((0, 0.0, -0.075 * (1 - 0.6 * i / m)))) for i in range(m + 1)], [0.012] * (m + 1), 'glow', seg=5))  # P5.1
     UP = lambda tilt: (0, 1.0, math.tan(math.radians(tilt)))
     # 初级飞羽 ×6
     for t, L, el, sw, W in [(0.50, 1.45, 4, 46, 0.30), (0.60, 1.70, 7, 38, 0.31), (0.70, 1.95, 10, 30, 0.32),
