@@ -264,47 +264,33 @@ def plume(L, W, th, col, curve=0.14, edge=True, shaft=True, glow=False, round_ti
         parts.append(tube(sp, [0.020 * (1 - 0.65 * i / 16) + 0.004 for i in range(17)], 'glow' if glow else 'gold', seg=5))
     return parts
 
-def shoulder_plate(p0, p1, height, th, col='pnl_white'):
-    """贴舷楼的装甲肩板: p0 贴墙内缘中心, p1 外缘中心; 沿船长 ±半长, 竖向 ±半高, 厚度 th。
-    UV 走 pnl_ 面板细节区。P6: 翼根咬合船体用, 不用大球。"""
+def shoulder_plate(p0, p1, height, th, col='white', taper=0.55):
+    """贴舷楼的装甲肩板(P6): p0 贴墙内缘中心 → p1 外缘; 外端收窄(taper), 略上扬。
+    默认实色 white(不用 pnl_ 重 AO, 避免港口读成灰方块)。"""
     p0, p1 = Vector(p0), Vector(p1)
-    out = (p1 - p0); Lout = out.length; nrm = out.normalized()
-    # 沿船长方向(−Y 为主)与上方向
+    nrm = (p1 - p0).normalized()
     along = Vector((0, -1, 0)); along = (along - nrm * along.dot(nrm)).normalized()
     up = nrm.cross(along).normalized()
     if up.z < 0: up = -up; along = -along
-    half_L = abs(p1.y - p0.y) * 0.55 + 0.35   # 船长向半长
-    half_H = height * 0.5
+    half_L0 = abs(p1.y - p0.y) * 0.55 + 0.42   # 内端半长(船长向)
+    half_L1 = half_L0 * taper                      # 外端收窄
+    half_H0 = height * 0.5; half_H1 = height * 0.38
     bm = bmesh.new(); uvl = bm.loops.layers.uv.new('UVMap')
-    # 8 角: 内/外 × 四角(前后×上下)
-    corners = []
-    for t_out, du in ((0.0, 0.0), (1.0, th)):  # 内面 / 外面(外面再外推 th)
-        c = p0.lerp(p1, t_out) + nrm * du
-        for sL in (-1, 1):
-            for sH in (-1, 1):
-                corners.append(bm.verts.new(c + along * (sL * half_L) + up * (sH * half_H)))
-    # corners: 0-3 内(−L−H, −L+H, +L−H, +L+H 按上面循环实际是 sL外层 sH内层)
-    # rebuild ordered: for each face
-    # Simpler: create as two rings
-    bm.free()
-    bm = bmesh.new(); uvl = bm.loops.layers.uv.new('UVMap')
-    def ring(c, du):
+    def ring(c, half_L, half_H, du):
         o = c + nrm * du
         return [bm.verts.new(o + along * (sL * half_L) + up * (sH * half_H))
                 for sL, sH in [(-1, -1), (1, -1), (1, 1), (-1, 1)]]
-    rin = ring(p0, 0.0); rout = ring(p0.lerp(p1, 1.0), th)
-    def face(vs, u0, u1, v0, v1):
+    rin = ring(p0, half_L0, half_H0, 0.0)
+    rout = ring(p1, half_L1, half_H1, th)
+    def face(vs, u0=0, u1=1, v0=0, v1=1):
         f = bm.faces.new(vs)
-        for lp, (uu, vv) in zip(f.loops, [(u0, v0), (u1, v0), (u1, v1), (u0, v1)]):
-            lp[uvl].uv = (uu, vv)
-    # 外面(细节区)
-    face([rout[0], rout[1], rout[2], rout[3]], 0, 1, 0, 1)
-    # 内面
-    face([rin[0], rin[3], rin[2], rin[1]], 0, 1, 0, 1)
-    # 四侧
+        uvs = [(u0, v0), (u1, v0), (u1, v1), (u0, v1)]
+        for lp, uv in zip(f.loops, uvs): lp[uvl].uv = uv
+    face([rout[0], rout[1], rout[2], rout[3]])
+    face([rin[0], rin[3], rin[2], rin[1]])
     for i in range(4):
         j = (i + 1) % 4
-        face([rin[i], rin[j], rout[j], rout[i]], 0, 1, 0, 0.15)
+        face([rin[i], rin[j], rout[j], rout[i]], 0, 1, 0, 0.2)
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
     return new_obj('shoulder', bm, [col])
 
@@ -326,8 +312,8 @@ def build_wings():
         DZ = float(os.environ.get('ROBIN_WING_DZ', '-0.25'))
         wall = Vector((0.50, -0.70, 1.88 + DZ))          # 贴舷楼外墙
         sh = Vector((1.08, -0.82, 2.05 + DZ))            # 套筒外口 / 翼骨根(=咬合后外伸)
-        tip = sh + Vector((1.05, -0.50, 0.32))           # 翼骨更长 → 翼展再大一档
-        LS = float(os.environ.get('ROBIN_WING_LS', '1.00')); SW = 4
+        tip = sh + Vector((1.20, -0.42, 0.28))           # P6b: 翼骨更外展(俯视剪影更宽)
+        LS = float(os.environ.get('ROBIN_WING_LS', '1.05')); SW = 2
     else:  # attach
         DZ = float(os.environ.get('ROBIN_WING_DZ', '-0.40'))
         wall = Vector((0.47, -0.64, 1.98 + DZ))
@@ -347,28 +333,26 @@ def build_wings():
             t = i / 7.0; pt = p0 + (sh - p0) * t + Vector((0, 0, -0.10 * math.sin(math.pi * t)))
             d = sphere(1.0, 'glow', 10); rr = 0.012 + 0.014 * t; xform(d, loc=tuple(pt), scale=(rr, rr, rr)); P.append(d)
     elif MODE == 'plate':
-        # 肩甲: 大块装甲板从墙长出(白面板细节), 外缘略上扬
-        p_out = wall.lerp(sh, 0.55) + Vector((0.02, 0, 0.06))
-        P.append(shoulder_plate(wall, p_out, height=0.62, th=0.045, col='pnl_white'))
-        # 下层略小的 peri 叠板(厚度感)
-        p_out2 = wall.lerp(sh, 0.42) + Vector((0.01, 0.04, -0.08))
-        P.append(shoulder_plate(wall + Vector((0.01, 0.05, -0.10)), p_out2, height=0.38, th=0.032, col='pnl_peri'))
+        # 肩甲: 白实色收窄板(从墙长出) + peri 下层叠板; 避免 pnl_ 重 AO 读成灰方块
+        p_out = wall.lerp(sh, 0.62) + Vector((0.02, 0, 0.08))
+        P.append(shoulder_plate(wall, p_out, height=0.70, th=0.050, col='white', taper=0.50))
+        p_out2 = wall.lerp(sh, 0.48) + Vector((0.01, 0.06, -0.10))
+        P.append(shoulder_plate(wall + Vector((0.015, 0.06, -0.12)), p_out2, height=0.42, th=0.036, col='peri', taper=0.45))
         # 小套筒(护腕): 肩甲外缘 → 翼骨根, 张口流线, 无大球
         n = 10
-        sleeve_pts = [tuple(wall.lerp(sh, 0.45 + 0.55 * i / n)) for i in range(n + 1)]
-        P.append(tube(sleeve_pts, [0.11 - 0.045 * (i / n) ** 0.7 for i in range(n + 1)], 'white', seg=14))
-        P.append(tube([sleeve_pts[int(0.7 * n)], sleeve_pts[int(0.85 * n)]], [0.078, 0.078], 'gold', seg=14))
-        P.append(tube([sleeve_pts[int(0.35 * n)], sleeve_pts[int(0.48 * n)]], [0.095, 0.095], 'glow', seg=14))  # 套筒发光环
-        # 肩甲外缘发光缝 + 金边(白天一眼可见的发光结构)
-        edge_lo = wall + Vector((0.02, -0.38, -0.28)); edge_hi = p_out + Vector((0.02, -0.38, 0.28))
-        P.append(tube([tuple(edge_lo), tuple(edge_hi)], [0.010, 0.010], 'glow', seg=6))
-        edge_lo2 = wall + Vector((0.02, 0.38, -0.28)); edge_hi2 = p_out + Vector((0.02, 0.38, 0.28))
-        P.append(tube([tuple(edge_lo2), tuple(edge_hi2)], [0.010, 0.010], 'glow', seg=6))
-        P.append(tube([tuple(p_out + Vector((0.03, -0.35, 0.30))), tuple(p_out + Vector((0.03, 0.35, 0.30)))], [0.008, 0.008], 'gold', seg=6))
-        # 细斜撑: 舷墙下方 → 套筒中段(结构感, 非光点)
+        sleeve_pts = [tuple(wall.lerp(sh, 0.50 + 0.50 * i / n)) for i in range(n + 1)]
+        P.append(tube(sleeve_pts, [0.100 - 0.040 * (i / n) ** 0.7 for i in range(n + 1)], 'white', seg=14))
+        P.append(tube([sleeve_pts[int(0.7 * n)], sleeve_pts[int(0.85 * n)]], [0.072, 0.072], 'gold', seg=14))
+        P.append(tube([sleeve_pts[int(0.35 * n)], sleeve_pts[int(0.48 * n)]], [0.088, 0.088], 'glow', seg=14))
+        # 肩甲上下沿发光缝 + 外缘金边
+        for sy in (-1, 1):
+            a = wall + Vector((0.02, sy * 0.40, -0.32)); b = p_out + Vector((0.02, sy * 0.22, 0.30))
+            P.append(tube([tuple(a), tuple(b)], [0.012, 0.012], 'glow', seg=6))
+        P.append(tube([tuple(p_out + Vector((0.03, -0.22, 0.32))), tuple(p_out + Vector((0.03, 0.22, 0.32)))], [0.009, 0.009], 'gold', seg=6))
+        # 细斜撑
         br0 = Vector((0.55, -0.60, 1.20 + DZ)); br1 = wall.lerp(sh, 0.65) + Vector((0, 0, -0.08))
-        P.append(tube([tuple(br0 + (br1 - br0) * (i / 8)) for i in range(9)], [0.040 + 0.012 * i / 8 for i in range(9)], 'white', seg=10))
-        P.append(tube([tuple(br0 + (br1 - br0) * (i / 8) + Vector((0.05, 0, 0))) for i in range(9)], [0.010] * 9, 'glow', seg=5))
+        P.append(tube([tuple(br0 + (br1 - br0) * (i / 8)) for i in range(9)], [0.038 + 0.012 * i / 8 for i in range(9)], 'white', seg=10))
+        P.append(tube([tuple(br0 + (br1 - br0) * (i / 8) + Vector((0.05, 0, 0))) for i in range(9)], [0.011] * 9, 'glow', seg=5))
     else:
         wall = Vector((0.47, -0.64, 1.98 + DZ))
         n = 8
@@ -656,7 +640,7 @@ def build_bow():
     root_R = Vector((0.14, 8.24, 0.66))
     wall_R = Vector((0.06, 8.30, 0.55))
     P = []
-    P.append(shoulder_plate(wall_R, root_R, height=0.28 * S / 0.40, th=0.022, col='pnl_white'))
+    P.append(shoulder_plate(wall_R, root_R, height=0.28 * S / 0.40, th=0.022, col='white', taper=0.55))
     P += wing_fan(tuple(root_R), S, (30, 70), (0, 0.5, 1.0), n_pri=3, n_sec=1, n_cov=1)
     for p in P: p.select_set(False)
     r = join(P, 'bowp_R'); l = mirror_x(r, 'bowp_L')

@@ -13,7 +13,7 @@ from PIL import Image, ImageDraw, ImageFilter
 
 # 屏上目标色(P2 色板, 见 color_derive/robin_p2_scheme.json)
 PAL = {
- 'white':  '#F4F0E8', 'peri': '#6EB4F0', 'peri_d': '#5A9EE0', 'navy': '#3A5578', 'deck': '#C9CEE0',  # P6: peri→青(#58B8FF系); navy→浅灰蓝(水下靴少抢白)
+ 'white':  '#F4F0E8', 'peri': '#6EB4F0', 'peri_d': '#5A9EE0', 'navy': '#7A9BB8', 'deck': '#C9CEE0',  # P6b: navy 再浅(侧视下水线少抢)
  'dhwhite':'#E8E4EE', 'turret':'#F5F2F8', 'violet':'#7546C2', 'glow':'#58B8FF', 'gold':'#D8B868',
  'roof':   '#E9ECF5', 'star': '#F2EDDF', 'royal': '#573C9F',
 }
@@ -193,9 +193,9 @@ def paint_hull_blocks(pos,nrm,cov,upc=None):
     f=np.clip(y/ez,-2,2); S=side
     TC=0.54   # 翼组站位(游戏 z≈−0.7)
     # A3 提亮: 深藏青只留水线下靴带(f<0.12), 0.12–0.22 periwinkle-深; 光束底改乳白, 光束本身 periwinkle 为主
-    # P6: 船艏水下深蓝太抢 → 靴带收成浅灰蓝细带; 水线改发光细带(白天发光结构); 舷侧大白底从更低处起
-    idx[S&(f<0.07)]=NAMES.index('navy'); idx[S&(f>=0.07)&(f<0.105)]=NAMES.index('glow')
-    hi=S&(f>=0.105)
+    # P6b: 靴带再收; 水线发光; 白底从 f≈0.09 起
+    idx[S&(f<0.05)]=NAMES.index('navy'); idx[S&(f>=0.05)&(f<0.09)]=NAMES.index('glow')
+    hi=S&(f>=0.09)
     idx[hi]=NAMES.index('white')
     # A4: 斜条合并 → 每半船 2 块大硬边光束(大 periwinkle + 次 peri_d), 端部 royal 楔; 一条连续发光主线贯穿全船
     LEAN=0.030
@@ -206,9 +206,9 @@ def paint_hull_blocks(pos,nrm,cov,upc=None):
             e=hi&(np.abs(tt-(t1 if sgn>0 else t0))<0.0035); idx[e]=NAMES.index(edge_col)
         return m
     # A5: 每侧 4 块(艏 royal 楔 / 前大 periwinkle / 后大 periwinkle / 艉 royal 楔), 其余留乳白大底
-    # P6: 白主导再压一档; peri 辅色更窄(≈18% 船长/侧), 端部小 peri 楔(不再用 royal 深紫)
-    beam(0.04,0.065,'peri',1);  beam(0.30,0.40,'peri',1,'glow')
-    beam(0.66,0.76,'peri',-1,'glow');  beam(0.940,0.965,'peri',-1)
+    # P6b: peri 辅色再窄(≈12% 船长/侧)
+    beam(0.04,0.058,'peri',1);  beam(0.32,0.40,'peri',1,'glow')
+    beam(0.66,0.74,'peri',-1,'glow');  beam(0.945,0.965,'peri',-1)
     # 舯「聚光」区: 乳白 + 金色三线谱折角
     gap=hi&(np.abs(t-TC)<0.045); idx[gap]=NAMES.index('white')
     for k in range(3):
@@ -217,7 +217,7 @@ def paint_hull_blocks(pos,nrm,cov,upc=None):
         idx[v]=NAMES.index('gold')
     # 发光主线: 沿舷 f≈0.34 贯穿艏艉, 在舯部聚光区折成向上的 V(指向翼根), 线宽加粗
     fl=0.34+0.50*np.clip(1-np.abs(t-TC)/0.045,0,1)
-    idx[S&(np.abs(f-fl)<0.055)&(t>0.03)&(t<0.97)]=NAMES.index('glow')   # P6: 主发光线再加粗(白天占比拉向标杆~7%)
+    idx[S&(np.abs(f-fl)<0.065)&(t>0.03)&(t<0.97)]=NAMES.index('glow')   # P6b: 主发光线再加粗
     # 艏艉 navy 尖楔 + 星点
     bow=hi&(t<0.012+0.022*(1-f)); stern=hi&(t>0.988-0.018*(1-f))   # P6: 艏艉深色尖楔再收
     idx[bow|stern]=NAMES.index('navy')
