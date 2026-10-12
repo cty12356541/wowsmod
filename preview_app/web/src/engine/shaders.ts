@@ -238,13 +238,17 @@ export const FRAG = {
       ao *= ( 1.0 - 0.35 * under ) * ( 1.0 - 0.4 * nearWl );
       gl_FragColor.rgb *= mix( 1.0, clamp( ao, uAoFloor * 0.85, 1.0 ), uAoAmt );
     }
+    vec3 wmPreG = gl_FragColor.rgb;
     if ( uGameRaw > 0.0 ) gl_FragColor.rgb = gl_FragColor.rgb * uGameRaw;
     else {
       vec3 gx = max( gl_FragColor.rgb * uGain - uToe, 0.0 );
       vec3 gp = pow( gx, vec3( uTmP ) );
       vec3 gc = min( uTmS * gp / ( gp + 1.0 ), vec3( 1.0 ) );
       float wmGL = dot( gc, vec3( 0.2126, 0.7152, 0.0722 ) );
-      gc = clamp( mix( vec3( wmGL ), gc, uSat ), 0.0, 1.0 );
+      // 发光不参与夜间去饱和: 按自发光占像素辐亮度的比例把饱和度拉回 ≥1(港口夜景发光线/道具发光保持原色)
+      float wmEF = clamp( dot( totalEmissiveRadiance, vec3( 0.2126, 0.7152, 0.0722 ) ) / max( dot( wmPreG, vec3( 0.2126, 0.7152, 0.0722 ) ), 1e-4 ), 0.0, 1.0 );
+      float wmSat = mix( uSat, max( uSat, 1.0 ), smoothstep( 0.05, 0.6, wmEF ) );
+      gc = clamp( mix( vec3( wmGL ), gc, wmSat ), 0.0, 1.0 );
       // 金色色相补偿: 港口金偏黄/橄榄, 工作台偏橙 → 高彩暖色抬 G、略压 R
       if ( uGoldShift > 0.001 ) {
         float mx = max( gc.r, max( gc.g, gc.b ) ), mn = min( gc.r, min( gc.g, gc.b ) );
