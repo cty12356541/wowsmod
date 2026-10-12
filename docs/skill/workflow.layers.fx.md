@@ -10,9 +10,9 @@
 | 烟囱烟 | `particles/animated/Smoke_*` | 可行(港口实证) |
 | 炮口焰 | `MuzzleFlashes_*` | 需训练房实测 |
 | 开火烟 | `trails/shot_smoke`、`shot_hat`(RGB 白, 换色=乘色) | 需训练房实测 |
-| 航迹 | `trails/foam*` 是数据贴图(R0/G 遮罩/B .5) | 颜色大概率不可行, 需实测 |
+| 航迹 | `trails/foam*` 是数据贴图(R0/G 遮罩/B .5), 无 RGB 颜色 | **颜色不可改**(已实拆确认); 本主题不改航迹 |
 发射器参数在 `content/assets.bin` 不可改; 按船只能动挂点位置(.visual), GP 绑定不改。
 **工具**: `fx find --kind` → `fx ship-effects <船> [--gp]`(挂点→粒子) → `fx init <项目> --from 主题.json` → `fx apply <项目>`(跳过数据贴图; 缺 particles pkg 报 missing)。主题 = 项目 `fx.json` 的 `preview`(tint/strength/keep/alpha), 工作台与换色同一公式。特效单独建 loose 项目, 不混进船 mod。
 **预览**: `render --look game-day|game-night --query "env=water&speed=full&warm=20"`(航迹+烟囱烟, 烟从 HP_FX_Smoke_* 冒) / `"…&fire=main&fireT=0.09"`(炮口焰; 0.6 看开火烟); `fx=vanilla` 出原版对照。无骨骼几何用估计炮口。
-**验证**: 训练房已授权(炮火/开火烟/航迹): 原版与主题各一轮同机位连拍; 结束关游戏, 只删特效文件。
+**验证**: 训练房已授权(炮火/开火烟/航迹): 原版与主题各一轮同机位连拍; 结束关游戏, 只删特效文件。航迹颜色以贴图实拆为准(foam*=数据), 训练房只拍对照证明观感未改。模式下拉点 Join 钮内侧 teal 船标(~1397,40@2560x1440), 勿点红钮右外侧灰条。
 **完成标准**: 设计卡(色/形/强度/呼应/克制/可读性) + 可改性表 + 原版对照图; 列出全局受影响贴图; 未实测项写明。
