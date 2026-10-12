@@ -1,7 +1,8 @@
-﻿param([string]$Proj='<WORK_DIR>\wowsmod\out\e2e\robin\dir_p3',[string]$Spec='<USERPROFILE>\e2e_port\p3\props_spec.json')
+﻿param([string]$Proj='<WORK_DIR>\wowsmod\out\e2e\robin\dir_p3',[string]$Spec='<USERPROFILE>\e2e_port\p3\props_spec.json',[string]$Mod='')
 # apply 后自检(r32): 每个外带件必须进入「会被加载的」visual(船体分段或炮塔), 发光材质必须是 emissive fx。
 # 失败即非 0 退出, 不要 install。根因: model animate 只把 .ssm 挂进 .model, 网格在独立 .model 里从未被加载 → 羽翼在游戏里消失, 而 apply 报 ok=True。
-$D=Get-Item (Join-Path $Proj 'assets\res_mods\PnFMods\Robin_Bourgogne')   # 只查本 mod(ModsSDK.zip 是 SDK 占位)
+if(-not $Mod){ $Mod=([regex]::Match((Get-Content (Join-Path $Proj 'mod.toml') -Raw),'(?m)^name\s*=\s*"([^"]+)"')).Groups[1].Value }
+$D=Get-Item (Join-Path $Proj "assets\res_mods\PnFMods\$Mod")   # 只查本 mod(ModsSDK.zip 是 SDK 占位)
 $cfg=Get-Content $Spec -Raw -Encoding UTF8 | ConvertFrom-Json; $bad=0
 $vis=Get-ChildItem $D.FullName -Recurse -Filter *.visual | ? { $_.FullName -notmatch '\\misc\\' }
 foreach($p in $cfg.props){
