@@ -1,0 +1,11 @@
+[package]
+name = "wowsmod-oodle"
+description = "Clean-room pure-Rust Oodle block decoder (work in progress). See docs/oodle-cleanroom/."
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+
+[dependencies]
+
+[dev-dependencies]

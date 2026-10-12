@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/wowsmod-formats", "crates/wowsmod"]
+members = ["crates/wowsmod-formats", "crates/wowsmod", "crates/wowsmod-oodle"]
 exclude = ["vendor/oozextract"]
 
 [workspace.package]
