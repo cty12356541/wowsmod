@@ -6,6 +6,7 @@
 
 | 日期 | 层 | 差在哪 | 根因 | 怎么补 | 效果 |
 |---|---|---|---|---|---|
+| 10-12 r40 | 7 | 金偏橙、深紫偏冷、水过透、外带件无 AO、夜景未量化 | 全局曲线顾此失彼; 无 SSAO; 夜 sat 过高 | gamelook+shader: contactAO/waterOpa/goldHue/periHue; night sat→0.06; 重 eval | 区均 ΔE≈7.6(原 7.5); high/gold 13→5.6; 夜近黑白 |
 | 10-12 r39 | 6 | 航迹想跟主题换色 | foam*/foam_wide 实拆为数据贴图(R0/G 遮罩/B.5), 无 RGB | skill+MODDABILITY 标颜色不可改; 主题 wake enable_if 永不启用; 训练房只拍对照 | 航迹不改色 |
 | 10-12 r34 | 3/5/7 | ①炮塔壳港口读成平涂盒子+后下黑缝 ②发光读成白漆 ③艏翼与舯翼风格不一 ④原壳小突起打碎色块 | ①整圈套壳+单像素纯色 UV, 缝隙被港口 SSAO 压黑; 工作台环境光强/无 SSAO 没暴露 ②发光色近白 #B8E8FF、power 0.35 ③艏翼另写厚刃 blade() ④从未盘点原壳 | ①T3: 中上带局部板/封缝/去前板/面板细节区/顶板点缀; wysiwyg 记残差交预览 ②#58B8FF + power 0.7 ③wing_fan 复用 plume, check 加共享造型语言规则 ④`model prune` + 新节点 shape.refine.clean; apply_p4 末尾 verify_apply 闸门 | T3 回转/仰角 0 碰撞; 港口见报告 |
 | 10-12 r38 | 3/5 | P6 抬白把 peri 改青灰+浅 navy → 发闷; 用户否决大肩甲, 要在 P5 上微调 | 把「抬白」做成「降辅色饱和」 | P5.1: 回悬浮+LS0.88; peri 回 #A8C2F2; navy 细靴仍饱和 #243A78; violet 更清 #8B70E0; 发光线/羽轴/power 略提(0.82); 面板保持深 AO | 预览白≈38%/发光 3.7%; 港口见报告 |
