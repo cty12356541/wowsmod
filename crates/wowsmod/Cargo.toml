@@ -29,6 +29,8 @@ toml = "0.8"
 regex = "1"
 # model import 多材质 GLB 的 JPEG 贴图(MIT OR Apache-2.0 OR Zlib, 纯 Rust)
 zune-jpeg = "0.4"
+# 运行时加载用户本机 Oodle 运行库(ISC)
+libloading = "0.8"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"

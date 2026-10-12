@@ -48,7 +48,22 @@ pub fn set_oodle_backend(b: Box<dyn OodleBackend>) -> bool {
     BACKEND.set(b).is_ok()
 }
 
+/// 延迟加载器: 第一次需要 Oodle 时调用一次(例如运行时加载用户游戏自带的 Oodle 库)。
+static LOADER: OnceLock<fn() -> Option<Box<dyn OodleBackend>>> = OnceLock::new();
+
+/// 注册延迟加载器(不会立即执行)。返回是否注册成功。
+pub fn set_oodle_loader(f: fn() -> Option<Box<dyn OodleBackend>>) -> bool {
+    LOADER.set(f).is_ok()
+}
+
 pub fn oodle_backend() -> Option<&'static dyn OodleBackend> {
+    if BACKEND.get().is_none() {
+        if let Some(f) = LOADER.get() {
+            if let Some(b) = f() {
+                let _ = BACKEND.set(b);
+            }
+        }
+    }
     if BACKEND.get().is_none() {
         #[cfg(feature = "oozextract")]
         {
@@ -253,5 +268,31 @@ mod tests {
         assert_eq!(method_for(6, 10, 10), Method::Stored);
         assert_eq!(method_for(LESTA_OODLE_CINFO, 5, 10), Method::LestaOodle);
         assert_eq!(method_for(6, 5, 10), Method::Deflate);
+    }
+}
+
+#[cfg(test)]
+mod backend_tests {
+    use super::*;
+    struct Mock;
+    impl OodleBackend for Mock {
+        fn name(&self) -> &'static str { "mock" }
+        fn decompress(&self, input: &[u8], output: &mut [u8]) -> std::result::Result<usize, String> {
+            let n = input.len().min(output.len());
+            output[..n].copy_from_slice(&input[..n]);
+            Ok(n)
+        }
+    }
+    fn load_mock() -> Option<Box<dyn OodleBackend>> { Some(Box::new(Mock)) }
+
+    #[test]
+    fn lazy_loader_registers_backend_once() {
+        assert!(set_oodle_loader(load_mock));
+        let b = oodle_backend().expect("loader should provide backend");
+        assert_eq!(b.name(), "mock");
+        let mut out = [0u8; 3];
+        assert_eq!(b.decompress(b"abc", &mut out).unwrap(), 3);
+        assert_eq!(&out, b"abc");
+        assert!(!set_oodle_backend(Box::new(Mock)), "second registration must fail");
     }
 }

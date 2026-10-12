@@ -17,6 +17,7 @@ mod meshsrc;
 mod mcp;
 mod preview;
 mod modproj;
+mod oodle_rt;
 mod registry;
 mod render;
 mod texcmd;
@@ -260,6 +261,7 @@ fn main() {
         Ok(c) => c,
         Err(e) => e.exit(),
     };
+    oodle_rt::install(cli.game.as_deref());
     let json_out = cli.json_out.clone();
     if json_out.is_some() {
         cli.json = true;
@@ -412,6 +414,7 @@ fn cmd_doctor(cli: &Cli) -> Result<i32> {
             "oozextract_risk": "oozextract 是 GPL(powzix/ooz) 的 Rust 移植; 默认未编译。开发可用 --features oozextract; 发布请用本机 Oodle(见 LICENSE_REPORT.md / help troubleshoot)",
             "runtime_hint": "优先从本机游戏/用户提供的 oo2core*.dll 加载(WOWSMOD_OODLE_DLL); 勿分发游戏内 DLL"
         },
+        "oodle": oodle_rt::status(),
         "candidates": cands,
         "blender": blender,
     });
@@ -478,6 +481,7 @@ fn cmd_doctor(cli: &Cli) -> Result<i32> {
     }
     println!("wowsmod {}  (Oodle 后端: {})", env!("CARGO_PKG_VERSION"), compression::oodle_backend().map(|b| b.name()).unwrap_or("未编译"));
     if compression::oodle_backend().is_none() {
+        println!("提示: 未找到本机 Oodle 运行库(oo2core*.dll); 设 WOWSMOD_OODLE=<dll 或目录> 或放到 exe 同目录。见 {}", oodle_rt::README_HINT);
         println!("提示: 默认未含 oozextract(许可证风险, 见 LICENSE_REPORT.md)。开发构建: cargo build --release --features oozextract");
         println!("      或设置 WOWSMOD_OODLE_DLL=指向本机 oo2core*.dll(若已实现运行时加载)");
     } else if compression::oodle_backend().map(|b| b.name().contains("oozextract")).unwrap_or(false) {
