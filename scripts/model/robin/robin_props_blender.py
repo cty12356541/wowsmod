@@ -257,90 +257,157 @@ def plume(L, W, th, col, curve=0.14, edge=True, shaft=True, glow=False, round_ti
         return 1.35 * W * min(1.0, t / 0.22) ** 0.6 * (1.0 - t) ** 0.85 + 0.003
     if edge:
         pts = [(L * t, -curve * L * t * t + 0.5 * wv(t) + 0.003, th * 0.2) for t in [0.08 + 0.84 * i / 16 for i in range(17)]]
-        parts.append(tube(pts, [0.012 * (1 - 0.7 * i / 16) + 0.002 for i in range(17)], 'gold', seg=5))
+        parts.append(tube(pts, [0.014 * (1 - 0.7 * i / 16) + 0.003 for i in range(17)], 'gold', seg=5))  # P6: 金前缘略粗(白天可读)
     if shaft:
         sp = [(L * t, -curve * L * t * t, th * (1 - (0.6 * t)) + 0.004) for t in [0.02 + 0.85 * i / 16 for i in range(17)]]
-        parts.append(tube(sp, [0.013 * (1 - 0.7 * i / 16) + 0.002 for i in range(17)], 'glow' if glow else 'gold', seg=5))
+        # P6: 发光羽轴加粗(白天发光占比目标≈标杆 7%)
+        parts.append(tube(sp, [0.020 * (1 - 0.65 * i / 16) + 0.004 for i in range(17)], 'glow' if glow else 'gold', seg=5))
     return parts
 
+def shoulder_plate(p0, p1, height, th, col='pnl_white'):
+    """贴舷楼的装甲肩板: p0 贴墙内缘中心, p1 外缘中心; 沿船长 ±半长, 竖向 ±半高, 厚度 th。
+    UV 走 pnl_ 面板细节区。P6: 翼根咬合船体用, 不用大球。"""
+    p0, p1 = Vector(p0), Vector(p1)
+    out = (p1 - p0); Lout = out.length; nrm = out.normalized()
+    # 沿船长方向(−Y 为主)与上方向
+    along = Vector((0, -1, 0)); along = (along - nrm * along.dot(nrm)).normalized()
+    up = nrm.cross(along).normalized()
+    if up.z < 0: up = -up; along = -along
+    half_L = abs(p1.y - p0.y) * 0.55 + 0.35   # 船长向半长
+    half_H = height * 0.5
+    bm = bmesh.new(); uvl = bm.loops.layers.uv.new('UVMap')
+    # 8 角: 内/外 × 四角(前后×上下)
+    corners = []
+    for t_out, du in ((0.0, 0.0), (1.0, th)):  # 内面 / 外面(外面再外推 th)
+        c = p0.lerp(p1, t_out) + nrm * du
+        for sL in (-1, 1):
+            for sH in (-1, 1):
+                corners.append(bm.verts.new(c + along * (sL * half_L) + up * (sH * half_H)))
+    # corners: 0-3 内(−L−H, −L+H, +L−H, +L+H 按上面循环实际是 sL外层 sH内层)
+    # rebuild ordered: for each face
+    # Simpler: create as two rings
+    bm.free()
+    bm = bmesh.new(); uvl = bm.loops.layers.uv.new('UVMap')
+    def ring(c, du):
+        o = c + nrm * du
+        return [bm.verts.new(o + along * (sL * half_L) + up * (sH * half_H))
+                for sL, sH in [(-1, -1), (1, -1), (1, 1), (-1, 1)]]
+    rin = ring(p0, 0.0); rout = ring(p0.lerp(p1, 1.0), th)
+    def face(vs, u0, u1, v0, v1):
+        f = bm.faces.new(vs)
+        for lp, (uu, vv) in zip(f.loops, [(u0, v0), (u1, v0), (u1, v1), (u0, v1)]):
+            lp[uvl].uv = (uu, vv)
+    # 外面(细节区)
+    face([rout[0], rout[1], rout[2], rout[3]], 0, 1, 0, 1)
+    # 内面
+    face([rin[0], rin[3], rin[2], rin[1]], 0, 1, 0, 1)
+    # 四侧
+    for i in range(4):
+        j = (i + 1) % 4
+        face([rin[i], rin[j], rout[j], rout[i]], 0, 1, 0, 0.15)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    return new_obj('shoulder', bm, [col])
+
+
 def build_wings():
-    """方案 A5「舞台·展翼歌者」(A4 → 用户: 肩球臃肿、羽像船桨、横向金条太多)。
-    衔接: 贴舷楼外墙的薄壁板 + 流线护腕套筒(壁端略张口) + 细斜撑; 不用球。
-    翼骨: 套筒外接细白骨(下沿发光)。羽: plume() 弯弧收尖, 长短渐变 ——
-    初级飞羽×6(骨外半段, 越外越长越外展) → 次级×6(骨内半段, 短, periwinkle, 叠在初级下) → 覆羽两排(圆头白, 盖住羽根) → 裙摆×3。
-    剪影目标: 知更鸟立绘头翼(白→淡紫, 外缘长尖羽成扇弧, 内侧短羽叠层)。"""
+    """P6「装甲根 + 羽末梢」: 贴舷楼大型肩甲 + 小套筒(无大球) + 羽片从根部长出。
+    取代 A7 悬浮光点挂饰 —— 标杆好看核心是外带件从船身长出来、成片有厚度。
+    MODE=plate(默认) | float(旧悬浮) | attach(A5 薄壁+套筒, 无肩甲)。"""
     P = []
-    # A6: 整翼下移 DZ, 羽厚 ×TK, 羽宽 ×0.9, 小覆羽排取消
-    # A7 悬浮(默认): 无墙板/套筒/斜撑实体; 整翼外移到舷外(翼根 x≈船舷 1.19 + 间隙 GAP), 下移 DZ=−0.60;
-    #   翼根 = 小发光悬浮核心(金细环 + 发光环 + 发光核, 光环语言); 与船弱关联 = 一串渐小发光光点(非实体杆)。
-    MODE = os.environ.get('ROBIN_WING_MODE', 'float')
+    MODE = os.environ.get('ROBIN_WING_MODE', 'plate')
     TK = float(os.environ.get('ROBIN_WING_TK', '0.45'))
     if MODE == 'float':
         DZ = float(os.environ.get('ROBIN_WING_DZ', '-0.60')); GAP = float(os.environ.get('ROBIN_WING_GAP', '0.45'))
         sh = Vector((1.19 + GAP, -0.80, 2.10 + DZ))
-        tip = sh + Vector((0.62, -0.38, 0.22))      # 翼骨更短, 控制翼展/船宽
-        LS = float(os.environ.get('ROBIN_WING_LS', '0.80')); SW = 8   # 初级再收短、多后掠; P5: LS 0.70→0.80(港口距离羽翼读小)
-    else:
+        tip = sh + Vector((0.62, -0.38, 0.22))
+        LS = float(os.environ.get('ROBIN_WING_LS', '0.80')); SW = 8
+    elif MODE == 'plate':
+        # P6: 肩甲贴墙(x≈0.50) → 套筒外口(x≈1.08) → 翼骨外延; 挂点舷楼中部偏上, 避开副炮回转包络
+        DZ = float(os.environ.get('ROBIN_WING_DZ', '-0.25'))
+        wall = Vector((0.50, -0.70, 1.88 + DZ))          # 贴舷楼外墙
+        sh = Vector((1.08, -0.82, 2.05 + DZ))            # 套筒外口 / 翼骨根(=咬合后外伸)
+        tip = sh + Vector((1.05, -0.50, 0.32))           # 翼骨更长 → 翼展再大一档
+        LS = float(os.environ.get('ROBIN_WING_LS', '1.00')); SW = 4
+    else:  # attach
         DZ = float(os.environ.get('ROBIN_WING_DZ', '-0.40'))
-        sh = Vector((0.82, -0.72, 2.10 + DZ)); tip = Vector((1.75, -1.05, 2.38 + DZ)); LS = 0.86; SW = 0
-    wall = Vector((0.47, -0.64, 1.98 + DZ))
+        wall = Vector((0.47, -0.64, 1.98 + DZ))
+        sh = Vector((0.82, -0.72, 2.10 + DZ)); tip = Vector((1.75, -1.05, 2.38 + DZ))
+        LS = 0.86; SW = 0
     arm = lambda t: sh + (tip - sh) * t
     if MODE == 'float':
-        ax = (sh - tip).normalized()   # 核心环面朝翼骨方向
+        ax = (sh - tip).normalized()
         core = sphere(1.0, 'glow', 20); xform(core, loc=tuple(sh), scale=(0.075, 0.075, 0.075)); P.append(core)
         for R, r, col in [(0.15, 0.016, 'gold'), (0.20, 0.008, 'glow'), (0.25, 0.006, 'gold')]:
             ring = torus(R, r, 48, 6, col); P.append(ring)
-            # 环轴(局部 Z) 对准翼骨方向 ax
             q = Vector((0, 0, 1)).rotation_difference(ax)
             ring.matrix_world = Matrix.Translation(sh) @ q.to_matrix().to_4x4(); bpy.ops.object.select_all(action='DESELECT')
             ring.select_set(True); bpy.context.view_layer.objects.active = ring; bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
-        # 弱关联光点: 舷墙外侧(y≈1.0, 船舷) → 核心, 6 个渐大发光点, 沿下垂弧
         p0 = Vector((1.22, -0.80, 1.05))
         for i in range(1, 7):
             t = i / 7.0; pt = p0 + (sh - p0) * t + Vector((0, 0, -0.10 * math.sin(math.pi * t)))
             d = sphere(1.0, 'glow', 10); rr = 0.012 + 0.014 * t; xform(d, loc=tuple(pt), scale=(rr, rr, rr)); P.append(d)
+    elif MODE == 'plate':
+        # 肩甲: 大块装甲板从墙长出(白面板细节), 外缘略上扬
+        p_out = wall.lerp(sh, 0.55) + Vector((0.02, 0, 0.06))
+        P.append(shoulder_plate(wall, p_out, height=0.62, th=0.045, col='pnl_white'))
+        # 下层略小的 peri 叠板(厚度感)
+        p_out2 = wall.lerp(sh, 0.42) + Vector((0.01, 0.04, -0.08))
+        P.append(shoulder_plate(wall + Vector((0.01, 0.05, -0.10)), p_out2, height=0.38, th=0.032, col='pnl_peri'))
+        # 小套筒(护腕): 肩甲外缘 → 翼骨根, 张口流线, 无大球
+        n = 10
+        sleeve_pts = [tuple(wall.lerp(sh, 0.45 + 0.55 * i / n)) for i in range(n + 1)]
+        P.append(tube(sleeve_pts, [0.11 - 0.045 * (i / n) ** 0.7 for i in range(n + 1)], 'white', seg=14))
+        P.append(tube([sleeve_pts[int(0.7 * n)], sleeve_pts[int(0.85 * n)]], [0.078, 0.078], 'gold', seg=14))
+        P.append(tube([sleeve_pts[int(0.35 * n)], sleeve_pts[int(0.48 * n)]], [0.095, 0.095], 'glow', seg=14))  # 套筒发光环
+        # 肩甲外缘发光缝 + 金边(白天一眼可见的发光结构)
+        edge_lo = wall + Vector((0.02, -0.38, -0.28)); edge_hi = p_out + Vector((0.02, -0.38, 0.28))
+        P.append(tube([tuple(edge_lo), tuple(edge_hi)], [0.010, 0.010], 'glow', seg=6))
+        edge_lo2 = wall + Vector((0.02, 0.38, -0.28)); edge_hi2 = p_out + Vector((0.02, 0.38, 0.28))
+        P.append(tube([tuple(edge_lo2), tuple(edge_hi2)], [0.010, 0.010], 'glow', seg=6))
+        P.append(tube([tuple(p_out + Vector((0.03, -0.35, 0.30))), tuple(p_out + Vector((0.03, 0.35, 0.30)))], [0.008, 0.008], 'gold', seg=6))
+        # 细斜撑: 舷墙下方 → 套筒中段(结构感, 非光点)
+        br0 = Vector((0.55, -0.60, 1.20 + DZ)); br1 = wall.lerp(sh, 0.65) + Vector((0, 0, -0.08))
+        P.append(tube([tuple(br0 + (br1 - br0) * (i / 8)) for i in range(9)], [0.040 + 0.012 * i / 8 for i in range(9)], 'white', seg=10))
+        P.append(tube([tuple(br0 + (br1 - br0) * (i / 8) + Vector((0.05, 0, 0))) for i in range(9)], [0.010] * 9, 'glow', seg=5))
     else:
+        wall = Vector((0.47, -0.64, 1.98 + DZ))
         n = 8
         P.append(tube([tuple(wall + (sh - wall) * (i / n)) for i in range(n + 1)], [0.17 - 0.06 * (i / n) ** 0.7 for i in range(n + 1)], 'white', seg=16))
         P.append(tube([tuple(wall + (sh - wall) * t) for t in (0.86, 0.94)], [0.118, 0.118], 'gold', seg=16))
         P.append(tube([tuple(wall + (sh - wall) * t) for t in (0.30, 0.36)], [0.160, 0.160], 'glow', seg=16))
-    # 翼骨: 细白, 下沿发光
-    m = 14
-    P.append(tube([tuple(arm(i / m)) for i in range(m + 1)], [0.085 * (1 - 0.6 * i / m) + 0.02 for i in range(m + 1)], 'white', seg=12))
-    P.append(tube([tuple(arm(i / m) + Vector((0, 0.0, -0.075 * (1 - 0.6 * i / m)))) for i in range(m + 1)], [0.010] * (m + 1), 'glow', seg=5))
-    if MODE != 'float':
         br0 = Vector((0.50, -0.58, min(1.25, 1.25 + DZ + 0.15))); br1 = wall + (sh - wall) * 0.5 + Vector((0, 0, -0.10))
         P.append(tube([tuple(br0 + (br1 - br0) * (i / 8)) for i in range(9)], [0.055 + 0.015 * i / 8 for i in range(9)], 'white', seg=10))
         P.append(tube([tuple(br0 + (br1 - br0) * (i / 8) + Vector((0.06, 0, 0))) for i in range(9)], [0.008] * 9, 'glow', seg=5))
-    UP = lambda tilt: (0, 1.0, math.tan(math.radians(tilt)))   # 前缘朝艏, 倾 tilt°
-    # 初级飞羽 ×6: 骨外半段, 越外越长越外展越仰
+    # 翼骨: 细白, 下沿发光(P6 加粗)
+    m = 14
+    P.append(tube([tuple(arm(i / m)) for i in range(m + 1)], [0.090 * (1 - 0.55 * i / m) + 0.022 for i in range(m + 1)], 'white', seg=12))
+    P.append(tube([tuple(arm(i / m) + Vector((0, 0.0, -0.080 * (1 - 0.55 * i / m)))) for i in range(m + 1)], [0.014] * (m + 1), 'glow', seg=5))
+    UP = lambda tilt: (0, 1.0, math.tan(math.radians(tilt)))
+    # 初级飞羽 ×6
     for t, L, el, sw, W in [(0.50, 1.45, 4, 46, 0.30), (0.60, 1.70, 7, 38, 0.31), (0.70, 1.95, 10, 30, 0.32),
                             (0.80, 2.20, 13, 22, 0.33), (0.90, 2.40, 16, 15, 0.33), (1.00, 2.50, 19, 8, 0.32)]:
-        L *= LS; sw += SW   # A5b ×0.86; A7 悬浮 ×0.70 且多后掠, 控翼展
-        b = plume(L, W * 0.9, 0.055 * TK, 'feather_wp', curve=0.13, glow=True)   # P5: 全部初级发光羽轴(原 L>2.0 在 LS 0.70 下一根都没有)
+        L *= LS; sw += SW
+        b = plume(L, W * 0.9, 0.055 * TK, 'feather_wp', curve=0.13, glow=True)
         aim(b, tuple(arm(t) + Vector((0, 0, 0.03))), dvec(el, sw), UP(35), roll=0); P += b
-    # 次级 ×6: 骨内半段, 短, periwinkle, 叠在初级下(低 0.06)
+    # 次级 ×6
     for k, t in enumerate([0.0, 0.10, 0.20, 0.30, 0.40, 0.50]):
-        L = 1.10 + 0.06 * k; sw = 72 - 6 * k; el = -6 + k
+        L = (1.10 + 0.06 * k) * (1.0 if MODE != 'plate' else 1.05); sw = 72 - 6 * k; el = -6 + k
         b = plume(L, 0.27, 0.05 * TK, 'feather_pv', curve=0.12, edge=(k % 2 == 0))
         aim(b, tuple(arm(t) + Vector((0, -0.04, -0.07))), dvec(el, sw), UP(30), roll=0); P += b
-    # 覆羽两排: 大覆羽(圆头白, 盖住飞羽根) + 小覆羽(更短, 贴骨)
+    # 覆羽
     for k in range(7):
         t = 0.02 + 0.15 * k
         f = plume(0.72 - 0.03 * k, 0.26, 0.06 * TK, 'white', curve=0.08, edge=False, shaft=False, round_tip=True)
         aim(f, tuple(arm(t) + Vector((0, 0.02, 0.07))), dvec(6, 40 - 3 * k), UP(38), roll=0); P += f
-    for k in range(0):   # A6: 小覆羽排取消(减堆叠)
-        t = 0.04 + 0.16 * k
-        f = plume(0.40, 0.22, 0.05, 'white', curve=0.06, edge=False, shaft=False, round_tip=True)
-        aim(f, tuple(arm(t) + Vector((0, 0.05, 0.11))), dvec(10, 45), UP(45), roll=0); P += f
-    # 裙摆 ×3: 套筒下, 外下后
-    for k, (L, el, sw) in enumerate([(1.30, -16, 34), (1.12, -26, 46), (0.92, -36, 58)]):
-        b = plume(L, 0.25, 0.05 * TK, 'feather_wp', curve=0.12, edge=(k == 0))
+    # 裙摆 ×3: plate 模式略收仰角, 少侵入副炮包络
+    for k, (L, el, sw) in enumerate([(1.30, -12 if MODE == 'plate' else -16, 34), (1.12, -20 if MODE == 'plate' else -26, 46), (0.92, -28 if MODE == 'plate' else -36, 58)]):
+        b = plume(L * (1.05 if MODE == 'plate' else 1.0), 0.25, 0.05 * TK, 'feather_wp', curve=0.12, edge=(k == 0), glow=(k == 0))
         aim(b, tuple(sh + Vector((-0.05, -0.06 - 0.08 * k, -0.14))), dvec(el, sw), UP(45), roll=0); P += b
     for p in P: p.select_set(False)
     right = join(P, 'wing_R')
     left = mirror_x(right, 'wing_L')
     return [right, left]
+
 
 def build_halo():
     objs = []
@@ -542,13 +609,15 @@ def build_shells():
         s_ = (pts[2][1] if k == 'FGM049' else pts[3][1])  # 尺度参考
         # 后板徽记: 金八芒星 + 下方短发光缝(少而精)
         o = octagram(0.10 * s_ + 0.012, 0.004 + 0.004 * s_, 'gold'); xform(o, loc=(0, rz - 0.003, H * 0.55), rot=(90, 0, 0)); ps.append(o)
-        if prm.get('rear_glow', True): gl = tube([(-0.16 * s_, rz - 0.004, y0 + 0.22 * (H - y0)), (0.16 * s_, rz - 0.004, y0 + 0.22 * (H - y0))], [0.004 + 0.004 * s_] * 2, 'glow', seg=6); ps.append(gl)
+        if prm.get('rear_glow', True): gl = tube([(-0.18 * s_, rz - 0.004, y0 + 0.22 * (H - y0)), (0.18 * s_, rz - 0.004, y0 + 0.22 * (H - y0))], [0.006 + 0.006 * s_] * 2, 'glow', seg=6); ps.append(gl)  # P6: 后板发光缝加粗
         # 侧中板(peri)上沿短金条: 每侧一段, 只在该板中部 60%
         for sx in (1, -1):
             zc = 0.5 * (pts[3][0] + pts[4][0]) if len(pts) > 4 else pts[3][0]
             wz = max(w for z, w in pts) + g + th * 0.6
             L = 0.18 * (pts[-1][0] - pts[0][0])
             gt = tube([(sx * wz, zc - L / 2, H - ch * 0.5), (sx * wz, zc + L / 2, H - ch * 0.5)], [0.003 + 0.002 * s_] * 2, 'gold', seg=5); ps.append(gt)
+            # P6: 侧板上沿内侧加发光短缝(白天炮塔分缝可读)
+            gls = tube([(sx * (wz + 0.004), zc - L / 2, H - ch * 0.35), (sx * (wz + 0.004), zc + L / 2, H - ch * 0.35)], [0.0045 + 0.003 * s_] * 2, 'glow', seg=5); ps.append(gls)
         out.append(join(ps, 'shell_' + k))
     return out
 
@@ -581,17 +650,21 @@ def wing_fan(root, S, d0, up, n_pri=3, n_sec=1, n_cov=1, glow_k=0):
     return P
 
 def build_bow():
-    """艏饰 v2(用户: 艏翼与舯部主翼风格统一): 两侧小翼改用主翼同一生成器 wing_fan(plume) ——
-    白薄羽片同厚宽比/弯弧/收尖/分层, 金前缘 + 发光羽轴, 同配色发光色; 尺度 S=0.40(主次: 明显小于舯部主翼)。
-    艏柱金八芒星 + 光环保留(光环语言同 halo/悬浮核心)。"""
-    S = float(os.environ.get('ROBIN_BOW_S', '0.40'))
-    P = wing_fan((0.14, 8.24, 0.66), S, (30, 70), (0, 0.5, 1.0), n_pri=3, n_sec=1, n_cov=1)
+    """艏饰 P6: 与主翼同一造型语言(肩甲小根 + wing_fan 羽末梢)。尺度小于主翼(S≈0.48)。"""
+    S = float(os.environ.get('ROBIN_BOW_S', '0.48'))
+    # 小肩甲根(贴艏楼侧墙) → 羽扇
+    root_R = Vector((0.14, 8.24, 0.66))
+    wall_R = Vector((0.06, 8.30, 0.55))
+    P = []
+    P.append(shoulder_plate(wall_R, root_R, height=0.28 * S / 0.40, th=0.022, col='pnl_white'))
+    P += wing_fan(tuple(root_R), S, (30, 70), (0, 0.5, 1.0), n_pri=3, n_sec=1, n_cov=1)
     for p in P: p.select_set(False)
     r = join(P, 'bowp_R'); l = mirror_x(r, 'bowp_L')
     o = octagram(0.16, 0.02, 'gold'); xform(o, loc=(0, 8.78, 0.72), rot=(90, 0, 0))
-    g = torus(0.21, 0.012, 64, 8, 'glow'); xform(g, loc=(0, 8.77, 0.72), rot=(90, 0, 0))
+    g = torus(0.21, 0.014, 64, 8, 'glow'); xform(g, loc=(0, 8.77, 0.72), rot=(90, 0, 0))  # P6: 发光环略粗
     t = torus(0.19, 0.022, 64, 8, 'gold'); xform(t, loc=(0, 8.775, 0.72), rot=(90, 0, 0))
     return [join([r, l, o, g, t], 'bow_crest')]
+
 
 def build_mic():
     """中桅大麦克(复古演唱会话筒, 程序化, 非 PMX): 网罩头+金箍+白柄+发光环, 立在主桅顶 (游戏 0, ~3.0, −1.45), 前倾 12°。"""
