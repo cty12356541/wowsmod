@@ -22,3 +22,4 @@
 | 贡献者 | 日期 | 范围 | 接触记录 |
 |---|---|---|---|
 | Grok Bot（代理） | 2026-10-13 | S0 语料工具、crate 骨架、测试框架（**不含解码逻辑**） | **已污染：Mermaid / Kraken**，见 DEVLOG 2026-10-13 |
+| Grok Bot（代理，规格作者） | 2026-10-14 | 8c0a 黑盒实验与 SPEC_mermaid.md / EXPERIMENTS.md / HANDOFF.md、测试框架（**不写解码代码**） | **spec author; possible training-data exposure; writes no decoder code; spec requires third-party review**。本次未阅读任何禁止来源、未联网；仅分析 .blk/.gold |
