@@ -11,6 +11,6 @@
 **发光色要够饱和**(r34): 近白天青 #B8E8FF 在港口夜景读成「白漆」; 改 #58B8FF(饱和天青)+ emissivePower 0.7(船体与外带件同值), 夜景读主题色、白天也看得出。只换发光线色用 `scripts/paint/glow_recolor.py <_a> <glow遮罩> <#色> <out>`, 外带件图集发光列同色(`prop_atlas.py`)。
 **额外模型材质**: 薄片/头发/衣物开 `doubleSided`, 镂空用 alphaTest(`model import` 自动随 glTF)。
 **外带件夜景描边**(知更鸟 P5.1): 不发光的外带件(翼/光环/披风等)在港口夜景会随整体去饱和变成灰白剪影, 只剩船体发光线可读。关键外带件给**克制的发光描边**: 只取外缘细带(羽片两侧外缘约 7% 宽, 不铺满整面), 强度**低于船体主发光线**(遮罩值 0.5–0.7 × 主线, 同 emissivePower; 金环/金饰 ≤0.35-0.55, 发光色=漫反射金→暖金, 再高就成橙黄糊团)。描边色与船体发光线同一色相族(#58B8FF), 用道具专用 `_a`/遮罩, 不改共享图集。工具 `scripts/model/robin/prop_glow_rim.py` → `tex import <wing_atlas> --like <prop>_a.dds` + `glow --mg <prop>_mg.dds --mask <rim遮罩> --mfm <prop>.mfm`。验收: 白天前后差 <1% 像素, 夜景 `channel=emissive` 能看到羽缘线。
-**外带件挂点与发光**(知更鸟 C2/halo, 2026-10-13/14 港口实测): 外带件 renderSet 挂在 `*_DeckHouse` 节点 + `SHIPMAT_EMISSIVE_PBS_DeckHouse` 时, 改 `_mg`/emissivePower 在港口夜景看不出变化(翼侧面/斜前方暗黑)。把 renderSet `<node>` 改为分段船体节点(如 `MidFront`)、材质 identifier 改 `SHIPMAT_EMISSIVE_PBS_Hull`(mfm 不变, 全部 LOD 一起改)后, **翅膀**夜景侧面/艉斜向转为亮白。同法用于**光环**无效: 光环仍是深钢色(仰视/侧视), 材质与贴图与翅膀同构(_a/_mg 均值相同) → 光环暗不是挂点问题, 待查法线朝向/几何(高处水平环只受天光)。结论: 外带件默认挂船体节点; 挂点修复只解决「DeckHouse 不吃发光」, 不保证所有件亮; 每件夜景单独验收。亮度仍随角度变(翼正斜前方仍偏暗), 别把「被照亮」当「自发光」。
+**外带件挂点与发光**(知更鸟 C2/halo 港口实测): 外带件挂 `*_DeckHouse` 节点 + `SHIPMAT_EMISSIVE_PBS_DeckHouse` 时改发光无效。renderSet `<node>` 改分段船体节点(如 `MidFront`)、identifier 改 `SHIPMAT_EMISSIVE_PBS_Hull`(全部 LOD)后, 翅膀夜景侧面转亮白; 光环同法仍暗(材质贴图与翅膀同构 → 疑法线/几何)。外带件默认挂船体节点, 每件夜景单独验收; 亮度随角度变, 「被照亮」≠「自发光」。
 **完成标准**: 只有清单指定处发光; 发光面积在设计上限内; 白天看得出、夜间不糊成一片(工作台夜景 + 港口)。
 **自评**: 关掉发光层 4 仍成立吗? 发光有没有抢掉人物/立绘的主体地位?
