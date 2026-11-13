@@ -22,6 +22,9 @@ use crate::modproj::{sha256_hex, InstallItem};
 
 pub const DIR: &str = ".wowsmod";
 
+mod switch;
+pub use switch::{recover_pending, switch};
+
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct Registry {
     pub format: u32,
@@ -123,27 +126,45 @@ fn remove_empty_tree(d: &Path) {
     let _ = std::fs::remove_dir(d);
 }
 
-/// 进程级互斥: .wowsmod/lock(超过 10 分钟的旧锁视为残留)
-pub struct Lock(PathBuf);
+/// OS-owned lock; a live owner never expires, and process termination releases it.
+pub struct Lock { path: PathBuf, file: Option<std::fs::File> }
 impl Lock {
     pub fn take(res_mods: &Path) -> Result<Lock> {
         let d = reg_dir(res_mods);
+        switch::guard_path(res_mods, DIR)?;
         std::fs::create_dir_all(&d)?;
         let p = d.join("lock");
-        if let Ok(m) = std::fs::metadata(&p) {
-            let old = m.modified().ok().and_then(|t| t.elapsed().ok()).map(|e| e.as_secs() > 600).unwrap_or(true);
-            if old {
-                let _ = std::fs::remove_file(&p);
+        switch::guard_path(res_mods, &format!("{DIR}/lock"))?;
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true).write(true).create(true);
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            // DELETE access + FILE_FLAG_DELETE_ON_CLOSE: even TerminateProcess
+            // releases the handle and removes the lock, without PID/age guesses.
+            options.access_mode(0xC001_0000).share_mode(0).custom_flags(0x0400_0000);
+        }
+        let file = options.open(&p).with_context(|| format!("另一个 wowsmod 正在安装/卸载, 或锁不可访问: {}。等待操作结束后重试", p.display()))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::{fs::MetadataExt, io::AsRawFd};
+            extern "C" { fn flock(fd: i32, operation: i32) -> i32; }
+            if unsafe { flock(file.as_raw_fd(), 2 | 4) } != 0 {
+                bail!("另一个 wowsmod 正在安装/卸载: {}", p.display());
+            }
+            if file.metadata()?.ino() != std::fs::metadata(&p)?.ino() {
+                bail!("安装锁刚被释放, 请重试: {}", p.display());
             }
         }
-        std::fs::OpenOptions::new().write(true).create_new(true).open(&p).map_err(|_| anyhow!("另一个 wowsmod 正在安装/卸载({} 存在)。等它结束; 若确定没有在运行, 删除该文件后重试", p.display()))?;
-        Ok(Lock(p))
+        Ok(Lock { path: p, file: Some(file) })
     }
 }
 impl Drop for Lock {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
-        if let Some(d) = self.0.parent() {
+        #[cfg(not(windows))]
+        let _ = std::fs::remove_file(&self.path);
+        self.file.take();
+        if let Some(d) = self.path.parent() {
             // 只有锁的空目录也删掉(安装失败回滚后)
             let _ = std::fs::remove_dir(d);
         }
@@ -151,10 +172,16 @@ impl Drop for Lock {
 }
 
 fn safe_rel(rel: &str) -> Result<()> {
-    if rel.is_empty() || rel.split('/').any(|c| c.is_empty() || c == ".." || c == "." || c.contains(':') || c.contains('\\')) {
+    if rel.is_empty() || rel.split('/').any(|c| {
+        let stem = c.split('.').next().unwrap_or("").to_ascii_uppercase();
+        c.is_empty() || c == ".." || c == "." || c.ends_with(['.', ' '])
+            || c.chars().any(|ch| ch.is_control() || "<>:\\|?*\"".contains(ch))
+            || ["CON", "PRN", "AUX", "NUL"].contains(&stem.as_str())
+            || (stem.len() == 4 && (stem.starts_with("COM") || stem.starts_with("LPT")) && matches!(stem.as_bytes()[3], b'1'..=b'9'))
+    }) {
         bail!("拒绝不安全的路径 {rel:?}");
     }
-    if rel.to_lowercase().starts_with(&format!("{DIR}/")) {
+    if rel.eq_ignore_ascii_case(DIR) || rel.to_lowercase().starts_with(&format!("{DIR}/")) {
         bail!("路径不能写进 {DIR}/: {rel}");
     }
     Ok(())
@@ -226,6 +253,7 @@ pub fn install(res_mods: &Path, info: &ModInfo, items: &[InstallItem], o: &Opts)
         safe_rel(&it.rel)?;
     }
     let _lock = if o.dry_run { None } else { Some(Lock::take(res_mods)?) };
+    let recovery = if o.dry_run { switch::reject_pending(res_mods)?; json!({"recovered": false}) } else { switch::recover_locked(res_mods)? };
     let mut reg = load(res_mods)?;
     if reg.mods.contains_key(&info.name) {
         bail!("mod {} 已经装在 {}; 先 wowsmod uninstall {}(或 install --reinstall)", info.name, res_mods.display(), info.name);
@@ -325,7 +353,7 @@ pub fn install(res_mods: &Path, info: &ModInfo, items: &[InstallItem], o: &Opts)
         save(res_mods, &reg)?;
     }
     Ok(json!({"dry_run": o.dry_run, "mod": info.name, "res_mods": res_mods.display().to_string(), "files": entry.files.len(), "written": written.len(), "shared_with_other_mods": shared,
-        "overwrote_foreign": foreign, "skipped_existing_loader": skipped_foreign_loader, "bytes_written": bytes, "registry": reg_dir(res_mods).join("registry.json").display().to_string()}))
+        "overwrote_foreign": foreign, "skipped_existing_loader": skipped_foreign_loader, "bytes_written": bytes, "recovery": recovery, "registry": reg_dir(res_mods).join("registry.json").display().to_string()}))
 }
 
 /// 从登记表里移除一个 mod 并复原文件(调用方负责加锁和保存)
@@ -427,11 +455,13 @@ fn remove_empty_tree_children(d: &Path) {
 
 pub fn uninstall(res_mods: &Path, name: &str, force: bool, dry_run: bool) -> Result<Value> {
     let _lock = if dry_run { None } else { Some(Lock::take(res_mods)?) };
+    let recovery = if dry_run { switch::reject_pending(res_mods)?; json!({"recovered": false}) } else { switch::recover_locked(res_mods)? };
     let mut reg = load(res_mods)?;
-    let r = remove_mod(res_mods, &mut reg, name, force, dry_run)?;
+    let mut r = remove_mod(res_mods, &mut reg, name, force, dry_run)?;
     if !dry_run {
         save(res_mods, &reg)?;
     }
+    r["recovery"] = recovery;
     Ok(r)
 }
 

@@ -260,6 +260,47 @@ fn do_install(ctx: &GameCtx, p: &Project, source: &str, res_mods: &Path, a: &Ins
     Ok(r)
 }
 
+/// Apply a project to the selected client's active build.
+pub fn apply_project(cli: &Cli, project: &Path, dry_run: bool) -> Result<Value> {
+    apply_project_inner(cli, project, dry_run, &game::running())
+}
+
+fn apply_project_inner(cli: &Cli, project: &Path, dry_run: bool, running: &[String]) -> Result<Value> {
+    if !running.is_empty() {
+        bail!("游戏正在运行({}), 未应用。请退出游戏后重试", running.join(", "));
+    }
+    let project = Project::open(project)?;
+    let ctx = game_ctx(cli, true)?.unwrap();
+    let rm = &ctx.install.res_mods;
+    // Fully read and stub-fill B before touching the installed A. Recovery never
+    // relies on an old project's assets or on a previous client's packages.
+    let (items, notes) = modproj::plan_install(&project, &ctx.index, &ctx.reader, rm)?;
+    let info = info_of(&project, "project", &ctx.install.build);
+    let mut result = registry::switch(rm, &info, &items, dry_run)?;
+    result["target_client"] = json!(ctx.install.root.display().to_string());
+    result["build"] = json!(ctx.install.build);
+    result["target_build"] = json!(ctx.install.build);
+    result["project"] = json!(info.project_dir.display().to_string());
+    result["notes"] = json!(notes);
+    result["by_origin"] = json!(items.iter().fold(BTreeMap::<String, usize>::new(), |mut counts, item| {
+        *counts.entry(item.origin.split(':').next().unwrap_or("").into()).or_default() += 1;
+        counts
+    }));
+    let mut warnings = result["warnings"].as_array().cloned().unwrap_or_default();
+    if !project.cfg.meta.game_build.is_empty() && project.cfg.meta.game_build != ctx.install.build {
+        warnings.push(json!(format!("项目构建 {} 与目标构建 {} 不同, 请进港检查", project.cfg.meta.game_build, ctx.install.build)));
+    }
+    result["manifest_updated"] = json!(false);
+    if !dry_run {
+        match project_manifest(&project, rm, &ctx.install.build, &items) {
+            Ok(()) => result["manifest_updated"] = json!(true),
+            Err(error) => warnings.push(json!(format!("应用已提交; 候选项目清单未更新: {error:#}。游戏登记表仍是安装状态的依据"))),
+        }
+    }
+    result["warnings"] = json!(warnings);
+    Ok(result)
+}
+
 pub fn cmd_install(cli: &Cli, a: &InstallArgs) -> Result<i32> {
     check_running(a.ignore_running || a.dry_run)?;
     let (p, source) = open_target(&a.target)?;
@@ -268,6 +309,7 @@ pub fn cmd_install(cli: &Cli, a: &InstallArgs) -> Result<i32> {
         eprintln!("提示: mod 制作时的客户端构建 {} 与当前 {} 不同; 装完请进港检查(原版资源可能已更新)", p.cfg.meta.game_build, ctx.install.build);
     }
     let res_mods = a.res_mods.clone().unwrap_or(ctx.install.res_mods.clone());
+    if !a.dry_run { registry::recover_pending(&res_mods)?; }
     let mut pre = Value::Null;
     if a.reinstall && registry::load(&res_mods)?.mods.contains_key(&p.cfg.meta.name) && !a.dry_run {
         pre = registry::uninstall(&res_mods, &p.cfg.meta.name, false, false)?;
@@ -328,6 +370,7 @@ fn resolve_uninstall(cli: &Cli, a: &UninstallArgs) -> Result<(String, PathBuf, O
 pub fn cmd_uninstall(cli: &Cli, a: &UninstallArgs) -> Result<i32> {
     check_running(a.ignore_running || a.dry_run)?;
     let (name, res_mods, proj) = resolve_uninstall(cli, a)?;
+    if !a.dry_run { registry::recover_pending(&res_mods)?; }
     let reg = registry::load(&res_mods)?;
     let r = if reg.mods.contains_key(&name) {
         let r = registry::uninstall(&res_mods, &name, a.force, a.dry_run)?;
@@ -470,6 +513,10 @@ pub fn cmd_migrate(cli: &Cli, a: &MigrateArgs) -> Result<i32> {
     };
     if from == to {
         bail!("--from 与 --to 是同一个目录 {}", to.display());
+    }
+    if !a.dry_run {
+        registry::recover_pending(&from)?;
+        if to.is_dir() { registry::recover_pending(&to)?; }
     }
     if !to.is_dir() {
         if a.dry_run {
@@ -658,4 +705,90 @@ pub fn cmd_pack(cli: &Cli, a: &PackArgs) -> Result<i32> {
         println!("已打包 {} ({} 字节, {} 个条目; mod 文件 {n_real}, 占位 {n_stub} 个在安装时从玩家游戏补齐{})", out.display(), z.len(), back.len(), if a.full { format!(", 附完整 res_mods {full_n} 个") } else { String::new() });
     }
     Ok(0)
+}
+
+#[cfg(test)]
+mod apply_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    struct Fixture { root: PathBuf, cli: Cli, rm: PathBuf }
+    impl Fixture {
+        fn new() -> Self {
+            static NEXT: AtomicU64 = AtomicU64::new(0);
+            let root = std::env::temp_dir().join(format!("wowsmod_apply_{}_{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+            let game = root.join("fake-client");
+            let rm = game.join("bin/123/res_mods");
+            std::fs::create_dir_all(&rm).unwrap();
+            std::fs::create_dir_all(game.join("res_packages")).unwrap();
+            std::fs::create_dir_all(game.join("bin/123/idx")).unwrap();
+            let mut idx = vec![0; 56];
+            idx[0..4].copy_from_slice(&wowsmod_formats::idx::IDX_MAGIC.to_le_bytes());
+            idx[4..8].copy_from_slice(&wowsmod_formats::idx::VERSION_V40.to_le_bytes());
+            std::fs::write(game.join("bin/123/idx/empty.idx"), idx).unwrap();
+            let cli = Cli { game: Some(game), json: false, json_out: None, cmd: crate::Cmd::Doctor };
+            Self { root, cli, rm }
+        }
+        fn project(&self, name: &str) -> Project {
+            let project = Project::init(&self.root.join(name), name, "PFSB510", "sdk", "123").unwrap();
+            std::fs::write(project.assets().join(format!("{name}.txt")), name).unwrap();
+            project
+        }
+    }
+    impl Drop for Fixture { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.root); } }
+    fn snap(root: &Path) -> BTreeMap<String, Vec<u8>> {
+        fn walk(root: &Path, dir: &Path, out: &mut BTreeMap<String, Vec<u8>>) {
+            for entry in std::fs::read_dir(dir).unwrap() {
+                let path = entry.unwrap().path();
+                let rel = path.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/");
+                if path.is_dir() { out.insert(format!("{rel}/"), vec![]); walk(root, &path, out); }
+                else { out.insert(rel, std::fs::read(path).unwrap()); }
+            }
+        }
+        let mut result = BTreeMap::new(); walk(root, root, &mut result); result
+    }
+    #[test]
+    fn apply_dry_run_is_read_only_then_updates_selected_manifest_only() {
+        let f = Fixture::new(); let a = f.project("A"); let b = f.project("B");
+        apply_project_inner(&f.cli, &a.root, false, &[]).unwrap();
+        let manifest_a = std::fs::read(a.root.join(".install/manifest.json")).unwrap();
+        let before = snap(&f.root);
+        let dry = apply_project_inner(&f.cli, &b.root, true, &[]).unwrap();
+        assert_eq!(dry["build"], "123");
+        assert_eq!(dry["previous"][0]["name"], "A");
+        assert_eq!(snap(&f.root), before);
+        let applied = apply_project(&f.cli, &b.root, false).unwrap();
+        assert_eq!(applied["ok"], true);
+        assert_eq!(applied["target_client"], f.cli.game.as_ref().unwrap().display().to_string());
+        assert_eq!(std::fs::read(a.root.join(".install/manifest.json")).unwrap(), manifest_a);
+        let manifest: Value = serde_json::from_slice(&std::fs::read(b.root.join(".install/manifest.json")).unwrap()).unwrap();
+        assert_eq!(manifest["managed_by_registry"], true);
+        assert_eq!(registry::names(&registry::load(&f.rm).unwrap()), std::collections::BTreeSet::from(["B".into()]));
+    }
+
+    #[test]
+    fn prepare_failure_and_running_game_do_not_mutate_projects_or_client() {
+        let f = Fixture::new(); let a = f.project("A"); let b = f.project("B");
+        let before = snap(&f.root);
+        assert!(apply_project_inner(&f.cli, &b.root, false, &["korabli64.exe".into()]).is_err());
+        assert_eq!(snap(&f.root), before);
+        apply_project_inner(&f.cli, &a.root, false, &[]).unwrap();
+        std::fs::write(b.assets().join("missing.geometry"), b"<stub/>").unwrap();
+        let before_bad = snap(&f.root);
+        assert!(apply_project_inner(&f.cli, &b.root, false, &[]).is_err());
+        assert_eq!(snap(&f.root), before_bad);
+    }
+
+    #[test]
+    fn manifest_failure_reports_committed_success_with_warning() {
+        let f = Fixture::new(); let a = f.project("A"); let b = f.project("B");
+        apply_project_inner(&f.cli, &a.root, false, &[]).unwrap();
+        std::fs::write(b.root.join(".install"), b"user file blocking manifest directory").unwrap();
+        let result = apply_project_inner(&f.cli, &b.root, false, &[]).unwrap();
+        assert_eq!(result["ok"], true);
+        assert_eq!(result["manifest_updated"], false);
+        assert!(!result["warnings"].as_array().unwrap().is_empty());
+        assert_eq!(registry::names(&registry::load(&f.rm).unwrap()), std::collections::BTreeSet::from(["B".into()]));
+        assert_eq!(registry::verify(&f.rm).unwrap()["mods"][0]["intact"], true);
+        assert_eq!(std::fs::read(b.root.join(".install")).unwrap(), b"user file blocking manifest directory");
+    }
 }
