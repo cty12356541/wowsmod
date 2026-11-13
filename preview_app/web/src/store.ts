@@ -116,16 +116,18 @@ let simulationEpoch = 0, attemptedSimulationEpoch = -1;
 let loadSeq = 0;
 /** 载入 viewRev（B）与对比基准（A）的材质 + 部件树 + 贴图列表 */
 export async function loadRevs() {
+  // Even an unavailable snapshot supersedes an outstanding geometry download.
+  const seq = ++loadSeq;
   const s = get(); const rev = s.viewRev || s.head; if (!rev || !viewer || s.project?.capabilities?.preview === false) return;
   const target = viewer;
-  const base = baseRev(); const seq = ++loadSeq;
+  const base = baseRev();
   const [mB, mA, parts, tex] = await Promise.all([manifest(rev), manifest(base), api.parts(rev, base), api.textures(rev, base)]);
   if (seq !== loadSeq || target !== viewer || !active) return;
   const key = geometryKey(mB);
   if (loadedGeometry?.target !== target || loadedGeometry.key !== key) {
     const geometry = await api.geometry(mB.geometry.url);
     if (seq !== loadSeq || target !== viewer || !active) return;
-    target.loadGeometry(geometry, { preserveCamera: true });
+    target.loadGeometry(geometry, { preserveCamera: loadedGeometry?.target === target });
     loadedGeometry = { target, key };
     Object.entries(get().hidden).forEach(([id, hidden]) => target.setPartVisible(id, !hidden));
   }
@@ -145,9 +147,10 @@ export async function loadRevs() {
 // ---------------------------------------------------------------- 启动
 let bootSeq = 0;
 let viewerFactory: (() => Viewer) | null = null;
+let previewRecoveryPending = false;
 export async function boot(factory?: () => Viewer) {
   if (factory) viewerFactory = factory;
-  active = true; const seq = ++bootSeq;
+  active = true; previewRecoveryPending = false; const seq = ++bootSeq;
   set({ phase: 'loading', loadMsg: t('ldConnect'), fatal: null });
   try {
     await api.health();
@@ -185,7 +188,7 @@ export async function boot(factory?: () => Viewer) {
   }
 }
 export function disposeWorkbench() {
-  active = false; bootSeq++; loadSeq++; syncSeq++; viewerFactory = null; disposeRequests();
+  active = false; bootSeq++; loadSeq++; syncSeq++; viewerFactory = null; previewRecoveryPending = false; disposeRequests();
   timers.forEach(clearTimeout); timers.clear(); clearManifests(); loadedGeometry = null; loadedSimulationKey = null; simulationEpoch++; attemptedSimulationEpoch = -1; setViewer(null);
 }
 
@@ -206,6 +209,7 @@ apiOn('event', async (ev: { type: string; data: any }) => {
 let syncSeq = 0;
 export async function resync(d?: any) {
   const seq = ++syncSeq;
+  let initializingPreview = false;
   try {
     const [project, steps] = await Promise.all([api.project(), api.steps()]);
     const s = get(); const wasAtHead = !s.viewRev || s.viewRev === s.head;
@@ -215,17 +219,28 @@ export async function resync(d?: any) {
     const refreshSimulation = loadedSimulationKey !== nextSimulationKey;
     loadedSimulationKey = nextSimulationKey;
     if (refreshSimulation) simulationEpoch++;
-    const target = viewer;
     if (refreshSimulation || (project.capabilities?.simulation === false && (s.sim || s.simOn || s.workspace === 'sim'))) {
-      target?.setSimData(null);
+      viewer?.setSimData(null);
       set({ sim: null, simOn: false, workspace: 'review', rightTab: 'history', snap: null, tel: 'stop', rudder: 0, combat: false });
     }
     clearManifests();
-    viewer?.setFx(project.fx?.preview ?? null);
     set({ project, steps: steps.steps, head: steps.head, viewRev: wasAtHead || !exists ? steps.head : s.viewRev });
     document.title = t('docTitle', { p: project.project.name });
+    if (project.capabilities?.preview !== false && (previewRecoveryPending || !viewer || loadedGeometry?.target !== viewer)) {
+      // Recovery includes materials: a newer resync must finish it even when
+      // an earlier resync has already committed geometry or failed afterward.
+      previewRecoveryPending = true;
+      initializingPreview = true;
+      set({ phase: 'loading', loadMsg: t('ldModel'), loadFrac: null, fatal: null });
+      if (!steps.head) throw new ApiError('no_model', '', 404);
+      if (!viewer) { const created = viewerFactory?.(); if (created) setViewer(created); }
+      if (!viewer) throw new ApiError('no_viewer', t('libPreviewUnavailable'), 0);
+    }
+    const target = viewer;
+    target?.setFx(project.fx?.preview ?? null);
     await loadRevs();
     if (!active || seq !== syncSeq || viewer !== target) return;
+    if (initializingPreview || project.capabilities?.preview === false) { previewRecoveryPending = false; set({ phase: 'ready', fatal: null }); }
     if (attemptedSimulationEpoch !== simulationEpoch && project.capabilities?.simulation === true && target) {
       // Geometry may have superseded the identity's first resync before /sim began.
       // Stamp only an actual attempt so a later same-identity resync can own it.
@@ -237,16 +252,24 @@ export async function resync(d?: any) {
       const st = steps.steps.find((x: Step) => x.id === steps.head);
       if (st) { toast('info', t('newStep', { n: st.index }), st.title); viewer?.flash(st.parts.slice(0, 12)); }
     }
-  } catch { /* 断线由连接状态处理 */ }
+  } catch (e: any) {
+    if (initializingPreview && active && seq === syncSeq) set({ phase: 'fatal', fatal: { code: e?.code || 'internal', message: displayError(e, t('libPreviewUnavailable')) } });
+    // Ordinary live refresh disconnections remain owned by connection state.
+  }
 }
 
 // ---------------------------------------------------------------- 动作
+function displayError(value: unknown, fallback: string): string {
+  if (typeof value === 'string') return value || fallback;
+  if (value && typeof value === 'object' && 'message' in value) return displayError(value.message, fallback);
+  return fallback;
+}
 async function trackResult(response: any, kind: 'apply' | 'uninstall') {
   const id = response.job_id || response.job?.id;
   async function finish(job?: Job) {
     if (!active) return;
     if (job?.state === 'failed') {
-      const message = job.error?.message || job.message || t('jobFailed');
+      const message = displayError(job.error, displayError(job.message, t('jobFailed')));
       set({ applyMessage: message }); toast('error', t('jobFailed'), message); return;
     }
     const project = await api.project(); if (!active) return;

@@ -235,9 +235,21 @@ fn project_manifest(p: &Project, res_mods: &Path, build: &str, items: &[InstallI
     Ok(())
 }
 
-fn archive_project_manifest(root: &Path) {
+fn same_res_mods(left: &Path, right: &Path) -> bool {
+    let left = std::fs::canonicalize(left).unwrap_or_else(|_| left.to_path_buf());
+    let right = std::fs::canonicalize(right).unwrap_or_else(|_| right.to_path_buf());
+    if cfg!(windows) { left.to_string_lossy().to_lowercase() == right.to_string_lossy().to_lowercase() } else { left == right }
+}
+
+fn archive_project_manifest(root: &Path, res_mods: &Path) {
     let mp = root.join(".install/manifest.json");
     if mp.exists() {
+        // One project can be installed in multiple clients; its latest manifest
+        // may describe another installation that this uninstall did not touch.
+        let manifest = std::fs::read(&mp).ok().and_then(|data| serde_json::from_slice::<Manifest>(&data).ok());
+        if !manifest.is_some_and(|m| same_res_mods(Path::new(&m.res_mods), res_mods)) {
+            return;
+        }
         let hist = root.join(".install/history");
         let _ = std::fs::create_dir_all(&hist);
         let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
@@ -341,13 +353,14 @@ pub fn cmd_install(cli: &Cli, a: &InstallArgs) -> Result<i32> {
     Ok(0)
 }
 
-/// 卸载目标解析: 项目目录 → (名, res_mods 来自项目清单); 否则当作 mod 名
+/// 卸载目标解析: 显式 res_mods > 显式 game > 项目清单 > 自动定位。
 fn resolve_uninstall(cli: &Cli, a: &UninstallArgs) -> Result<(String, PathBuf, Option<Project>)> {
     let p = Path::new(&a.target);
     if p.join("mod.toml").exists() {
         let pr = Project::open(p)?;
         let rm = match &a.res_mods {
             Some(r) => r.clone(),
+            None if cli.game.is_some() => res_mods_of(cli, None)?,
             None => {
                 let mp = p.join(".install/manifest.json");
                 if let Ok(d) = std::fs::read(&mp) {
@@ -382,7 +395,7 @@ pub fn cmd_uninstall(cli: &Cli, a: &UninstallArgs) -> Result<i32> {
             // Use the entry actually removed while locked, not the earlier
             // routing snapshot, which may predate a concurrent application.
             if let Some(project) = r["project_dir"].as_str() {
-                archive_project_manifest(Path::new(project));
+                archive_project_manifest(Path::new(project), &res_mods);
             }
         }
         r
@@ -390,6 +403,10 @@ pub fn cmd_uninstall(cli: &Cli, a: &UninstallArgs) -> Result<i32> {
         // A replaced candidate retains its manifest for history. It must never
         // become a legacy uninstall plan for B's loader/shared resources.
         let manifest: Value = serde_json::from_slice(&std::fs::read(pr.root.join(".install/manifest.json"))?)?;
+        let manifest_res_mods = manifest["res_mods"].as_str().ok_or_else(|| anyhow!("项目 {name} 的安装清单缺少 res_mods, 未卸载"))?;
+        if !same_res_mods(Path::new(manifest_res_mods), &res_mods) {
+            bail!("项目 {name} 的安装清单指向 {manifest_res_mods}, 与指定目标 {} 不同, 未卸载。请检查 --game 或 --res-mods", res_mods.display());
+        }
         if manifest.get("managed_by_registry").is_some() {
             bail!("项目 {name} 的清单由登记表管理, 但该项目当前未安装(可能已被另一候选替换)。不会按旧版清单卸载; 请用 wowsmod installed 查看当前安装");
         }
@@ -729,21 +746,23 @@ pub fn cmd_pack(cli: &Cli, a: &PackArgs) -> Result<i32> {
 mod apply_tests {
     use super::*;
     use std::sync::atomic::{AtomicU64, Ordering};
+    fn fake_client(game: PathBuf) -> (Cli, PathBuf) {
+        let rm = game.join("bin/123/res_mods");
+        std::fs::create_dir_all(&rm).unwrap();
+        std::fs::create_dir_all(game.join("res_packages")).unwrap();
+        std::fs::create_dir_all(game.join("bin/123/idx")).unwrap();
+        let mut idx = vec![0; 56];
+        idx[0..4].copy_from_slice(&wowsmod_formats::idx::IDX_MAGIC.to_le_bytes());
+        idx[4..8].copy_from_slice(&wowsmod_formats::idx::VERSION_V40.to_le_bytes());
+        std::fs::write(game.join("bin/123/idx/empty.idx"), idx).unwrap();
+        (Cli { game: Some(game), json: false, json_out: None, cmd: crate::Cmd::Doctor }, rm)
+    }
     struct Fixture { root: PathBuf, cli: Cli, rm: PathBuf }
     impl Fixture {
         fn new() -> Self {
             static NEXT: AtomicU64 = AtomicU64::new(0);
             let root = std::env::temp_dir().join(format!("wowsmod_apply_{}_{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
-            let game = root.join("fake-client");
-            let rm = game.join("bin/123/res_mods");
-            std::fs::create_dir_all(&rm).unwrap();
-            std::fs::create_dir_all(game.join("res_packages")).unwrap();
-            std::fs::create_dir_all(game.join("bin/123/idx")).unwrap();
-            let mut idx = vec![0; 56];
-            idx[0..4].copy_from_slice(&wowsmod_formats::idx::IDX_MAGIC.to_le_bytes());
-            idx[4..8].copy_from_slice(&wowsmod_formats::idx::VERSION_V40.to_le_bytes());
-            std::fs::write(game.join("bin/123/idx/empty.idx"), idx).unwrap();
-            let cli = Cli { game: Some(game), json: false, json_out: None, cmd: crate::Cmd::Doctor };
+            let (cli, rm) = fake_client(root.join("fake-client"));
             Self { root, cli, rm }
         }
         fn project(&self, name: &str) -> Project {
@@ -815,6 +834,84 @@ mod apply_tests {
     }
 
     #[test]
+    fn uninstall_game_removes_only_selected_client_and_preserves_other_client_manifest() {
+        for by_name in [false, true] {
+            let f = Fixture::new(); let p = f.project("Shared");
+            let (other_cli, other_rm) = fake_client(f.root.join("other-client"));
+            apply_project_inner(&f.cli, &p.root, false, &[]).unwrap();
+            apply_project_inner(&other_cli, &p.root, false, &[]).unwrap();
+            let other_before = snap(other_cli.game.as_ref().unwrap());
+            let manifest_before = std::fs::read(p.root.join(".install/manifest.json")).unwrap();
+            let target = if by_name { "Shared".into() } else { p.root.display().to_string() };
+            let mut args = uninstall_args(&f, target); args.res_mods = None;
+
+            assert_eq!(cmd_uninstall(&f.cli, &args).unwrap(), 0);
+
+            assert!(!f.rm.join("Shared.txt").exists());
+            assert!(!f.rm.join("PnFModsLoader.py").exists());
+            let selected = registry::load(&f.rm).unwrap();
+            assert!(selected.mods.is_empty());
+            assert!(selected.paths.is_empty());
+            assert_eq!(snap(other_cli.game.as_ref().unwrap()), other_before);
+            assert_eq!(std::fs::read(other_rm.join("Shared.txt")).unwrap(), b"Shared");
+            assert_eq!(registry::verify(&other_rm).unwrap()["mods"][0]["intact"], true);
+            assert_eq!(std::fs::read(p.root.join(".install/manifest.json")).unwrap(), manifest_before);
+        }
+    }
+
+    #[test]
+    fn uninstall_res_mods_overrides_game_and_preserves_other_client_manifest() {
+        let f = Fixture::new(); let p = f.project("Shared");
+        let (other_cli, other_rm) = fake_client(f.root.join("other-client"));
+        apply_project_inner(&f.cli, &p.root, false, &[]).unwrap();
+        apply_project_inner(&other_cli, &p.root, false, &[]).unwrap();
+        let other_before = snap(other_cli.game.as_ref().unwrap());
+        let manifest_before = std::fs::read(p.root.join(".install/manifest.json")).unwrap();
+        let mut args = uninstall_args(&f, p.root.display().to_string());
+        args.res_mods = Some(f.rm.join("."));
+
+        assert_eq!(cmd_uninstall(&other_cli, &args).unwrap(), 0);
+
+        assert!(!f.rm.join("Shared.txt").exists());
+        assert!(registry::load(&f.rm).unwrap().mods.is_empty());
+        assert_eq!(snap(other_cli.game.as_ref().unwrap()), other_before);
+        assert_eq!(registry::verify(&other_rm).unwrap()["mods"][0]["intact"], true);
+        assert_eq!(std::fs::read(p.root.join(".install/manifest.json")).unwrap(), manifest_before);
+    }
+
+    #[test]
+    fn uninstall_invalid_explicit_game_does_not_fall_back_to_project_manifest() {
+        let mut f = Fixture::new(); let p = f.project("Shared");
+        apply_project_inner(&f.cli, &p.root, false, &[]).unwrap();
+        f.cli.game = Some(f.root.join("missing-client"));
+        let mut args = uninstall_args(&f, p.root.display().to_string()); args.res_mods = None;
+        let before = snap(&f.root);
+
+        assert!(cmd_uninstall(&f.cli, &args).is_err());
+
+        assert_eq!(snap(&f.root), before);
+        assert_eq!(registry::verify(&f.rm).unwrap()["mods"][0]["intact"], true);
+    }
+
+    #[test]
+    fn uninstall_explicit_empty_client_does_not_follow_legacy_manifest_to_another_client() {
+        for by_res_mods in [false, true] {
+            let f = Fixture::new(); let p = f.project("Legacy");
+            let (other_cli, other_rm) = fake_client(f.root.join("other-client"));
+            let items = vec![InstallItem { rel: "legacy.txt".into(), data: b"legacy".to_vec(), origin: "project".into() }];
+            modproj::install(&p, &items, &f.rm, "123", false).unwrap();
+            let mut args = uninstall_args(&f, p.root.display().to_string());
+            args.res_mods = by_res_mods.then_some(other_rm);
+            let before = snap(&f.root);
+
+            assert!(cmd_uninstall(&other_cli, &args).is_err());
+
+            assert_eq!(snap(&f.root), before);
+            assert_eq!(std::fs::read(f.rm.join("legacy.txt")).unwrap(), b"legacy");
+        }
+    }
+
+    #[test]
     fn stale_registry_managed_manifest_cannot_uninstall_replacement_shared_files() {
         let f = Fixture::new(); let a = f.project("A"); let b = f.project("B");
         std::fs::write(a.assets().join("shared.txt"), b"identical shared bytes").unwrap();
@@ -862,6 +959,20 @@ mod apply_tests {
         modproj::install(&a, &items, &f.rm, "123", false).unwrap();
         assert_eq!(cmd_uninstall(&f.cli, &uninstall_args(&f, a.root.display().to_string())).unwrap(), 0);
         assert!(!f.rm.join("legacy.txt").exists());
+    }
+
+    #[test]
+    fn legacy_manifest_without_explicit_target_still_selects_its_installed_client() {
+        let mut f = Fixture::new(); let p = f.project("Legacy");
+        let items = vec![InstallItem { rel: "legacy.txt".into(), data: b"legacy".to_vec(), origin: "project".into() }];
+        modproj::install(&p, &items, &f.rm, "123", false).unwrap();
+        f.cli.game = None;
+        let mut args = uninstall_args(&f, p.root.display().to_string()); args.res_mods = None;
+
+        assert_eq!(cmd_uninstall(&f.cli, &args).unwrap(), 0);
+
+        assert!(!f.rm.join("legacy.txt").exists());
+        assert!(!p.root.join(".install/manifest.json").exists());
     }
 
     #[test]

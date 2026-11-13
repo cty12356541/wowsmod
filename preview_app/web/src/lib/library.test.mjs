@@ -72,3 +72,12 @@ test('selector refresh key changes for installation/client changes and completed
   assert.equal(libraryRefreshKey({ ...project, etag: 2, activity: { state: 'working' } }, 0), key);
   assert.equal(libraryRefreshKey(structuredClone(project), 0), key);
 });
+test('English library counts use singular nouns for one variant or applied record', () => {
+  globalThis.document = { documentElement: {} }; setLang('en');
+  assert.equal(t('libVariantsN', { n: 0 }), '0 variants');
+  assert.equal(t('libVariantsN', { n: 1 }), '1 variant');
+  assert.equal(t('libVariantsN', { n: 2 }), '2 variants');
+  assert.equal(t('libAppliedN', { n: 0 }), '0 applied records');
+  assert.equal(t('libAppliedN', { n: 1 }), '1 applied record');
+  assert.equal(t('libAppliedN', { n: 2 }), '2 applied records');
+});

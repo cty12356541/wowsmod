@@ -237,7 +237,12 @@ fn api(st: &Arc<PreviewState>, method: &Method, path: &str, q: &[(String, String
                     if r["ok"] == true {
                         *j = json!({"id": id2, "state": "done", "progress": 1.0, "message": "完成", "result": r});
                     } else {
-                        *j = json!({"id": id2, "state": "failed", "progress": 1.0, "message": "失败", "error": {"code": "install_failed", "message": r["error"].clone()}});
+                        let error = &r["error"];
+                        let code = error["code"].as_str().map(str::to_owned).unwrap_or_else(|| format!("{}_failed", action.command()));
+                        let message = error.as_str().or_else(|| error["message"].as_str()).or_else(|| r["stderr"].as_str())
+                            .filter(|s| !s.trim().is_empty()).map(str::to_owned)
+                            .unwrap_or_else(|| if error.is_null() { "操作失败".into() } else { error.to_string() });
+                        *j = json!({"id": id2, "state": "failed", "progress": 1.0, "message": "失败", "error": {"code": code, "message": message, "detail": error}});
                     }
                 }
                 st2.refresh_install();
@@ -604,6 +609,48 @@ mod library_tests {
         }
         assert!(Action::from_path("/api/v1/something/uninstall").is_none());
         assert!(Action::from_path("/api/v1/install-more").is_none());
+    }
+
+    #[test]
+    fn async_apply_failure_after_preflight_exposes_text_and_preserves_error_detail() {
+        let mut f = Fixture::new();
+        let client = f.root.join("client"); let rm = client.join("bin/123/res_mods");
+        std::fs::create_dir_all(&rm).unwrap();
+        std::fs::create_dir_all(client.join("bin/123/idx")).unwrap();
+        std::fs::create_dir_all(client.join("res_packages")).unwrap();
+        let mut idx = vec![0; 56];
+        idx[0..4].copy_from_slice(&wowsmod_formats::idx::IDX_MAGIC.to_le_bytes());
+        idx[4..8].copy_from_slice(&wowsmod_formats::idx::VERSION_V40.to_le_bytes());
+        std::fs::write(client.join("bin/123/idx/empty.idx"), idx).unwrap();
+        let cli = super::super::library::selected_cli(Some(client));
+        f.service = PreviewService::new(&cli, &f.root.join("home"), None).unwrap();
+        let id = f.project("candidate", &[]); let project = f.root.join("candidate");
+        std::fs::write(project.join("assets/res_mods/paint.txt"), b"candidate").unwrap();
+        crate::m4cmd::apply_project(&cli, &project, false).unwrap();
+        let prefix = format!("/api/v1/projects/{id}");
+        let (status, plan) = f.json("POST", &format!("{prefix}/apply"), r#"{"dry_run":true}"#);
+        assert_eq!(status, 200); assert_eq!(plan["ok"], true);
+        let registry_before = std::fs::read(rm.join(".wowsmod/registry.json")).unwrap();
+        let manifest_before = std::fs::read(project.join(".install/manifest.json")).unwrap();
+        std::fs::write(rm.join("paint.txt"), b"external edit after preflight").unwrap();
+        let (status, submitted) = f.json("POST", &format!("{prefix}/apply"), r#"{"dry_run":false}"#);
+        assert_eq!(status, 200); assert_eq!(submitted["ok"], true);
+        let route = submitted["url"].as_str().unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let job = loop {
+            let (status, job) = f.json("GET", route, ""); assert_eq!(status, 200);
+            if job["state"] != "running" { break job; }
+            assert!(std::time::Instant::now() < deadline, "asynchronous application did not finish");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        assert_eq!(job["state"], "failed");
+        let message = job["error"]["message"].as_str().expect("job error message must be renderable text");
+        assert!(message.contains("paint.txt"), "must retain the actual failure: {message}");
+        assert_eq!(job["error"]["code"], "apply_failed");
+        assert_eq!(job["error"]["detail"]["message"], message);
+        assert_eq!(std::fs::read(rm.join("paint.txt")).unwrap(), b"external edit after preflight");
+        assert_eq!(std::fs::read(rm.join(".wowsmod/registry.json")).unwrap(), registry_before);
+        assert_eq!(std::fs::read(project.join(".install/manifest.json")).unwrap(), manifest_before);
     }
 
     #[test]
