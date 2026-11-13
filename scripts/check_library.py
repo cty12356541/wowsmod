@@ -140,11 +140,22 @@ def main() -> None:
             after_rejection = run("library", "list")["entries"]
             check(next(p for p in after_rejection if p["id"] == a_entry["id"])["favorite"] is True,
                   "rejected mutation leaves catalog unchanged")
+            session_views = {}
             for entry in (a_entry, b_entry):
                 status, project = request(f'/api/v1/projects/{entry["id"]}/project')
                 check(status == 200 and project["project"]["name"] == "same-pnf-name",
                       f'project session works without a model: {entry["id"]}')
                 check(project["install"]["state"] != "installed", "same-name projects are not falsely installed")
+                session_views[entry["id"]] = project
+            source = relocated / "mod.toml"
+            source.write_text(source.read_text(encoding="utf-8").replace('name = "same-pnf-name"',
+                                                                       'name = "edited-source-name"'),
+                              encoding="utf-8")
+            status, refreshed = request(f'/api/v1/projects/{a_entry["id"]}/project')
+            check(status == 200 and refreshed["project"]["name"] == "edited-source-name",
+                  "cached session refreshes edited source configuration")
+            check(refreshed["etag"] > session_views[a_entry["id"]]["etag"],
+                  "source refresh advances project generation")
             (output / "library.json").write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
         finally:
             process.terminate()

@@ -87,5 +87,6 @@ foreach ($oldFile in $oldFiles) {
 }
 $revision = (& git -C $repoRoot rev-parse HEAD).Trim()
 $manifest = [ordered]@{ schema = 1; frontend_baseline = '1a1fba8'; source_git_commit = $revision; source_sha256 = $sourceHash; files = $bundleFiles }
-[IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 5) + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
+$manifestJson = ($manifest | ConvertTo-Json -Depth 5).Replace("`r`n", "`n") + "`n"
+[IO.File]::WriteAllText($manifestPath, $manifestJson, [Text.UTF8Encoding]::new($false))
 Write-Output "Embedded $($bundleFiles.Count) preview files from source $sourceHash."
