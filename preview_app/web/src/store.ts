@@ -133,11 +133,12 @@ export async function loadRevs() {
   }
   const current = get(); const ids = new Set<string>(parts.parts.map((part: Part) => part.id));
   set({ parts: parts.parts, textures: tex.textures, selected: current.selected && ids.has(current.selected) ? current.selected : null, hidden: Object.fromEntries(Object.entries(current.hidden).filter(([id]) => ids.has(id))) });
-  const prog = (d: number, n: number) => { if (active && seq === loadSeq) set({ texProg: n && d < n ? { d, n } : null }); };
-  const rB = await target.applyManifest('B', mB, prog);
-  if (seq !== loadSeq) return;
-  await target.applyManifest('A', mA);
-  if (seq !== loadSeq || target !== viewer) return;
+  const isCurrent = () => active && seq === loadSeq && target === viewer;
+  const prog = (d: number, n: number) => { if (isCurrent()) set({ texProg: n && d < n ? { d, n } : null }); };
+  const rB = await target.applyManifest('B', mB, prog, isCurrent);
+  if (!isCurrent()) return;
+  await target.applyManifest('A', mA, undefined, isCurrent);
+  if (!isCurrent()) return;
   set({ texProg: null });
   target.gc();
   const failed = rB.failed.length;

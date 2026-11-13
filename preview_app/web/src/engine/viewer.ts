@@ -438,9 +438,8 @@ export class Viewer {
   private static SLOTS: [string, boolean][] = [['a', true], ['n', false], ['mg', false], ['ao', false]];
   private sigOf(def: MaterialDef) { const t: any = def.textures || {}; return [def.family, JSON.stringify(def.params || {}), ...Viewer.SLOTS.map(([s]) => t[s] ? `${t[s].url}|${t[s].hash}` : '-')].join('|'); }
 
-  async applyManifest(side: 'A' | 'B', manifest: Manifest, onProgress?: (d: number, t: number) => void) {
+  async applyManifest(side: 'A' | 'B', manifest: Manifest, onProgress?: (d: number, t: number) => void, isCurrent: () => boolean = () => true) {
     const mats = manifest.materials || {}, max = this.Q.tex;
-    if (manifest.camo && manifest.camo.color0) this.U.uCamoCol.value.setRGB(...manifest.camo.color0);
     const result = { missing: [] as string[], failed: [] as string[] }; const next: Record<string, string> = {};
     let done = 0, total = 0; const pending: Promise<void>[] = [];
     Object.entries(mats).forEach(([mfm, def]) => {
@@ -453,11 +452,14 @@ export class Viewer {
         total++;
         try { tex[slot] = await getTex(ti, { srgb, max }); } catch { result.failed.push(ti.name); }
         done++; onProgress && onProgress(done, total);
-      })).then(() => { if (!this.disposed && !this.matCache.has(sig)) this.matCache.set(sig, this.buildMaterial(def, tex, sig)); }));
+      })).then(() => { if (!this.disposed && isCurrent() && !this.matCache.has(sig)) this.matCache.set(sig, this.buildMaterial(def, tex, sig)); }));
     });
     onProgress && onProgress(done, total);
     await Promise.all(pending);
-    if (this.disposed) return result;
+    // The caller can be superseded while getTex is pending. Check before any
+    // visible commit; checking after this promise returns would be too late.
+    if (this.disposed || !isCurrent()) return result;
+    if (manifest.camo && manifest.camo.color0) this.U.uCamoCol.value.setRGB(...manifest.camo.color0);
     this.sets[side] = {}; Object.entries(next).forEach(([mfm, sig]) => { this.sets[side][mfm] = this.matCache.get(sig)!; });
     this.recomputeChanged();
     if (side === 'B') this.meshes.forEach((m) => { const mt = this.sets.B[m.userData.mfm]; if (mt) { m.material = mt; this.applyMeshFlags(m, mt); } });
