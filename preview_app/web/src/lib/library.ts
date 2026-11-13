@@ -1,10 +1,13 @@
-import type { LibraryEntry } from './types';
+import type { LibraryEntry, Project } from './types';
 
 export interface LibraryFilters {
   search: string; nations: string[]; levels: string[]; species: string[]; statuses: string[];
   favorites: boolean; sort: 'opened' | 'added' | 'name';
 }
 export const defaultFilters: LibraryFilters = { search: '', nations: [], levels: [], species: [], statuses: [], favorites: false, sort: 'opened' };
+export function libraryRefreshKey(project: Project | null, catalogEpoch: number): string {
+  return JSON.stringify([catalogEpoch, project?.game.path, project?.game.build, project?.install.state, project?.install.rev, project?.install.files, project?.install.time]);
+}
 export function shipKey(entry: LibraryEntry): string { return entry.project?.ship_key || entry.ship_metadata.key || (entry.project?.ship ? 'unknown:' + entry.project.ship : 'global'); }
 export function filterProjects(projects: LibraryEntry[], filters: LibraryFilters): LibraryEntry[] {
   const words = filters.search.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
@@ -26,8 +29,8 @@ export function groupProjects(projects: LibraryEntry[]): { key: string; projects
   projects.forEach((p) => { const key = shipKey(p); groups.set(key, [...(groups.get(key) || []), p]); });
   return [...groups].map(([key, entries]) => ({ key, projects: entries }));
 }
-export function shipLabel(entry: LibraryEntry): string {
-  return entry.ship_metadata.name_local || entry.ship_metadata.param || entry.project?.ship || (shipKey(entry) === 'global' ? '全局 / 未关联' : '未识别舰船');
+export function shipLabel(entry: LibraryEntry, translate: (key: string) => string): string {
+  return entry.ship_metadata.name_local || entry.ship_metadata.param || entry.project?.ship || translate(shipKey(entry) === 'global' ? 'libGlobal' : 'libUnknown');
 }
 export function facetValues(projects: LibraryEntry[], field: 'nation' | 'level' | 'species'): string[] {
   return [...new Set(projects.map((p) => p.ship_metadata[field] == null || p.ship_metadata[field] === '' ? 'unknown' : String(p.ship_metadata[field])))].sort((a, b) => field === 'level' ? (Number(a) || 99) - (Number(b) || 99) : a.localeCompare(b));

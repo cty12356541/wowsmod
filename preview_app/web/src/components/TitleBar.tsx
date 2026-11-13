@@ -36,7 +36,7 @@ export function TitleBar() {
       )}
       <div className="tb-center">
         <Seg size="ws" ariaLabel={t('workspace')} value={s.workspace} onChange={(w) => actions.setWorkspace(w)}
-          opts={[{ v: 'review', label: t('wsReview'), tip: t('wsReviewTip'), kbd: 'Tab' }, { v: 'sim', label: t('wsSim'), tip: p?.capabilities?.simulation === false ? capabilityReason('simulation') : s.sim ? t('wsSimTip') : t('simUnavailable'), disabled: !s.sim || p?.capabilities?.simulation === false, kbd: 'Tab' }]} />
+          opts={[{ v: 'review', label: t('wsReview'), tip: t('wsReviewTip'), kbd: 'Shift+V' }, { v: 'sim', label: t('wsSim'), tip: p?.capabilities?.simulation === false ? capabilityReason('simulation') : s.sim ? t('wsSimTip') : t('simUnavailable'), disabled: !s.sim || p?.capabilities?.simulation === false, kbd: 'Shift+V' }]} />
       </div>
       <div className="tb-right">
         {p?.activity?.state === 'working' && <span className="tb-status"><Loader2 size={12} className="spin" />{t('stWorking')}</span>}

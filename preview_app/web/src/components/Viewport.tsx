@@ -3,6 +3,7 @@ import { Camera, SlidersHorizontal, Layers, Sun, Sunset, Moon, RotateCcw, Info }
 import { useStore, actions, setViewer, viewer, baseRev, boot, disposeWorkbench } from '../store';
 import { Viewer, CHANNELS } from '../engine/viewer';
 import { t } from '../lib/i18n';
+import { handleWorkbenchKey } from '../lib/keyboard';
 import { IconBtn, Menu, Seg, SelBtn, Slider, Switch, Tip } from './ui';
 import * as Popover from '@radix-ui/react-dialog';
 
@@ -167,35 +168,8 @@ function SimHud() {
   );
 }
 
-// ---------------------------------------------------------------- 键盘
+// The shared handler is tested directly; native control/dialog keys are preserved.
 function keyboard() {
-  const h = (e: KeyboardEvent) => {
-    const tg = e.target as HTMLElement; if (tg && (tg.tagName === 'INPUT' || tg.tagName === 'TEXTAREA' || tg.isContentEditable)) return;
-    if (e.ctrlKey || e.metaKey || e.altKey) return;
-    const s = useStore.getState(); const k = e.key.toLowerCase();
-    if (k === 'tab') { e.preventDefault(); if (s.sim) actions.setWorkspace(s.workspace === 'review' ? 'sim' : 'review'); return; }
-    if (s.workspace === 'review') {
-      const m = { '1': 'single', '2': 'split', '3': 'side', '4': 'overlay' }[k]; if (m) { actions.setMode(m as any); return; }
-      if (k === 'f' && s.selected) { viewer?.focus([s.selected]); return; }
-      const ch = { a: 1, n: 2, e: 3, w: 4, m: 5 }[k]; if (ch !== undefined) { actions.setChannel(s.channel === ch ? 0 : ch); return; }
-      if (k === 'escape') { actions.select(null); return; }
-      if (k === 'arrowup' || k === 'arrowdown') {
-        const act = s.steps; const i = act.findIndex((x) => x.id === (s.viewRev || s.head)); const j = i + (k === 'arrowup' ? -1 : 1);
-        if (act[j]) { e.preventDefault(); actions.view(act[j].id); }
-      }
-      return;
-    }
-    // 模拟
-    const tels = ['rev', 'stop', 'q1', 'q2', 'q3', 'full'] as const; const ti = tels.indexOf(s.tel as any);
-    if (k === 'w') actions.setTel(tels[Math.min(5, ti + 1)]);
-    else if (k === 's') actions.setTel(tels[Math.max(0, ti - 1)]);
-    else if (k === 'a') actions.setRudder(Math.max(-1, s.rudder - 0.5));
-    else if (k === 'd') actions.setRudder(Math.min(1, s.rudder + 0.5));
-    else if (k === ' ') { e.preventDefault(); actions.fire('main', 'salvo'); }
-    else if (k === 'f') actions.fire('main', 'single');
-    else if (k === 'r') actions.fire('secondary', 'salvo');
-    else if (k === 'c') actions.setCombat(!s.combat);
-    else if (k === '1' || k === '2' || k === '3') actions.setDist((['near', 'mid', 'far'] as const)[+k - 1]);
-  };
-  window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h);
+  window.addEventListener('keydown', handleWorkbenchKey);
+  return () => window.removeEventListener('keydown', handleWorkbenchKey);
 }

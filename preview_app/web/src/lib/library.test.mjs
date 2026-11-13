@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { defaultFilters, filterProjects, groupProjects } from './library.ts';
+import { defaultFilters, filterProjects, groupProjects, shipLabel, libraryRefreshKey } from './library.ts';
+import { setLang, t } from './i18n.ts';
 import { ProjectCache, projectPrefix, showLibrary } from './scope.ts';
 
 const entry = (id, extra = {}) => ({ id, path: `C:/mods/${id}`, display_name: 'Robin', tags: ['角色'], favorite: false, status: 'working', added_unix: 100, opened_unix: null, available: true, warnings: [], project: { name: 'same-mod', version: '1', ship: 'FSB110', ship_key: 'PFSB110', game_build: '123', mode: 'sdk' }, ship_metadata: { key: 'PFSB110', known: true, nation: 'France', level: 10, species: 'Battleship', name_local: '勃艮第', param: 'PFSB110_Bourgogne', warning: null }, install: { state: 'not_installed', rev: null, files: 0, time: null }, ...extra });
@@ -50,4 +51,24 @@ test('project prefix and library entry preserve direct and render routes', () =>
   assert.equal(showLibrary('?project=a', true), false);
   assert.equal(showLibrary('?render=1', true), false);
   assert.equal(showLibrary('', false), false);
+});
+test('global and unknown ship fallbacks use the active UI language', () => {
+  globalThis.document = { documentElement: {} };
+  const globalEntry = entry('global', { project: null, ship_metadata: { key: '', known: false } });
+  const unknownEntry = entry('unknown', { project: null, ship_metadata: { key: 'UNKNOWN', known: false } });
+  setLang('en');
+  assert.equal(shipLabel(globalEntry, t), 'Global / unlinked');
+  assert.equal(shipLabel(unknownEntry, t), 'Unknown');
+  setLang('zh');
+  assert.equal(shipLabel(globalEntry, t), '全局 / 未关联');
+  assert.equal(shipLabel(unknownEntry, t), '未识别');
+});
+test('selector refresh key changes for installation/client changes and completed application only', () => {
+  const project = { install: { state: 'not_installed', rev: null, files: 0, time: null }, game: { path: 'D:/Game', build: '123' }, etag: 1, activity: { state: 'idle' } };
+  const key = libraryRefreshKey(project, 0);
+  assert.notEqual(libraryRefreshKey({ ...project, install: { ...project.install, state: 'installed' } }, 0), key);
+  assert.notEqual(libraryRefreshKey(project, 1), key);
+  assert.notEqual(libraryRefreshKey({ ...project, game: { ...project.game, build: '124' } }, 0), key);
+  assert.equal(libraryRefreshKey({ ...project, etag: 2, activity: { state: 'working' } }, 0), key);
+  assert.equal(libraryRefreshKey(structuredClone(project), 0), key);
 });

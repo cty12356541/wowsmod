@@ -32,20 +32,26 @@ test('dry run opens a review dialog and selecting project never applies automati
   await actions.prepareApply();
   assert.equal(useStore.getState().dialog.kind, 'apply');
   assert.equal(useStore.getState().applyPlan.target_client, 'D:/Game');
+  assert.equal(useStore.getState().catalogEpoch, 0);
   assert.deepEqual(applyCalls().map((c) => c.body), [{ dry_run: true }]);
 });
 test('explicit confirmation supports immediate apply result and keeps validation wording truthful', async () => {
+  const catalogEpoch = useStore.getState().catalogEpoch || 0;
   await actions.confirmApply();
   assert.deepEqual(applyCalls().at(-1).body, { dry_run: false });
   assert.equal(useStore.getState().dialog, null);
   assert.match(useStore.getState().applyMessage, /实机验收|in-game validation/);
+  assert.equal(useStore.getState().catalogEpoch, catalogEpoch + 1);
 });
 test('job_id apply result polls the scoped job until completion', async () => {
+  const catalogEpoch = useStore.getState().catalogEpoch || 0;
   realResult = { ok: true, job_id: 'job-B' }; await actions.prepareApply(); await actions.confirmApply();
   assert.equal(useStore.getState().job.id, 'job-B');
+  assert.equal(useStore.getState().catalogEpoch, catalogEpoch);
   await new Promise((resolve) => setTimeout(resolve, 370));
   assert(calls.some((c) => c.url === '/api/v1/projects/B/jobs/job-B'));
   assert.equal(useStore.getState().job.state, 'done');
+  assert.equal(useStore.getState().catalogEpoch, catalogEpoch + 1);
 });
 test('running-game errors remain visible and never submit a real apply', async () => {
   failApply = true; const before = applyCalls().length; await actions.prepareApply();

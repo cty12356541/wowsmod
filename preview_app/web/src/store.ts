@@ -33,6 +33,7 @@ export interface State {
   stats: { fps: number; draws: number; tris: number; idle: boolean; gl: string; gpuTexMB: number } | null;
   job: Job | null; toasts: Toast[]; dialog: null | { kind: 'uninstall' | 'gameRunning' | 'apply' };
   applyPlan: ApplyPlan | null; applyBusy: boolean; applyError: string; applyMessage: string;
+  catalogEpoch: number;
 }
 
 const initialLang = ((): Lang => {
@@ -76,6 +77,7 @@ export const useStore = create<State>(() => ({
   emisMode: -1, emisSpeed: 1, lodMode: 'auto', lodBias: 1, lodTint: false, distPreset: null, snap: null,
   stats: null, job: null, toasts: [], dialog: null,
   applyPlan: null, applyBusy: false, applyError: '', applyMessage: '',
+  catalogEpoch: 0,
 }));
 const set = useStore.setState, get = useStore.getState;
 let active = false;
@@ -210,7 +212,7 @@ async function trackResult(response: any, kind: 'apply' | 'uninstall') {
     }
     const project = await api.project(); if (!active) return;
     const message = kind === 'apply' ? t('libApplyDone') : t('uninstalledTitle');
-    set({ project, applyMessage: message }); toast('ok', message, job?.message);
+    set({ project, catalogEpoch: get().catalogEpoch + 1, applyMessage: message }); toast('ok', message, job?.message);
   }
   if (!id) { await finish(); return; }
   set({ job: { id, kind, state: 'running', progress: 0, message: response.message || t('libWorking') }, applyMessage: response.message || t('libWorking') });
