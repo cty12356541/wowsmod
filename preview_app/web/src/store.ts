@@ -104,17 +104,32 @@ export function baseRev(s = get()): string {
 export function changedPartIds() { return get().parts.filter((p) => p.changed).map((p) => p.id); }
 
 const manifestCache = new ProjectCache<Manifest>();
-async function manifest(rev: string) { const hit = manifestCache.get(projectScope, rev); if (hit) return hit; const value = await api.model(rev); manifestCache.set(projectScope, rev, value); return value; }
+let manifestEpoch = 0;
+function clearManifests() { manifestEpoch++; manifestCache.clear(); }
+async function manifest(rev: string) { const epoch = manifestEpoch; const hit = manifestCache.get(projectScope, rev); if (hit) return hit; const value = await api.model(rev); if (epoch === manifestEpoch) manifestCache.set(projectScope, rev, value); return value; }
+const geometryKey = (m: Manifest) => JSON.stringify([projectScope, m.geometry.hash, m.geometry.url]);
+let loadedGeometry: { target: Viewer; key: string } | null = null;
+const simulationKey = (project: Project) => JSON.stringify([project.ship.param || project.ship.code, project.capabilities?.simulation]);
+let loadedSimulationKey: string | null = null;
 
 let loadSeq = 0;
 /** 载入 viewRev（B）与对比基准（A）的材质 + 部件树 + 贴图列表 */
 export async function loadRevs() {
-  const s = get(); const rev = s.viewRev || s.head; if (!rev || !viewer) return;
+  const s = get(); const rev = s.viewRev || s.head; if (!rev || !viewer || s.project?.capabilities?.preview === false) return;
   const target = viewer;
   const base = baseRev(); const seq = ++loadSeq;
   const [mB, mA, parts, tex] = await Promise.all([manifest(rev), manifest(base), api.parts(rev, base), api.textures(rev, base)]);
-  if (seq !== loadSeq) return;
-  set({ parts: parts.parts, textures: tex.textures });
+  if (seq !== loadSeq || target !== viewer || !active) return;
+  const key = geometryKey(mB);
+  if (loadedGeometry?.target !== target || loadedGeometry.key !== key) {
+    const geometry = await api.geometry(mB.geometry.url);
+    if (seq !== loadSeq || target !== viewer || !active) return;
+    target.loadGeometry(geometry, { preserveCamera: true });
+    loadedGeometry = { target, key };
+    Object.entries(get().hidden).forEach(([id, hidden]) => target.setPartVisible(id, !hidden));
+  }
+  const current = get(); const ids = new Set<string>(parts.parts.map((part: Part) => part.id));
+  set({ parts: parts.parts, textures: tex.textures, selected: current.selected && ids.has(current.selected) ? current.selected : null, hidden: Object.fromEntries(Object.entries(current.hidden).filter(([id]) => ids.has(id))) });
   const prog = (d: number, n: number) => { if (active && seq === loadSeq) set({ texProg: n && d < n ? { d, n } : null }); };
   const rB = await target.applyManifest('B', mB, prog);
   if (seq !== loadSeq) return;
@@ -139,6 +154,7 @@ export async function boot(factory?: () => Viewer) {
     const [project, steps] = await Promise.all([api.project(), api.steps()]);
     if (!active || seq !== bootSeq) return;
     set({ project, steps: steps.steps, head: steps.head, viewRev: steps.head });
+    loadedSimulationKey = simulationKey(project);
     document.title = t('docTitle', { p: project.project.name });
     if (project.capabilities?.preview === false) { set({ phase: 'ready' }); startLive(); return; }
     if (!steps.head) throw new ApiError('no_model', '', 404);
@@ -152,6 +168,7 @@ export async function boot(factory?: () => Viewer) {
     await new Promise((r) => setTimeout(r, 0));
     if (!active || seq !== bootSeq) return;
     viewer!.loadGeometry(buf);
+    loadedGeometry = { target: viewer!, key: geometryKey(m) };
     viewer!.setFx(project.fx?.preview ?? null);
     if (project.capabilities?.simulation !== false) try { const sim = await api.sim(); if (!active || seq !== bootSeq) return; set({ sim }); viewer!.setSimData(sim); } catch { /* Missing simulation is represented as unavailable. */ }
     await loadRevs();
@@ -166,8 +183,8 @@ export async function boot(factory?: () => Viewer) {
   }
 }
 export function disposeWorkbench() {
-  active = false; bootSeq++; loadSeq++; viewerFactory = null; disposeRequests();
-  timers.forEach(clearTimeout); timers.clear(); manifestCache.clear(); setViewer(null);
+  active = false; bootSeq++; loadSeq++; syncSeq++; viewerFactory = null; disposeRequests();
+  timers.forEach(clearTimeout); timers.clear(); clearManifests(); loadedGeometry = null; loadedSimulationKey = null; setViewer(null);
 }
 
 apiOn('connection', (c: ConnState) => {
@@ -179,21 +196,37 @@ apiOn('connection', (c: ConnState) => {
 });
 apiOn('event', async (ev: { type: string; data: any }) => {
   if (!active) return;
-  if (ev.type === 'steps' || ev.type === 'resync') await resync(ev.data);
-  else if (ev.type === 'project' || ev.type === 'game' || ev.type === 'activity') { try { set({ project: await api.project() }); } catch { /* */ } }
+  if (ev.type === 'steps' || ev.type === 'resync' || ev.type === 'project') await resync(ev.data);
+  else if (ev.type === 'game' || ev.type === 'activity') { try { const project = await api.project(); if (active) { set({ project }); document.title = t('docTitle', { p: project.project.name }); } } catch { /* */ } }
   else if (ev.type === 'job') set({ job: ev.data.job });
 });
 
-async function resync(d?: any) {
+let syncSeq = 0;
+export async function resync(d?: any) {
+  const seq = ++syncSeq;
   try {
     const [project, steps] = await Promise.all([api.project(), api.steps()]);
     const s = get(); const wasAtHead = !s.viewRev || s.viewRev === s.head;
     const exists = steps.steps.some((x: Step) => x.id === s.viewRev);
-    if (!active) return;
-    manifestCache.clear();
+    if (!active || seq !== syncSeq) return;
+    const nextSimulationKey = simulationKey(project);
+    const refreshSimulation = loadedSimulationKey !== nextSimulationKey;
+    loadedSimulationKey = nextSimulationKey;
+    const target = viewer;
+    if (refreshSimulation || (project.capabilities?.simulation === false && (s.sim || s.simOn || s.workspace === 'sim'))) {
+      target?.setSimData(null);
+      set({ sim: null, simOn: false, workspace: 'review', rightTab: 'history', snap: null, tel: 'stop', rudder: 0, combat: false });
+    }
+    clearManifests();
     viewer?.setFx(project.fx?.preview ?? null);
     set({ project, steps: steps.steps, head: steps.head, viewRev: wasAtHead || !exists ? steps.head : s.viewRev });
+    document.title = t('docTitle', { p: project.project.name });
     await loadRevs();
+    if (!active || seq !== syncSeq || viewer !== target) return;
+    if (refreshSimulation && project.capabilities?.simulation === true && target) {
+      try { const sim = await api.sim(); if (!active || loadedSimulationKey !== nextSimulationKey || viewer !== target) return; set({ sim }); target.setSimData(sim); }
+      catch { /* Changed or unsupported simulation stays unavailable after a failed fetch. */ }
+    }
     if (d && d.reason === 'new_step' && wasAtHead) {
       const st = steps.steps.find((x: Step) => x.id === steps.head);
       if (st) { toast('info', t('newStep', { n: st.index }), st.title); viewer?.flash(st.parts.slice(0, 12)); }
@@ -254,12 +287,12 @@ export const actions = {
   showAll() { get().parts.forEach((p) => viewer?.setPartVisible(p.id, true)); set({ hidden: {} }); },
   async revert(id: string) {
     if (!supports('undo')) { toast('error', capabilityReason('undo')); return; }
-    try { const r = await api.revert(id); set({ steps: r.steps, head: r.head, viewRev: r.head }); manifestCache.clear(); await loadRevs(); toast('ok', t('revertedTo', { n: r.steps.find((x: Step) => x.id === r.head)?.index ?? 0 })); }
+    try { const r = await api.revert(id); set({ steps: r.steps, head: r.head, viewRev: r.head }); clearManifests(); await loadRevs(); toast('ok', t('revertedTo', { n: r.steps.find((x: Step) => x.id === r.head)?.index ?? 0 })); }
     catch (e: any) { toast('error', t('opFailed'), e.message); }
   },
   async restore(id: string) {
     if (!supports('restore')) { toast('error', capabilityReason('restore')); return; }
-    try { const r = await api.restore(id); set({ steps: r.steps, head: r.head, viewRev: r.head }); manifestCache.clear(); await loadRevs(); toast('ok', t('restored')); }
+    try { const r = await api.restore(id); set({ steps: r.steps, head: r.head, viewRev: r.head }); clearManifests(); await loadRevs(); toast('ok', t('restored')); }
     catch (e: any) { toast('error', t('opFailed'), e.message); }
   },
   async install(kind: 'install' | 'uninstall') {

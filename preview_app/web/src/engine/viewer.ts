@@ -278,9 +278,14 @@ export class Viewer {
   setFixedSize(w: number, h: number) { this.opts.fixed = [w, h]; this.resize(); }
 
   // ---------------------------------------------------------------- 几何
-  loadGeometry(buf: ArrayBuffer) {
+  loadGeometry(buf: ArrayBuffer, options: { preserveCamera?: boolean } = {}) {
     const { root } = parseGLB(buf);
-    if (this.ship) { this.shipFrame.remove(this.ship); this.meshes.length = 0; this.parts = {}; this.mounts = []; }
+    if (this.ship) {
+      const oldGeometry = new Set<THREE.BufferGeometry>();
+      this.ship.traverse((node: any) => { if (node.geometry) oldGeometry.add(node.geometry); });
+      this.shipFrame.remove(this.ship); oldGeometry.forEach((geometry) => geometry.dispose());
+      this.meshes.length = 0; this.parts = {}; this.mounts = [];
+    }
     root.updateMatrixWorld(true);
     const box = new T.Box3();
     // 特效挂点(extras.fx: HP_FX_Smoke_* / HP_FX_WakeTrace* …)不是部件, 单独收起来
@@ -311,7 +316,7 @@ export class Viewer {
     this.applyLod(true);
     if (this.simData) this.setupMounts();
     this.renderer.shadowMap.needsUpdate = true;
-    this.preset('hero', true);
+    if (!options.preserveCamera) this.preset('hero', true);
     const out: Record<string, any> = {}; let tv = 0, tt = 0;
     Object.values(this.parts).forEach((p) => { out[p.id] = { verts: p.verts, tris: p.tris, prims: p.meshes.filter((m) => !m.userData.lod).length, lods: p.lods.length }; tv += p.verts; tt += p.tris; });
     return { parts: out, verts: tv, tris: tt, prims: this.meshes.filter((m) => !m.userData.lod).length, bounds: { min: this.BOX.min.toArray(), max: this.BOX.max.toArray() } };
@@ -627,7 +632,11 @@ export class Viewer {
 
   // ---------------------------------------------------------------- 模拟
   aimBearing: number | null = null; aimDistKm = 12; aimMarkDist = 40; pendingShots: { m: Mount; t: number }[] = [];
-  setSimData(d: SimData) {
+  setSimData(d: SimData | null) {
+    if (!d) {
+      this.simEnable(false); this.simData = null; this.motion = null; this.mounts = []; this.pendingShots = [];
+      this.combat = false; this.aimLocal = null; this.aimWorld = null; this.updateSimVis(); return;
+    }
     this.simData = d; this.motion = new ShipMotion(d.ship);
     this.motion.m2u = (this.BOX.max.z - this.BOX.min.z) / (d.ship.size_m?.[0] || 250);
     if (this.ship) this.setupMounts();
