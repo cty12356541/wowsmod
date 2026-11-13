@@ -111,6 +111,7 @@ const geometryKey = (m: Manifest) => JSON.stringify([projectScope, m.geometry.ha
 let loadedGeometry: { target: Viewer; key: string } | null = null;
 const simulationKey = (project: Project) => JSON.stringify([project.ship.param || project.ship.code, project.capabilities?.simulation]);
 let loadedSimulationKey: string | null = null;
+let simulationEpoch = 0, attemptedSimulationEpoch = -1;
 
 let loadSeq = 0;
 /** 载入 viewRev（B）与对比基准（A）的材质 + 部件树 + 贴图列表 */
@@ -155,6 +156,7 @@ export async function boot(factory?: () => Viewer) {
     if (!active || seq !== bootSeq) return;
     set({ project, steps: steps.steps, head: steps.head, viewRev: steps.head });
     loadedSimulationKey = simulationKey(project);
+    simulationEpoch++;
     document.title = t('docTitle', { p: project.project.name });
     if (project.capabilities?.preview === false) { set({ phase: 'ready' }); startLive(); return; }
     if (!steps.head) throw new ApiError('no_model', '', 404);
@@ -170,7 +172,7 @@ export async function boot(factory?: () => Viewer) {
     viewer!.loadGeometry(buf);
     loadedGeometry = { target: viewer!, key: geometryKey(m) };
     viewer!.setFx(project.fx?.preview ?? null);
-    if (project.capabilities?.simulation !== false) try { const sim = await api.sim(); if (!active || seq !== bootSeq) return; set({ sim }); viewer!.setSimData(sim); } catch { /* Missing simulation is represented as unavailable. */ }
+    if (project.capabilities?.simulation !== false) try { const epoch = simulationEpoch; attemptedSimulationEpoch = epoch; const sim = await api.sim(); if (!active || seq !== bootSeq || epoch !== simulationEpoch) return; set({ sim }); viewer!.setSimData(sim); } catch { /* Missing simulation is represented as unavailable. */ }
     await loadRevs();
     if (!active || seq !== bootSeq) return;
     set({ phase: 'ready' });
@@ -184,7 +186,7 @@ export async function boot(factory?: () => Viewer) {
 }
 export function disposeWorkbench() {
   active = false; bootSeq++; loadSeq++; syncSeq++; viewerFactory = null; disposeRequests();
-  timers.forEach(clearTimeout); timers.clear(); clearManifests(); loadedGeometry = null; loadedSimulationKey = null; setViewer(null);
+  timers.forEach(clearTimeout); timers.clear(); clearManifests(); loadedGeometry = null; loadedSimulationKey = null; simulationEpoch++; attemptedSimulationEpoch = -1; setViewer(null);
 }
 
 apiOn('connection', (c: ConnState) => {
@@ -212,6 +214,7 @@ export async function resync(d?: any) {
     const nextSimulationKey = simulationKey(project);
     const refreshSimulation = loadedSimulationKey !== nextSimulationKey;
     loadedSimulationKey = nextSimulationKey;
+    if (refreshSimulation) simulationEpoch++;
     const target = viewer;
     if (refreshSimulation || (project.capabilities?.simulation === false && (s.sim || s.simOn || s.workspace === 'sim'))) {
       target?.setSimData(null);
@@ -223,8 +226,11 @@ export async function resync(d?: any) {
     document.title = t('docTitle', { p: project.project.name });
     await loadRevs();
     if (!active || seq !== syncSeq || viewer !== target) return;
-    if (refreshSimulation && project.capabilities?.simulation === true && target) {
-      try { const sim = await api.sim(); if (!active || loadedSimulationKey !== nextSimulationKey || viewer !== target) return; set({ sim }); target.setSimData(sim); }
+    if (attemptedSimulationEpoch !== simulationEpoch && project.capabilities?.simulation === true && target) {
+      // Geometry may have superseded the identity's first resync before /sim began.
+      // Stamp only an actual attempt so a later same-identity resync can own it.
+      const epoch = simulationEpoch; attemptedSimulationEpoch = epoch;
+      try { const sim = await api.sim(); if (!active || epoch !== simulationEpoch || viewer !== target) return; set({ sim }); target.setSimData(sim); }
       catch { /* Changed or unsupported simulation stays unavailable after a failed fetch. */ }
     }
     if (d && d.reason === 'new_step' && wasAtHead) {
