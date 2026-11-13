@@ -30,17 +30,20 @@ def main() -> None:
     (rm / "readme.txt").write_bytes(b"untouched fixture client")
     original = snapshot(rm)
     env = dict(os.environ, WOWSMOD_HOME=str(root / "home"))
-    base = [str(args.exe.resolve()), "--json", "--game", str(client)]
+    exe = str(args.exe.resolve())
     flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
     evidence: list[dict] = []
 
-    def run(*words: str, success: bool = True) -> dict:
+    def run(*words: str, success: bool = True, game: Path | None = None) -> dict:
+        target = game if game is not None else client
+        base = [exe, "--json", "--game", str(target)]
         result = subprocess.run(base + list(words), env=env, capture_output=True,
                                 text=True, encoding="utf-8", timeout=60, creationflags=flags)
         response = json.loads(result.stdout)
         assert (result.returncode == 0) == success, (words, result.returncode, result.stdout, result.stderr)
         assert (response.get("ok") is True) == success, response
-        evidence.append({"command": list(words), "exit": result.returncode, "response": response})
+        evidence.append({"game": str(target), "command": list(words),
+                         "exit": result.returncode, "response": response})
         return response
 
     a, b, c, other = [root / "projects" / name for name in ("A", "B", "C", "Other")]
@@ -76,7 +79,34 @@ def main() -> None:
     assert "DifferentPnF" in json.dumps(verified), verified
     run("uninstall", str(c))
     assert snapshot(rm) == original, "uninstall did not restore original client bytes"
+
+    # One source project can be applied to two clients. Its latest manifest
+    # points at the second client, but explicit selection must remain authoritative.
+    second = root / "second-fake-client"
+    second_rm = second / "bin" / "456" / "res_mods"
+    second_idx = second / "bin" / "456" / "idx"
+    second_rm.mkdir(parents=True)
+    second_idx.mkdir()
+    (second / "res_packages").mkdir()
+    (second_idx / "empty.idx").write_bytes(struct.pack("<II", 0x50465349, 0x02000000) + bytes(48))
+    (second_rm / "fixture.txt").write_bytes(b"second client original resource")
+    second_original = snapshot(second_rm)
+    run("apply", str(a))
+    run("apply", str(a), game=second)
+    second_installed = snapshot(second)
+    manifest = a / ".install" / "manifest.json"
+    manifest_bytes = manifest.read_bytes()
+    before = snapshot(root)
+    run("uninstall", str(a), game=root / "missing-client", success=False)
+    assert snapshot(root) == before, "invalid explicit client fell back to the manifest target"
+    run("uninstall", str(a))
+    assert snapshot(rm) == original, "explicit first-client uninstall did not restore first client"
+    assert snapshot(second) == second_installed, "first-client uninstall modified second client"
+    assert manifest.read_bytes() == manifest_bytes, "first-client uninstall archived second-client manifest"
+    run("uninstall", str(a), game=second)
+    assert snapshot(second_rm) == second_original, "second-client uninstall did not restore its original bytes"
     report = {"ok": True, "real_game_used": False, "client_restored": True,
+              "two_clients_restored": True,
               "commands": len(evidence), "evidence": evidence}
     (root / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps({k: v for k, v in report.items() if k != "evidence"}, ensure_ascii=False))

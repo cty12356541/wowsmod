@@ -65,8 +65,11 @@ the preflight result immediately. The result uses the transaction service's
 and target client/build before an explicit second request with `dry_run:false`.
 The real request may return the result immediately or `{ok,job_id}`; polling
 `<project-prefix>/jobs/<job_id>` then returns `{state,message,result|error}`.
+Failed jobs provide `error.code` and a human-readable string `error.message`;
+structured diagnostic context, when present, is kept separately from the message.
 Selecting/opening a project never triggers either request.
 
 `/uninstall` dispatches uninstall exactly. Child processes inherit the selected
 client, including an explicitly unavailable path; they must not auto-select a
-different client. Existing render and warm-render routes remain compatible.
+different client or follow a project manifest that names another installation.
+Existing render and warm-render routes remain compatible.
