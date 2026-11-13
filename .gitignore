@@ -8,6 +8,7 @@ styles/*/examples/
 __pycache__/
 *.pyc
 /.agentdash/
+**/.agentdash/
 /.superpowers/
 /preview_app/web/node_modules/
 /preview_app/web/dist/

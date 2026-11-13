@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "frontend_baseline": "1a1fba8",
+  "source_git_commit": "ca6fab244c5a56697b7d8b88c449dc5e6cece9c2",
+  "source_sha256": "fe213d2a7196b0d9b1915560d90328d2bce6a121d1bf2875277269863250639b",
+  "files": [
+    {
+      "path": "assets/app.js",
+      "sha256": "e06b5662ee24de21127b3de9c6d8aca30a25136b7bab8ca3b414fe4fa1bd4560"
+    },
+    {
+      "path": "assets/style.css",
+      "sha256": "0608ddf1236a2689d26e56776bada1aaaab52dabd2f2972907991ddeb85e4218"
+    },
+    {
+      "path": "index.html",
+      "sha256": "01c67ed9d279cabef3046e4ac87ec3fcc8ba639bb6e24273428a3fb6cc87ad3b"
+    }
+  ]
+}
