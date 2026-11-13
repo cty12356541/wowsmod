@@ -1,6 +1,14 @@
 // 把 docs/skill/*.md 与 styles/**/(README|STYLE).md 编进二进制(技能树节点)
 use std::path::Path;
 fn main() {
+    // clap's generated command tree exceeds the MSVC default 1 MiB main-thread
+    // stack in dev builds. Reserve address space (not committed RAM) for the CLI;
+    // keep this binary-only so dependencies and worker-thread stacks are unchanged.
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows")
+        && std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc")
+    {
+        println!("cargo:rustc-link-arg-bin=wowsmod=/STACK:16777216");
+    }
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut files = Vec::new();
     let skill = root.join("docs/skill");
