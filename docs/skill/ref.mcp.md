@@ -20,6 +20,7 @@
 - 规则文件:
   - `AGENTS.md` 是正本;
   - `CLAUDE.md`、`.cursor/rules/wowsmod.mdc`、`GEMINI.md`、`.github/copilot-instructions.md` 都只是指向正本的入口。
+- 帮助树在构建时嵌入；更新 Markdown 后先重建并核对 `wowsmod help --check`。已有 `ai init` 文件不会自动刷新；先审阅/保留用户自定义内容，再显式运行 `wowsmod ai init <目录> --force`，不要静默覆盖规则。
 
 ## 预热出图
 - `wowsmod_render` 连到项目的常驻出图实例(见 `wowsmod help ref.render` 的"预热"一节), 不在 MCP 进程里开浏览器; 第一次调用会先启动实例(冷启动十几秒到几十秒), 之后每张约 1 秒。

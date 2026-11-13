@@ -12,6 +12,6 @@
 1. 粗摆: `model scale|move|rotate|remove|replace` / `model import`(PMX 先 `pmx2glb` 去人体材质)。
 2. **造型语言** → `workflow.layers.shape.form-language`(对标剪影/倒角/镶边)。
 3. **精细外形** → `shape.blender`; **整船级改模** → `shape.refine`(拆标杆几何→对等件)(必读): export-blender → 改网格 → import-blender → 出图验收。
-4. 会动的道具: `model animate`。尺寸: `mod set --ship-length` + `units`(装饰件通常 ≪ 船长 2%)。
-**完成标准**: 剪影与设计一致; 日/夜可见、LOD 在、不穿模、不挡炮管; 主题 `model list` 无人体材质装配。港口同角并排。
+4. 独立动画属实验, 先读 `ref.model.animate`; 随炮挂载不能用环绕动画替代。尺寸用 `mod set --ship-length` + `units` 核对本船比例, 不沿用统一船长百分比。
+**完成标准**: 剪影与设计一致; LOD、活动范围与材质检查有依据; 主题无人体装配。日/夜和港口仅在相关且获授权时验证, 未测项写明。
 **自评**: 只看剪影主次清吗? 有没有靠甲板上立人像认角色(错)? 该进 Blender 的精细件有没有用贴图糊弄?

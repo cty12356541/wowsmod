@@ -13,7 +13,7 @@
 ---
 **何时**: 主题要「船模也改」(非只涂色); 对标例子有大外带/罩壳/改轮廓; 用户反馈「船模没改」。
 **目标**: 拆→设计→建模→UV→挂回→检查→同角验收, 每步有输入与完成标准; 能脚本化的固化。
-**硬规则**: 主题禁人物雕像; 只道具/罩壳/外带; 大尺度远景可读(fq 能认翅膀/环)。
-**顺序**(勿跳): teardown → design → **layout(量化挂点/尺度/主次, 剪影并排过线)** → model → uv → hook → check →(clean: 原壳降噪, 按需)→ accept。layout 未过线不进贴图细修。粗摆仍走 `shape`/`form-language`; 本树管「真正精细」。
+**主题约束**: 禁人物雕像; 道具/罩壳/外带按设计需要, 不默认翼/环等特定造型。远近可读与动作安全按本项目核对。
+**依赖**: 有可拆参考才 teardown → 设计与布局 → 相关网格/UV工作 → hook → check →(clean 按需)→ accept。已有合格产物可复用并说明依据; 无关步骤跳过。粗摆走 `shape`/`form-language`, 不因目录完整就强制全做。
 **工具**: `model export-blender`/`import`; `scripts/model/mesh_budget.py`; `scripts/model/part_export.md`(流程); Blender 5.x 用关键字参数 `transform_apply`。
-**完成**: accept 同角≥3 过线; changelog 记本轮几何差与补法。
+**完成**: accept 同角说明与设计的符合项/差距/未验证项; 复盘记项目, 重复通用问题再提全局指引改进。

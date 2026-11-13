@@ -1,15 +1,13 @@
-# root: wowsmod 入口(先判断要做什么)
+# root: wowsmod 入口(先确认项目与授权范围)
 上级: -
 下级:
-- workflow: 要设计/做一整套外观 mod(复刻参考 / 角色主题 / 原创)时
-- ref: 只需要某个命令的用法(换色、发光、模型、出图、安装、打包…)时
-- styles: 设计书 §2 采用了某个风格包时
-- learn: 社区制作方法摘要(贴图痛船/外带建模/发光/ModsSDK)
+- workflow: 制作整套外观、复刻参考或设计角色主题
+- ref: 查询单个命令、项目、制作库、安装与打包
+- styles: 需要风格包作为设计参考
+- learn: 查阅社区制作方法与能力边界
 ---
-wowsmod 是 Lesta《战舰世界》客户端改模命令行工具; 所有命令可加 `--json`, 结果里的 `next` 是建议下一步。
+wowsmod 是 Lesta《战舰世界》客户端改模工具。先 `wowsmod status [项目]`，确认项目路径、目标船、当前客户端构建与已应用方案；多方案用 `wowsmod help ref.variants`。项目制作构建未知或不同，表示需当前版本验证，不直接判不兼容。
 
-1. 先 `wowsmod status [项目]`: 游戏、已装 mod、SDK 素材、项目状态。
-2. 路由: 整套外观 → `wowsmod help workflow`; 单个操作 → `wowsmod help ref`。
-3. 读法: `wowsmod help --tree` 看整棵树; `wowsmod help <id>` 读一个节点; `wowsmod help <id> --children` 只看下级。每个节点开头写了上级/下级, 只在需要时往下读。
+单次换色/局部修正 → `wowsmod help ref`；整套制作 → `wowsmod help workflow`。`wowsmod help --tree` 看目录，`wowsmod help <id>` 按需读节点；命令参数以 `<命令> --help` 为准，`--json` 的 `next` 只是建议。
 
-通用规则: 修改只写进项目目录(`edits/` 可撤销); 游戏目录只由 `install` 写、`uninstall` 完全还原; 游戏运行时 install/uninstall 会拒绝; 改完先出图再装; 进港只看港口, 不进战斗; 训练房需用户授权。
+编辑写入项目；浏览、选择、预览方案不安装。需要写游戏时先检查计划，再按已获授权执行明确的安装/应用动作。游戏运行时不能安装、切换或卸载；启动游戏、进港和训练房各按用户授权范围进行。工作台图、文件完整性、注册日志与实机视觉是不同证据，未做的检查写“未验证”。已有 `ai init` 规则副本需审阅后显式刷新，见 `ref.mcp`。

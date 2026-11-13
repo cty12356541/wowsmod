@@ -13,7 +13,7 @@
 
 ## 步骤(单张贴图, 以整船换成深海蓝为例)
 ```
-wowsmod --json port-albedo #1E3F66                  # → to_color
+wowsmod --json port-albedo "#1E3F66"                # → to_color; PowerShell 色号需引号
 wowsmod mod status <项目> --json                     # 看有哪些 *_a.dds
 wowsmod tex recolor <贴图名_a.dds> --project <项目> --to-color <to_color> --exclude-hue 0:65 --soft 0.04
 wowsmod tex channel <同名_mg.dds> --project <项目> --channel b --set 0   # 去迷彩遮罩

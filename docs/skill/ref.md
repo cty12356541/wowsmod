@@ -2,6 +2,7 @@
 上级: root
 下级:
 - ref.project: 新建项目、导入 SDK 素材
+- ref.variants: 制作库、多方案选择与显式应用
 - ref.recolor: 改底色、港口颜色换算
 - ref.glow: glow 参数与步骤
 - ref.model: 缩放/移动/删除/替换/新增部件

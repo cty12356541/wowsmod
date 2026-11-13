@@ -1,16 +1,16 @@
-# ref.pack: 打包分发
+# ref.pack: 打包与分发边界
 上级: ref
 下级: 无
 ---
 ```
-wowsmod pack <项目> [-o <文件或目录>]     # → <名>-<版本>.wsmod
-wowsmod install <包.wsmod>                 # 校验每个文件的 sha256 后安装
+wowsmod pack <项目> [-o <文件或目录>]
+wowsmod install <包.wsmod> --dry-run
 ```
-- 包是 zip,内含:`wowsmod-package.json`(文件清单与哈希)、`mod.toml`、`assets/res_mods/**`、`README.txt`。同一项目重复打包,结果完全相同。
-- 不打包的内容:
-  - 游戏原版资源:占位文件保持占位,安装时从使用者的游戏里补齐;
-  - Oodle(oo2core*)、pfsunpack/mkut 等专有工具;
-  - 任何可执行文件或脚本;
-  - `.install/` 与撤销数据。
-- `--full` 会把补齐后的原版资源也打进包,仅供个人备份,不要分发。
-- **受限素材硬拦截**: mod.toml 有 `[license] no_redistribute = true`(导入受限模型时自动写入)时 `pack` 报错退出并列出原因; 只在本机 `install`。确需自用备份: `pack --allow-restricted`(README 写明【受限】, 不得公开分发)。网页/口头声明的许可(扫描不到的)手动标: `wowsmod mod license <项目> --note "<来源+原文要点>"` 或导入时 `--license-note`; 去掉受限素材后 `mod license <项目> --clear`。
+标准 wsmod 是 zip，含 `wowsmod-package.json`(文件/哈希)、mod.toml、assets/res_mods 与 README.txt。相同项目重复打包结果确定；实际安装仍需授权和冲突检查。
+
+**SDK 必需文件保留**：`PnFMods/<名>/Main.py` 是注册入口，属于项目内容，必须随 SDK 包保留；不能按“所有脚本都排除”删除它。根 PnFModsLoader.py 由安装按需提供。当前打包过滤拦截 exe/dll/pyd/so/dylib/bat/cmd/ps1/msi 与 Oodle、pfsunpack/mkut 等专有组件，不表示会删掉全部 Python 文件。
+
+**原版资源**：项目里的二进制占位在标准包中保留，由安装从使用者目标客户端补齐；已修改的真实资源仍在包中。`--full` 另附补齐的 res_mods 树，只供个人备份，不公开分发。`.install/` 与撤销备份不作为分发内容。
+
+**许可**：`[license] no_redistribute = true` 默认阻止 pack；`wowsmod mod license <项目> --note "<来源与限制>"` 可手动记录扫描不到的许可。`--allow-restricted` 只作获准的本人备份，不能创造分发许可；移除素材并核对剩余许可后才考虑 clear。
+**验证**：包哈希、安装文件、SDK 注册和实机效果是不同阶段。包成功生成不代表当前版本兼容或已验收；记录目标船、制作构建、许可与未验证事项。
