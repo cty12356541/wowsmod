@@ -1,9 +1,9 @@
 # wowsmod — 莱服《战舰世界》(Мир кораблей) AI 模组工具箱
 
 单文件 Windows 命令行工具 `wowsmod.exe` + Rust 格式库 `wowsmod-formats`。
-目标客户端: 莱服 Lesta 26.10.0.0.8867689。M1 阶段只**读取**游戏文件, 不写游戏目录, 不启动游戏。
+提供资源检索、贴图与模型制作、项目预览和安装管理。客户端路径与 build 以 `doctor` 的结果为准；历史样本验证不代表所有新版资源已经兼容。
 
-> 状态: M1(定位 / 检索 / 解包 / 导出 GLB / geometry 往返)。改模与打包在后续里程碑(见 `D:\WoWSModding\PLAN.md`)。
+内置制作指引从 `wowsmod help` 进入。项目库仅登记本地项目路径；预览、制作状态和实际应用到游戏是独立操作。
 
 ## 快速开始
 
@@ -24,6 +24,24 @@ wowsmod geom "*.geometry" --roundtrip           # geometry 逐字节往返校验
 所有命令都支持 `--json`(机器可读; 出错时输出 `{"ok": false, "error": [...]}`)与 `--game <客户端目录>`。
 
 退出码: 0 成功; 1 错误; 2 `export --strict` 健康检查未通过; 3 没有匹配结果。
+
+## 多项目与同船方案
+
+```powershell
+wowsmod library add "E:\Mods\Bourgogne-Robin"
+wowsmod library scan "E:\Mods"              # 只扫描指定范围，跳过资源和缓存目录
+wowsmod library list --json
+wowsmod preview --library                     # 打开项目库，筛选舰船、选择方案并预览
+wowsmod preview "E:\Mods\Bourgogne-Robin"   # 仍支持直接打开一个项目
+wowsmod --game "E:\Korabli" apply "E:\Mods\Bourgogne-Robin" --dry-run
+# 确认预检结果后，去掉 --dry-run 才会应用到游戏
+```
+
+每个方案放在独立的项目目录中，项目根目录包含 `mod.toml`。显示名可以相同，项目身份由登记路径与稳定 ID 区分。显示名、标签、收藏和制作状态属于项目库，不修改 PnF 的 `mod.name`。
+
+`library remove <id>` 仅从库中移除记录，不删除项目或卸载游戏文件。项目移动后用 `library relocate <id> <新路径>` 重新定位并保留原 ID。制作完成、已应用到某个客户端以及当前编辑版本是否与已应用内容一致分别显示，不能相互替代。
+
+应用 SDK 方案时会检查同船已有方案、其他 Mod 的共享文件和外部修改。切换不需要旧项目仍然存在；写入失败或中断时使用事务快照恢复。游戏运行时拒绝应用。全局/loose 项目不会替换其他舰船方案。CLI 的 `apply` 本身就是写入指令，需先用 `--dry-run` 查看目标客户端和替换范围。
 
 ## 各命令说明
 
@@ -63,6 +81,17 @@ rustup default stable-x86_64-pc-windows-msvc   # 需要 VS 2022 Build Tools(MSVC
 cargo build --release                          # → target\release\wowsmod.exe(静态 CRT, 单文件)
 cargo test --release                           # 单元测试; 集成测试需要样本, 见下
 ```
+
+预览前端源文件位于 `preview_app/web`，CLI 嵌入 `crates/wowsmod/preview_web` 中的产物。修改前端后先生成并验证嵌入产物，再构建 Rust：
+
+```powershell
+npm.cmd --prefix preview_app/web ci --no-audit --no-fund
+powershell -ExecutionPolicy Bypass -File scripts/build_preview.ps1
+powershell -ExecutionPolicy Bypass -File scripts/build_preview.ps1 -Check
+cargo build --release --features oozextract
+```
+
+`build-info.json` 记录源码和产物 SHA-256；`-Check` 会拒绝源码已经变化、产物缺失或哈希不符的构建。源码最初取自本地缓存的前端提交 `1a1fba8`，后续源码与产物随本仓库一起维护。
 
 ## 需要自行下载的组件 / Optional external components
 
