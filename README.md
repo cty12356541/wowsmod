@@ -111,6 +111,16 @@ powershell -ExecutionPolicy Bypass -File scripts\accept_roundtrip.ps1 -All # 18 
 ```
 结果写到 `out\<脚本名>\report.json`。验收结论见 `M1_REPORT.md`。
 
+项目库与切换的端到端验收使用 Python 标准库，并自行创建测试项目/模拟客户端。`--out` 必须是尚未存在的目录，测试数据保留供复查；脚本不安装到真实游戏：
+
+```powershell
+python scripts/check_library.py --exe target/release/wowsmod.exe --out out/library-smoke-1
+python scripts/check_apply.py --exe target/release/wowsmod.exe --out out/apply-smoke-1
+npm.cmd --prefix preview_app/web test
+```
+
+前端行为测试使用 Node 24 的内置测试运行器。构建网页本身不依赖测试运行器；Windows MSVC CLI 的主线程栈预留在构建时设置，开发版和发布版都可直接启动。
+
 ## 署名与许可证
 
 本项目代码: MIT。依赖与移植来源:
