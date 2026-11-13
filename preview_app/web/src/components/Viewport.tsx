@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Camera, SlidersHorizontal, Layers, Sun, Sunset, Moon, RotateCcw, Info } from 'lucide-react';
-import { useStore, actions, setViewer, viewer, baseRev, boot } from '../store';
+import { useStore, actions, setViewer, viewer, baseRev, boot, disposeWorkbench } from '../store';
 import { Viewer, CHANNELS } from '../engine/viewer';
 import { t } from '../lib/i18n';
 import { IconBtn, Menu, Seg, SelBtn, Slider, Switch, Tip } from './ui';
@@ -10,19 +10,23 @@ export function Viewport() {
   const host = useRef<HTMLDivElement>(null);
   const s = useStore();
   useEffect(() => {
-    const v = new Viewer(host.current!, { quality: useStore.getState().quality, onContextLost: () => useStore.setState({ phase: 'fatal', fatal: { code: 'context_lost', message: t('ctxLost') } }) });
-    if (useStore.getState().look !== v.look) v.setLook(useStore.getState().look);
-    setViewer(v); (window as any).__viewer = v;
-    v.onPick((id) => actions.select(id));
+    let v: Viewer | null = null; let idleT: ReturnType<typeof setInterval> | null = null;
+    boot(() => {
+    const created = new Viewer(host.current!, { quality: useStore.getState().quality, onContextLost: () => useStore.setState({ phase: 'fatal', fatal: { code: 'context_lost', message: t('ctxLost') } }) });
+    v = created;
+    if (useStore.getState().look !== created.look) created.setLook(useStore.getState().look);
+    setViewer(created); (window as any).__viewer = created;
+    created.onPick((id) => actions.select(id));
     let last = 0;
-    v.onFrame(() => {
+    created.onFrame(() => {
       const now = performance.now(); if (now - last < 120) return; last = now;
-      const st = v.stats();
-      useStore.setState({ stats: { fps: st.fps, draws: st.draws, tris: st.tris, idle: st.idle, gl: st.gl, gpuTexMB: st.gpuTexMB }, snap: v.simOn ? v.simSnapshot() : useStore.getState().snap });
+      const st = created.stats();
+      useStore.setState({ stats: { fps: st.fps, draws: st.draws, tris: st.tris, idle: st.idle, gl: st.gl, gpuTexMB: st.gpuTexMB }, snap: created.simOn ? created.simSnapshot() : useStore.getState().snap });
     });
-    const idleT = setInterval(() => { if (v.idle) useStore.setState({ stats: { ...(useStore.getState().stats || {} as any), idle: true } }); }, 1000);
-    boot();
-    return () => { clearInterval(idleT); };
+    idleT = setInterval(() => { if (created.idle) useStore.setState({ stats: { ...(useStore.getState().stats || {} as any), idle: true } }); }, 1000);
+    return created;
+    });
+    return () => { if (idleT) clearInterval(idleT); disposeWorkbench(); v?.dispose(); delete (window as any).__viewer; };
   }, []);
   useEffect(() => keyboard(), []);
   const dark = s.light === 'night' || (s.light === 'dusk' && s.env === 'water');
@@ -34,7 +38,7 @@ export function Viewport() {
   const reviewing = s.viewRev && s.head && s.viewRev !== s.head;
   return (
     <div className={'viewport' + (dark ? ' dark' : '')}>
-      <ViewBar />
+      {s.project?.capabilities?.preview !== false && <ViewBar />}
       <div className={'vcanvas' + (s.conn === 'offline' ? ' offline' : '')} ref={host}>
         {hasA && s.mode === 'split' && <Splitter />}
         {hasA && s.mode === 'split' && <><span className="vlabel" style={{ left: 8 }}>{baseName}</span><span className="vlabel" style={{ right: 8 }}>{curName}</span></>}
@@ -52,6 +56,7 @@ export function Viewport() {
             <div className={'bar' + (s.loadFrac === null ? ' ind' : '')}><i style={{ width: s.loadFrac !== null ? s.loadFrac * 100 + '%' : undefined }} /></div></div></div>
         )}
         {s.phase === 'fatal' && <Fatal />}
+        {s.phase === 'ready' && s.project?.capabilities?.preview === false && <div className="project-no-preview"><Info size={26} style={{ margin: '0 auto' }} /><h2>{t('libPreviewUnavailable')}</h2><p>{s.project.capabilities.reasons.preview || t('libCapabilityUnavailable')}</p><p className="mono">{s.project.project.dir}</p><p>{t('libFooter')}</p></div>}
       </div>
     </div>
   );
@@ -65,7 +70,7 @@ function Fatal() {
     <div className="fatal" role="alert"><div className="box">
       <Info size={20} className="muted" />
       <h2>{net ? t('fatalNetTitle') : noModel ? t('fatalNoModelTitle') : t('fatalTitle')}</h2>
-      <p dangerouslySetInnerHTML={{ __html: net ? t('fatalNetDesc') : noModel ? t('fatalNoModelDesc') : f.message }} />
+      {net || noModel ? <p dangerouslySetInnerHTML={{ __html: net ? t('fatalNetDesc') : t('fatalNoModelDesc') }} /> : <p>{f.message}</p>}
       <div className="acts"><button className="btn primary" onClick={() => boot()}>{t('retry')}</button></div>
       {!noModel && <div className="err">{f.code}{f.message && !net ? '' : ' · ' + f.message}</div>}
     </div></div>

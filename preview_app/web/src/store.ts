@@ -1,7 +1,8 @@
 /* 应用状态（zustand）。3D 视口实例是模块级单例（不进 React 状态），动作里直接调用。 */
 import { create } from 'zustand';
-import { api, ApiError, on as apiOn, startLive, type ConnState } from './lib/api';
-import type { Project, Step, Part, TexInfo, Manifest, SimData, Job } from './lib/types';
+import { api, ApiError, on as apiOn, startLive, disposeRequests, projectScope, type ConnState } from './lib/api';
+import type { Project, Step, Part, TexInfo, Manifest, SimData, Job, ApplyPlan, Capability } from './lib/types';
+import { ProjectCache } from './lib/scope';
 import type { Viewer, Mode, WaterMode, Quality, CamMode, SimSnapshot } from './engine/viewer';
 import type { EnvName, LightName, LookName } from './engine/env';
 import type { Telegraph } from './engine/sim';
@@ -30,7 +31,8 @@ export interface State {
   emisMode: number; emisSpeed: number; lodMode: 'auto' | number; lodBias: number; lodTint: boolean; distPreset: 'near' | 'mid' | 'far' | null;
   snap: SimSnapshot | null;
   stats: { fps: number; draws: number; tris: number; idle: boolean; gl: string; gpuTexMB: number } | null;
-  job: Job | null; toasts: Toast[]; dialog: null | { kind: 'uninstall' | 'gameRunning' };
+  job: Job | null; toasts: Toast[]; dialog: null | { kind: 'uninstall' | 'gameRunning' | 'apply' };
+  applyPlan: ApplyPlan | null; applyBusy: boolean; applyError: string; applyMessage: string;
 }
 
 const initialLang = ((): Lang => {
@@ -73,14 +75,20 @@ export const useStore = create<State>(() => ({
   simOn: false, tel: 'stop', rudder: 0, camMode: 'orbit', combat: false, aimMouse: true, aimKm: 12, reloadReal: false, waves: 1,
   emisMode: -1, emisSpeed: 1, lodMode: 'auto', lodBias: 1, lodTint: false, distPreset: null, snap: null,
   stats: null, job: null, toasts: [], dialog: null,
+  applyPlan: null, applyBusy: false, applyError: '', applyMessage: '',
 }));
 const set = useStore.setState, get = useStore.getState;
+let active = false;
+const timers = new Set<ReturnType<typeof setTimeout>>();
+function later(fn: () => void, ms: number) { const timer = setTimeout(() => { timers.delete(timer); if (active) fn(); }, ms); timers.add(timer); }
+export const capabilityReason = (capability: Capability) => get().project?.capabilities?.reasons?.[capability] || t('libCapabilityUnavailable');
+export const supports = (capability: Capability) => get().project?.capabilities?.[capability] !== false;
 
 // ---------------------------------------------------------------- 提示
 let toastId = 0;
 export function toast(kind: Toast['kind'], title: string, desc?: string, ms = 4200) {
   const id = ++toastId; set({ toasts: [...get().toasts, { id, kind, title, desc, ms }] });
-  if (ms > 0) setTimeout(() => set({ toasts: get().toasts.filter((x) => x.id !== id) }), ms);
+  if (ms > 0) later(() => set({ toasts: get().toasts.filter((x) => x.id !== id) }), ms);
 }
 export const dismissToast = (id: number) => set({ toasts: get().toasts.filter((x) => x.id !== id) });
 
@@ -93,62 +101,82 @@ export function baseRev(s = get()): string {
 }
 export function changedPartIds() { return get().parts.filter((p) => p.changed).map((p) => p.id); }
 
-let manifestCache = new Map<string, Manifest>();
-async function manifest(rev: string) { if (!manifestCache.has(rev)) manifestCache.set(rev, await api.model(rev)); return manifestCache.get(rev)!; }
+const manifestCache = new ProjectCache<Manifest>();
+async function manifest(rev: string) { const hit = manifestCache.get(projectScope, rev); if (hit) return hit; const value = await api.model(rev); manifestCache.set(projectScope, rev, value); return value; }
 
 let loadSeq = 0;
 /** 载入 viewRev（B）与对比基准（A）的材质 + 部件树 + 贴图列表 */
 export async function loadRevs() {
   const s = get(); const rev = s.viewRev || s.head; if (!rev || !viewer) return;
+  const target = viewer;
   const base = baseRev(); const seq = ++loadSeq;
   const [mB, mA, parts, tex] = await Promise.all([manifest(rev), manifest(base), api.parts(rev, base), api.textures(rev, base)]);
   if (seq !== loadSeq) return;
   set({ parts: parts.parts, textures: tex.textures });
-  const prog = (d: number, n: number) => set({ texProg: n && d < n ? { d, n } : null });
-  const rB = await viewer.applyManifest('B', mB, prog);
+  const prog = (d: number, n: number) => { if (active && seq === loadSeq) set({ texProg: n && d < n ? { d, n } : null }); };
+  const rB = await target.applyManifest('B', mB, prog);
   if (seq !== loadSeq) return;
-  await viewer.applyManifest('A', mA);
+  await target.applyManifest('A', mA);
+  if (seq !== loadSeq || target !== viewer) return;
   set({ texProg: null });
-  viewer.gc();
+  target.gc();
   const failed = rB.failed.length;
   if (failed) toast('error', t('texFailTitle', { n: failed }), rB.failed.slice(0, 4).join(', '));
 }
 
 // ---------------------------------------------------------------- 启动
-export async function boot() {
+let bootSeq = 0;
+let viewerFactory: (() => Viewer) | null = null;
+export async function boot(factory?: () => Viewer) {
+  if (factory) viewerFactory = factory;
+  active = true; const seq = ++bootSeq;
   set({ phase: 'loading', loadMsg: t('ldConnect'), fatal: null });
   try {
     await api.health();
     set({ loadMsg: t('ldProject') });
     const [project, steps] = await Promise.all([api.project(), api.steps()]);
+    if (!active || seq !== bootSeq) return;
     set({ project, steps: steps.steps, head: steps.head, viewRev: steps.head });
     document.title = t('docTitle', { p: project.project.name });
+    if (project.capabilities?.preview === false) { set({ phase: 'ready' }); startLive(); return; }
     if (!steps.head) throw new ApiError('no_model', '', 404);
-    const m = await api.model(steps.head); manifestCache.set(steps.head, m);
+    if (!viewer) { const v = viewerFactory?.(); if (v) setViewer(v); }
+    if (!viewer) throw new ApiError('no_viewer', t('libPreviewUnavailable'), 0);
+    const m = await api.model(steps.head); if (!active || seq !== bootSeq) return; manifestCache.set(projectScope, steps.head, m);
     set({ loadMsg: t('ldModel'), loadFrac: 0 });
     const buf = await api.geometry(m.geometry.url, (f) => set({ loadFrac: f }));
+    if (!active || seq !== bootSeq) return;
     set({ loadMsg: t('ldParse'), loadFrac: null });
     await new Promise((r) => setTimeout(r, 0));
+    if (!active || seq !== bootSeq) return;
     viewer!.loadGeometry(buf);
     viewer!.setFx(project.fx?.preview ?? null);
-    try { const sim = await api.sim(); set({ sim }); viewer!.setSimData(sim); } catch { /* 后端没有模拟数据：模拟模式不可用 */ }
+    if (project.capabilities?.simulation !== false) try { const sim = await api.sim(); if (!active || seq !== bootSeq) return; set({ sim }); viewer!.setSimData(sim); } catch { /* Missing simulation is represented as unavailable. */ }
     await loadRevs();
+    if (!active || seq !== bootSeq) return;
     set({ phase: 'ready' });
     startLive();
   } catch (e: any) {
+    if (!active || seq !== bootSeq) return;
     const code = e && e.code ? e.code : 'internal';
     set({ phase: 'fatal', fatal: { code, message: e && e.message ? e.message : String(e) } });
     if (code === 'network' || code === 'timeout' || code === 'backend_unavailable') startLive();
   }
 }
+export function disposeWorkbench() {
+  active = false; bootSeq++; loadSeq++; viewerFactory = null; disposeRequests();
+  timers.forEach(clearTimeout); timers.clear(); manifestCache.clear(); setViewer(null);
+}
 
 apiOn('connection', (c: ConnState) => {
+  if (!active) return;
   const prev = get().conn; set({ conn: c, offlineSince: c === 'offline' ? get().offlineSince || Date.now() : null });
   if (c === 'online' && prev === 'offline') {
     if (get().phase === 'fatal') boot(); else { resync(); toast('ok', t('reconnected'), t('reconnectedDesc')); }
   }
 });
 apiOn('event', async (ev: { type: string; data: any }) => {
+  if (!active) return;
   if (ev.type === 'steps' || ev.type === 'resync') await resync(ev.data);
   else if (ev.type === 'project' || ev.type === 'game' || ev.type === 'activity') { try { set({ project: await api.project() }); } catch { /* */ } }
   else if (ev.type === 'job') set({ job: ev.data.job });
@@ -159,7 +187,8 @@ async function resync(d?: any) {
     const [project, steps] = await Promise.all([api.project(), api.steps()]);
     const s = get(); const wasAtHead = !s.viewRev || s.viewRev === s.head;
     const exists = steps.steps.some((x: Step) => x.id === s.viewRev);
-    manifestCache = new Map();
+    if (!active) return;
+    manifestCache.clear();
     viewer?.setFx(project.fx?.preview ?? null);
     set({ project, steps: steps.steps, head: steps.head, viewRev: wasAtHead || !exists ? steps.head : s.viewRev });
     await loadRevs();
@@ -171,6 +200,33 @@ async function resync(d?: any) {
 }
 
 // ---------------------------------------------------------------- 动作
+async function trackResult(response: any, kind: 'apply' | 'uninstall') {
+  const id = response.job_id || response.job?.id;
+  async function finish(job?: Job) {
+    if (!active) return;
+    if (job?.state === 'failed') {
+      const message = job.error?.message || job.message || t('jobFailed');
+      set({ applyMessage: message }); toast('error', t('jobFailed'), message); return;
+    }
+    const project = await api.project(); if (!active) return;
+    const message = kind === 'apply' ? t('libApplyDone') : t('uninstalledTitle');
+    set({ project, applyMessage: message }); toast('ok', message, job?.message);
+  }
+  if (!id) { await finish(); return; }
+  set({ job: { id, kind, state: 'running', progress: 0, message: response.message || t('libWorking') }, applyMessage: response.message || t('libWorking') });
+  const poll = async () => {
+    try {
+      const result = await api.job(id); if (!active) return;
+      const job: Job = { ...result, id, kind }; set({ job, applyMessage: job.message || t('libWorking') });
+      if (job.state === 'running') later(poll, 500); else await finish(job);
+    } catch (e: any) {
+      if (!active) return;
+      set({ job: { id, kind, state: 'failed', progress: 0, message: e.message }, applyMessage: e.message });
+      toast('error', t('jobFailed'), e.message);
+    }
+  };
+  later(poll, 300);
+}
 export const actions = {
   setLang(l: Lang) { setLang(l); localStorage.setItem('wm.lang', l); set({ lang: l }); const p = get().project; if (p) document.title = t('docTitle', { p: p.project.name }); },
   async view(rev: string) { set({ viewRev: rev }); await loadRevs(); const st = get().steps.find((x) => x.id === rev); if (st && st.parts.length && st.parts.length <= 12) viewer?.flash(st.parts); },
@@ -195,33 +251,44 @@ export const actions = {
   },
   showAll() { get().parts.forEach((p) => viewer?.setPartVisible(p.id, true)); set({ hidden: {} }); },
   async revert(id: string) {
-    try { const r = await api.revert(id); set({ steps: r.steps, head: r.head, viewRev: r.head }); manifestCache = new Map(); await loadRevs(); toast('ok', t('revertedTo', { n: r.steps.find((x: Step) => x.id === r.head)?.index ?? 0 })); }
+    if (!supports('undo')) { toast('error', capabilityReason('undo')); return; }
+    try { const r = await api.revert(id); set({ steps: r.steps, head: r.head, viewRev: r.head }); manifestCache.clear(); await loadRevs(); toast('ok', t('revertedTo', { n: r.steps.find((x: Step) => x.id === r.head)?.index ?? 0 })); }
     catch (e: any) { toast('error', t('opFailed'), e.message); }
   },
   async restore(id: string) {
-    try { const r = await api.restore(id); set({ steps: r.steps, head: r.head, viewRev: r.head }); manifestCache = new Map(); await loadRevs(); toast('ok', t('restored')); }
+    if (!supports('restore')) { toast('error', capabilityReason('restore')); return; }
+    try { const r = await api.restore(id); set({ steps: r.steps, head: r.head, viewRev: r.head }); manifestCache.clear(); await loadRevs(); toast('ok', t('restored')); }
     catch (e: any) { toast('error', t('opFailed'), e.message); }
   },
   async install(kind: 'install' | 'uninstall') {
+    if (kind === 'install') { await actions.prepareApply(); return; }
+    if (!supports('apply')) { set({ applyMessage: capabilityReason('apply') }); return; }
     const p = get().project; if (p && p.game.running) { set({ dialog: { kind: 'gameRunning' } }); return; }
     try {
-      const r = kind === 'install' ? await api.install() : await api.uninstall(); set({ job: r.job, dialog: null });
-      const poll = async () => {
-        const j = (await api.job(r.job.id)) as Job; set({ job: j });
-        if (j.state === 'running') { setTimeout(poll, 400); return; }
-        set({ project: await api.project() });
-        if (j.state === 'done') toast('ok', kind === 'install' ? t('installedTitle') : t('uninstalledTitle'), j.message);
-        else toast('error', t('jobFailed'), j.error?.message);
-        setTimeout(() => set({ job: null }), 600);
-      };
-      setTimeout(poll, 300);
+      const r = await api.uninstall(); set({ dialog: null });
+      await trackResult(r, 'uninstall');
     } catch (e: any) {
-      if (e.code === 'game_running') set({ dialog: { kind: 'gameRunning' } }); else toast('error', t('jobFailed'), e.message);
+      set({ applyMessage: e.message }); if (e.code === 'game_running') set({ dialog: { kind: 'gameRunning' } }); else toast('error', t('jobFailed'), e.message);
     }
+  },
+  async prepareApply() {
+    if (!supports('apply')) { set({ applyMessage: capabilityReason('apply') }); return; }
+    if (get().applyBusy || get().job?.state === 'running') return;
+    set({ dialog: { kind: 'apply' }, applyPlan: null, applyBusy: true, applyError: '', applyMessage: '' });
+    try { const result = await api.apply(true); if (active) set({ applyPlan: result.result || result }); }
+    catch (e: any) { if (active) set({ applyError: e.message, applyMessage: e.message }); }
+    finally { if (active) set({ applyBusy: false }); }
+  },
+  async confirmApply() {
+    if (!get().applyPlan || get().applyBusy || !supports('apply')) return;
+    set({ applyBusy: true, applyError: '' });
+    try { const result = await api.apply(false); if (!active) return; set({ dialog: null }); await trackResult(result, 'apply'); }
+    catch (e: any) { if (active) set({ applyError: e.message, applyMessage: e.message }); }
+    finally { if (active) set({ applyBusy: false }); }
   },
   // ---------- 工作区 / 模拟
   setWorkspace(w: Workspace) {
-    const s = get(); if (w === 'sim' && !s.sim) { toast('error', t('simUnavailable')); return; }
+    const s = get(); if (w === 'sim' && (!s.sim || !supports('simulation'))) { toast('error', s.project?.capabilities?.reasons.simulation || t('simUnavailable')); return; }
     set({ workspace: w, rightTab: w === 'sim' ? 'sim' : 'history', simOn: w === 'sim' });
     if (!viewer) return;
     viewer.simEnable(w === 'sim');

@@ -68,12 +68,27 @@ export function Toasts() {
 }
 
 export function Dialogs() {
-  const d = useStore((s) => s.dialog); const close = () => useStore.setState({ dialog: null });
+  const d = useStore((s) => s.dialog); const plan = useStore((s) => s.applyPlan); const busy = useStore((s) => s.applyBusy); const error = useStore((s) => s.applyError);
+  const close = () => { if (!busy) useStore.setState({ dialog: null }); };
   return (
     <D.Root open={!!d} onOpenChange={(o) => !o && close()}>
       <D.Portal>
         <D.Overlay className="dlg-ov" />
-        <D.Content className="dlg" aria-describedby={undefined}>
+        <D.Content className="dlg apply-dialog" aria-describedby={undefined}>
+          {d?.kind === 'apply' && <>
+            <D.Title className="dlg-t">{t('libApplyTitle')}</D.Title>
+            <p className="dlg-d">{t('libApplyHint')}</p>
+            {!plan && busy && <p role="status">{t('libApplyPlanning')}</p>}
+            {plan && <><dl className="apply-plan">
+              <dt>{t('libApplyCurrent')}</dt><dd>{plan.previous?.length ? plan.previous.map((entry, i) => <div key={i}><b>{entry.name}</b>{entry.project_dir && <div className="mono muted">{entry.project_dir}</div>}</div>) : t('libNone')}</dd>
+              <dt>{t('libApplySelected')}</dt><dd><b>{plan.selected?.name || '—'}</b>{plan.selected?.project_dir && <div className="mono muted">{plan.selected.project_dir}</div>}</dd>
+              <dt>{t('libApplyTarget')}</dt><dd className="mono">{plan.target_client || '—'}</dd>
+              <dt>{t('libApplyBuild')}</dt><dd>{plan.target_build || plan.build || '—'}</dd>
+              <dt>{t('libApplyFiles')}</dt><dd>{Array.isArray(plan.files) ? plan.files.length : plan.files ?? '—'}</dd>
+            </dl>{!!plan.warnings?.length && <ul className="apply-warnings">{plan.warnings.map((warning, i) => <li key={i}>{warning}</li>)}</ul>}</>}
+            {error && <p className="apply-error" role="alert">{error}</p>}
+            <div className="dlg-a"><button className="btn" disabled={busy} onClick={close}>{t('cancel')}</button><button className="btn primary" disabled={busy || !plan || !!error} onClick={() => actions.confirmApply()}>{busy && plan ? t('libWorking') : t('libApplyConfirm')}</button></div>
+          </>}
           {d?.kind === 'uninstall' && <>
             <D.Title className="dlg-t">{t('uninstallTitle')}</D.Title>
             <p className="dlg-d">{t('uninstallDesc')}</p>

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ChevronRight, Undo2, RotateCcw, Eye, Terminal, MessageSquare } from 'lucide-react';
-import { useStore, actions } from '../store';
+import { useStore, actions, capabilityReason } from '../store';
 import { t, fmtTime, cmdName } from '../lib/i18n';
 import type { Step } from '../lib/types';
 import { IconBtn, Tip, Menu } from './ui';
@@ -20,6 +20,7 @@ export function History() {
 
 function StepRow({ st, isHead, viewing, open, toggle }: { st: Step; isHead: boolean; viewing: boolean; open: boolean; toggle: () => void }) {
   const lang = useStore((s) => s.lang); void lang;
+  const capabilities = useStore((s) => s.project?.capabilities);
   const [allEdits, setAllEdits] = useState(false);
   const EDIT_MAX = 4; const edits = allEdits ? st.edits : st.edits.slice(0, EDIT_MAX);
   const rev = st.state === 'reverted';
@@ -49,8 +50,8 @@ function StepRow({ st, isHead, viewing, open, toggle }: { st: Step; isHead: bool
           )}
           <div className="acts">
             {!rev && !viewing && <button className="btn" onClick={() => actions.view(st.id)}><Eye size={14} />{t('viewThis')}</button>}
-            {!rev && !isHead && <Menu trigger={<button className="btn"><Undo2 size={14} />{t('revertHere')}</button>} items={[{ heading: t('revertConfirm', { n: st.index }) }, { label: t('revertDo'), onSelect: () => actions.revert(st.id) }]} />}
-            {rev && <button className="btn" onClick={() => actions.restore(st.id)}><RotateCcw size={14} />{t('restore')}</button>}
+            {!rev && !isHead && (capabilities?.undo === false ? <button className="btn" disabled title={capabilityReason('undo')}><Undo2 size={14} />{t('revertHere')}</button> : <Menu trigger={<button className="btn"><Undo2 size={14} />{t('revertHere')}</button>} items={[{ heading: t('revertConfirm', { n: st.index }) }, { label: t('revertDo'), onSelect: () => actions.revert(st.id) }]} />)}
+            {rev && <button className="btn" disabled={capabilities?.restore === false} title={capabilities?.restore === false ? capabilityReason('restore') : undefined} onClick={() => actions.restore(st.id)}><RotateCcw size={14} />{t('restore')}</button>}
           </div>
         </div>
       )}

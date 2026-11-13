@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { parseGLB } from '../lib/glb';
-import { getTex, FALLBACK, setAniso, texGC, texGpuBytes } from '../lib/tex';
+import { getTex, FALLBACK, setAniso, texGC, texGpuBytes, clearTexCache } from '../lib/tex';
 import type { Manifest, MaterialDef, SimData } from '../lib/types';
 import * as S from './shaders';
 import { palette, gameLook, type EnvName, type LightName, type Palette, type LookName, type GameLook } from './env';
@@ -53,6 +53,8 @@ export interface SimSnapshot {
 export interface ViewerOpts { quality?: Quality; preserve?: boolean; fixed?: [number, number]; deterministic?: boolean; onContextLost?: () => void }
 
 export class Viewer {
+  private resizeObserver: ResizeObserver | null = null;
+  private disposed = false;
   el: HTMLElement; renderer: THREE.WebGLRenderer; scene = new T.Scene(); camera: THREE.PerspectiveCamera; controls: OrbitControls;
   Q = QUALITY.high; qName: Quality = 'high'; opts: ViewerOpts;
   U: Record<string, { value: any }>; WU: Record<string, { value: any }>;
@@ -118,7 +120,7 @@ export class Viewer {
     });
     const q = new T.Mesh(new T.PlaneGeometry(2, 2), this.compMat); q.frustumCulled = false; this.compScene.add(q);
     this.makeTargets(); this.applyQuality(); this.applyEnv();
-    if (!opts.fixed) new ResizeObserver(() => this.resize()).observe(el);
+    if (!opts.fixed) { this.resizeObserver = new ResizeObserver(() => this.resize()); this.resizeObserver.observe(el); }
     this.resize();
     this.bindPointer();
     if (!opts.deterministic) r.setAnimationLoop((now) => this.loop(now));
@@ -429,7 +431,7 @@ export class Viewer {
     return m;
   }
   private static SLOTS: [string, boolean][] = [['a', true], ['n', false], ['mg', false], ['ao', false]];
-  private sigOf(def: MaterialDef) { const t: any = def.textures || {}; return [def.family, JSON.stringify(def.params || {}), ...Viewer.SLOTS.map(([s]) => (t[s] && t[s].hash) || '-')].join('|'); }
+  private sigOf(def: MaterialDef) { const t: any = def.textures || {}; return [def.family, JSON.stringify(def.params || {}), ...Viewer.SLOTS.map(([s]) => t[s] ? `${t[s].url}|${t[s].hash}` : '-')].join('|'); }
 
   async applyManifest(side: 'A' | 'B', manifest: Manifest, onProgress?: (d: number, t: number) => void) {
     const mats = manifest.materials || {}, max = this.Q.tex;
@@ -446,10 +448,11 @@ export class Viewer {
         total++;
         try { tex[slot] = await getTex(ti, { srgb, max }); } catch { result.failed.push(ti.name); }
         done++; onProgress && onProgress(done, total);
-      })).then(() => { if (!this.matCache.has(sig)) this.matCache.set(sig, this.buildMaterial(def, tex, sig)); }));
+      })).then(() => { if (!this.disposed && !this.matCache.has(sig)) this.matCache.set(sig, this.buildMaterial(def, tex, sig)); }));
     });
     onProgress && onProgress(done, total);
     await Promise.all(pending);
+    if (this.disposed) return result;
     this.sets[side] = {}; Object.entries(next).forEach(([mfm, sig]) => { this.sets[side][mfm] = this.matCache.get(sig)!; });
     this.recomputeChanged();
     if (side === 'B') this.meshes.forEach((m) => { const mt = this.sets.B[m.userData.mfm]; if (mt) { m.material = mt; this.applyMeshFlags(m, mt); } });
@@ -973,5 +976,18 @@ export class Viewer {
   snapshot(type = 'image/png') { this.frame(); return this.renderer.domElement.toDataURL(type); }
   canvas() { return this.renderer.domElement; }
   setDither(on: boolean) { this.compMat.uniforms.uDither.value = on ? 1 : 0; }
-  dispose() { this.renderer.setAnimationLoop(null); this.renderer.dispose(); this.el.removeChild(this.renderer.domElement); }
+  dispose() {
+    if (this.disposed) return; this.disposed = true;
+    this.renderer.setAnimationLoop(null); this.resizeObserver?.disconnect(); this.controls.dispose();
+    const geometries = new Set<THREE.BufferGeometry>(), materials = new Set<THREE.Material>();
+    [this.scene, this.envScene, this.compScene].forEach((scene) => scene.traverse((node: any) => {
+      if (node.geometry) geometries.add(node.geometry);
+      if (node.material) (Array.isArray(node.material) ? node.material : [node.material]).forEach((material: THREE.Material) => materials.add(material));
+    }));
+    this.matCache.forEach((material) => materials.add(material));
+    geometries.forEach((geometry) => geometry.dispose()); materials.forEach((material) => material.dispose()); this.matCache.clear();
+    this.rtA?.dispose(); this.rtB?.dispose(); this.envRT?.dispose(); this.pmrem.dispose(); this.bloom.dispose(); this.sun.shadow.map?.dispose(); clearTexCache();
+    this.pickCb = null; this.frameCb = null; this.aimCb = null;
+    this.renderer.dispose(); this.renderer.forceContextLoss(); this.renderer.domElement.remove();
+  }
 }

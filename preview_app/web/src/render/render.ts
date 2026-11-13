@@ -5,7 +5,8 @@
  * 输出：页面上只有一个 <canvas id="out">（尺寸 = 请求尺寸），CDP 直接截它；或取 __renderResult.dataURL（data=1）。
  * 确定性：不跑动画循环；所有时间由参数给定（t / warm / fireT），随机数固定种子；同一台机器同样参数 → 同样像素。 */
 import { Viewer, CHANNELS, type Quality, type FxTheme } from '../engine/viewer';
-import { api, disableLive } from '../lib/api';
+import { api, disableLive, projectScope } from '../lib/api';
+import { ProjectCache } from '../lib/scope';
 import { setLang, t, type Lang } from '../lib/i18n';
 import type { Manifest, Project, SimData, Step } from '../lib/types';
 import type { Telegraph } from '../engine/sim';
@@ -65,7 +66,7 @@ export function parseQuery(q: URLSearchParams): RenderParams {
 
 let viewer: Viewer | null = null; let host: HTMLDivElement; let out: HTMLCanvasElement;
 let project: Project | null = null; let steps: Step[] = []; let head: string | null = null; let sim: SimData | null = null;
-const manifests = new Map<string, Manifest>();
+const manifests = new ProjectCache<Manifest>();
 let booted: Promise<void> | null = null; let curQ: Quality | null = null; let geomHash: string | null = null;
 
 async function ensure(q: Quality) {
@@ -90,7 +91,7 @@ async function ensure(q: Quality) {
   booted.catch(() => { booted = null; });
   return booted;
 }
-async function manifest(rev: string) { if (!manifests.has(rev)) manifests.set(rev, await api.model(rev)); return manifests.get(rev)!; }
+async function manifest(rev: string) { const hit = manifests.get(projectScope, rev); if (hit) return hit; const value = await api.model(rev); manifests.set(projectScope, rev, value); return value; }
 
 /** rev 参数：head | base | s2 | 2（序号） | prev（相对 rev 的上一步，仅 base 用） */
 function resolveRev(x: string | undefined, rel?: string): string {

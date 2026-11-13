@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import type { TexRef } from './types';
 
-interface Entry { tex: THREE.Texture | null; promise: Promise<THREE.Texture>; bytes: number }
+interface Entry { tex: THREE.Texture | null; promise: Promise<THREE.Texture>; bytes: number; controller: AbortController }
 const cache = new Map<string, Entry>();
 let aniso = 4, inflight = 0;
 const queue: (() => Promise<void>)[] = [];
@@ -25,14 +25,16 @@ function withMax(url: string, max: number, w?: number, h?: number) {
   return url + (url.includes('?') ? '&' : '?') + 'max=' + max;
 }
 export function getTex(info: TexRef, opt: { srgb: boolean; max: number }): Promise<THREE.Texture> {
-  const key = info.hash + '|' + opt.max + '|' + (opt.srgb ? 's' : 'l');
+  const key = info.url + '|' + info.hash + '|' + opt.max + '|' + (opt.srgb ? 's' : 'l');
   const hit = cache.get(key); if (hit) return hit.promise;
   texStats.requested++; onStats && onStats(texStats);
-  const e: Entry = { tex: null, bytes: 0, promise: null as any };
+  const e: Entry = { tex: null, bytes: 0, promise: null as any, controller: new AbortController() };
   e.promise = enqueue(async () => {
-    const r = await fetch(withMax(info.url!, opt.max, info.width, info.height), { cache: 'force-cache' });
+    if (e.controller.signal.aborted) throw new Error('Texture request disposed');
+    const r = await fetch(withMax(info.url!, opt.max, info.width, info.height), { cache: 'force-cache', signal: e.controller.signal });
     if (!r.ok) throw Object.assign(new Error('HTTP ' + r.status + ' ' + info.url), { code: 'texture_http', status: r.status });
     const blob = await r.blob(); const img = await decode(blob);
+    if (e.controller.signal.aborted) { (img as ImageBitmap).close?.(); throw new Error('Texture request disposed'); }
     const tex = new THREE.Texture(img as any);
     tex.flipY = false; tex.premultiplyAlpha = false; tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
     tex.encoding = opt.srgb ? THREE.sRGBEncoding : THREE.LinearEncoding;
@@ -41,7 +43,7 @@ export function getTex(info: TexRef, opt: { srgb: boolean; max: number }): Promi
     e.tex = tex; e.bytes = img.width * img.height * 4 * 1.33;
     texStats.loaded++; texStats.bytes += blob.size; onStats && onStats(texStats);
     return tex;
-  }).catch((err) => { texStats.failed++; cache.delete(key); onStats && onStats(texStats); throw err; });
+  }).catch((err) => { texStats.failed++; if (cache.get(key) === e) cache.delete(key); onStats && onStats(texStats); throw err; });
   cache.set(key, e);
   return e.promise;
 }
@@ -51,5 +53,6 @@ const solid = (r: number, g: number, b: number, a: number, srgb = false) => {
 };
 export const FALLBACK = { a: solid(150, 156, 160, 255, true), n: solid(128, 128, 255, 255), mg: solid(110, 0, 0, 255), ao: solid(255, 255, 255, 255) };
 export function setAniso(a: number) { aniso = a; cache.forEach((e) => { if (e.tex && e.tex.anisotropy !== a) { e.tex.anisotropy = a; e.tex.needsUpdate = true; } }); }
-export function texGC(keep: Set<THREE.Texture>) { let n = 0; cache.forEach((e, k) => { if (e.tex && !keep.has(e.tex)) { e.tex.dispose(); cache.delete(k); n++; } }); return n; }
+export function texGC(keep: Set<THREE.Texture>) { let n = 0; cache.forEach((e, k) => { if (e.tex && !keep.has(e.tex)) { e.tex.dispose(); (e.tex.image as ImageBitmap)?.close?.(); cache.delete(k); n++; } }); return n; }
+export function clearTexCache() { cache.forEach((entry) => { entry.controller.abort(); entry.tex?.dispose(); (entry.tex?.image as ImageBitmap)?.close?.(); }); cache.clear(); onStats = null; }
 export function texGpuBytes() { let b = 0; cache.forEach((e) => { b += e.bytes; }); return b; }
