@@ -7,3 +7,8 @@ styles/*/examples/
 /target_render/
 __pycache__/
 *.pyc
+/.agentdash/
+/.superpowers/
+/preview_app/web/node_modules/
+/preview_app/web/dist/
+/preview_app/web/test-results/
