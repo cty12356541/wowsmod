@@ -454,14 +454,31 @@ fn remove_empty_tree_children(d: &Path) {
 }
 
 pub fn uninstall(res_mods: &Path, name: &str, force: bool, dry_run: bool) -> Result<Value> {
+    uninstall_checked(res_mods, name, None, force, dry_run)
+}
+
+/// A project path identifies one candidate, even when another candidate has the
+/// same PnF name. Check that identity under the same lock used for removal.
+pub fn uninstall_project(res_mods: &Path, name: &str, project: &Path, force: bool, dry_run: bool) -> Result<Value> {
+    uninstall_checked(res_mods, name, Some(project), force, dry_run)
+}
+
+fn uninstall_checked(res_mods: &Path, name: &str, project: Option<&Path>, force: bool, dry_run: bool) -> Result<Value> {
     let _lock = if dry_run { None } else { Some(Lock::take(res_mods)?) };
     let recovery = if dry_run { switch::reject_pending(res_mods)?; json!({"recovered": false}) } else { switch::recover_locked(res_mods)? };
     let mut reg = load(res_mods)?;
+    let installed_project = reg.mods.get(name).map(|entry| entry.project_dir.clone());
+    if let (Some(requested), Some(installed)) = (project, installed_project.as_deref()) {
+        if switch::project_key(requested) != switch::project_key(Path::new(installed)) {
+            bail!("同名 mod {name} 当前属于另一项目 {installed}, 不是请求的项目 {}。未卸载; 请指定当前项目或按 mod 名卸载", requested.display());
+        }
+    }
     let mut r = remove_mod(res_mods, &mut reg, name, force, dry_run)?;
     if !dry_run {
         save(res_mods, &reg)?;
     }
     r["recovery"] = recovery;
+    r["project_dir"] = json!(installed_project);
     Ok(r)
 }
 

@@ -373,18 +373,36 @@ pub fn cmd_uninstall(cli: &Cli, a: &UninstallArgs) -> Result<i32> {
     if !a.dry_run { registry::recover_pending(&res_mods)?; }
     let reg = registry::load(&res_mods)?;
     let r = if reg.mods.contains_key(&name) {
-        let r = registry::uninstall(&res_mods, &name, a.force, a.dry_run)?;
+        let r = if let Some(pr) = &proj {
+            registry::uninstall_project(&res_mods, &name, &pr.root, a.force, a.dry_run)?
+        } else {
+            registry::uninstall(&res_mods, &name, a.force, a.dry_run)?
+        };
         if !a.dry_run {
-            if let Some(pr) = &proj {
-                archive_project_manifest(&pr.root);
-            }
-            if let Some(m) = reg.mods.get(&name) {
-                archive_project_manifest(Path::new(&m.project_dir));
+            // Use the entry actually removed while locked, not the earlier
+            // routing snapshot, which may predate a concurrent application.
+            if let Some(project) = r["project_dir"].as_str() {
+                archive_project_manifest(Path::new(project));
             }
         }
         r
     } else if let Some(pr) = proj.as_ref().filter(|pr| pr.root.join(".install/manifest.json").exists()) {
-        // M2/M3 旧版安装(没有登记表)
+        // A replaced candidate retains its manifest for history. It must never
+        // become a legacy uninstall plan for B's loader/shared resources.
+        let manifest: Value = serde_json::from_slice(&std::fs::read(pr.root.join(".install/manifest.json"))?)?;
+        if manifest.get("managed_by_registry").is_some() {
+            bail!("项目 {name} 的清单由登记表管理, 但该项目当前未安装(可能已被另一候选替换)。不会按旧版清单卸载; 请用 wowsmod installed 查看当前安装");
+        }
+        // An interrupted manifest update may lack the marker. The current
+        // registry still owns its shared paths and must take precedence.
+        for file in manifest["files"].as_array().into_iter().flatten() {
+            if let Some(rel) = file["rel"].as_str() {
+                if reg.paths.contains_key(&rel.to_lowercase()) {
+                    bail!("旧清单中的 {rel} 当前由登记表管理, 未卸载。请用 wowsmod installed 查看当前归属");
+                }
+            }
+        }
+        // Only actual M2/M3 manifests without the ownership marker use this path.
         let mut r = modproj::uninstall(pr, a.dry_run)?;
         r["legacy"] = json!(true);
         r
@@ -790,5 +808,76 @@ mod apply_tests {
         assert_eq!(registry::names(&registry::load(&f.rm).unwrap()), std::collections::BTreeSet::from(["B".into()]));
         assert_eq!(registry::verify(&f.rm).unwrap()["mods"][0]["intact"], true);
         assert_eq!(std::fs::read(b.root.join(".install")).unwrap(), b"user file blocking manifest directory");
+    }
+
+    fn uninstall_args(f: &Fixture, target: String) -> UninstallArgs {
+        UninstallArgs { target, dry_run: false, force: false, res_mods: Some(f.rm.clone()), ignore_running: true }
+    }
+
+    #[test]
+    fn stale_registry_managed_manifest_cannot_uninstall_replacement_shared_files() {
+        let f = Fixture::new(); let a = f.project("A"); let b = f.project("B");
+        std::fs::write(a.assets().join("shared.txt"), b"identical shared bytes").unwrap();
+        std::fs::write(b.assets().join("shared.txt"), b"identical shared bytes").unwrap();
+        apply_project_inner(&f.cli, &a.root, false, &[]).unwrap();
+        apply_project_inner(&f.cli, &b.root, false, &[]).unwrap();
+        let before = snap(&f.root);
+        let error = cmd_uninstall(&f.cli, &uninstall_args(&f, a.root.display().to_string())).unwrap_err();
+        assert!(format!("{error:#}").contains("登记表"), "{error:#}");
+        assert_eq!(snap(&f.root), before);
+        assert_eq!(std::fs::read(f.rm.join("shared.txt")).unwrap(), b"identical shared bytes");
+        assert!(f.rm.join("PnFModsLoader.py").is_file());
+        assert_eq!(registry::verify(&f.rm).unwrap()["mods"][0]["intact"], true);
+        assert_eq!(cmd_uninstall(&f.cli, &uninstall_args(&f, b.root.display().to_string())).unwrap(), 0);
+        assert!(registry::load(&f.rm).unwrap().mods.is_empty());
+    }
+
+    #[test]
+    fn old_project_path_cannot_uninstall_same_name_replacement_but_active_alias_and_name_can() {
+        for by_name in [false, true] {
+            let f = Fixture::new(); let a = f.project("SharedName");
+            let b = Project::init(&f.root.join("candidate-B"), "SharedName", "FSB510_Bourgogne", "sdk", "123").unwrap();
+            std::fs::write(b.assets().join("SharedName.txt"), b"replacement B").unwrap();
+            apply_project_inner(&f.cli, &a.root, false, &[]).unwrap();
+            apply_project_inner(&f.cli, &b.root, false, &[]).unwrap();
+            let old_manifest = std::fs::read(a.root.join(".install/manifest.json")).unwrap();
+            let before = snap(&f.root);
+            let error = cmd_uninstall(&f.cli, &uninstall_args(&f, a.root.display().to_string())).unwrap_err();
+            assert!(format!("{error:#}").contains("项目"), "{error:#}");
+            assert_eq!(snap(&f.root), before);
+            let alias = b.root.join(".").display().to_string();
+            #[cfg(windows)] let alias = alias.to_ascii_uppercase();
+            let target = if by_name { "SharedName".into() } else { alias };
+            assert_eq!(cmd_uninstall(&f.cli, &uninstall_args(&f, target)).unwrap(), 0);
+            assert!(registry::load(&f.rm).unwrap().mods.is_empty());
+            assert_eq!(std::fs::read(a.root.join(".install/manifest.json")).unwrap(), old_manifest);
+            assert!(!b.root.join(".install/manifest.json").exists());
+        }
+    }
+
+    #[test]
+    fn genuine_legacy_manifest_still_uninstalls_by_project_path() {
+        let f = Fixture::new(); let a = f.project("Legacy");
+        let items = vec![InstallItem { rel: "legacy.txt".into(), data: b"legacy".to_vec(), origin: "project".into() }];
+        modproj::install(&a, &items, &f.rm, "123", false).unwrap();
+        assert_eq!(cmd_uninstall(&f.cli, &uninstall_args(&f, a.root.display().to_string())).unwrap(), 0);
+        assert!(!f.rm.join("legacy.txt").exists());
+    }
+
+    #[test]
+    fn unmarked_manifest_cannot_remove_current_registry_owned_shared_files() {
+        let f = Fixture::new(); let a = f.project("A"); let b = f.project("B");
+        apply_project_inner(&f.cli, &a.root, false, &[]).unwrap();
+        // A manifest update can fail between writing the old-format payload and
+        // adding its registry marker. Ownership must still come from registry.
+        let path = a.root.join(".install/manifest.json");
+        let mut manifest: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        manifest.as_object_mut().unwrap().remove("managed_by_registry");
+        std::fs::write(path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+        apply_project_inner(&f.cli, &b.root, false, &[]).unwrap();
+        let before = snap(&f.root);
+        assert!(cmd_uninstall(&f.cli, &uninstall_args(&f, a.root.display().to_string())).is_err());
+        assert_eq!(snap(&f.root), before);
+        assert_eq!(registry::verify(&f.rm).unwrap()["mods"][0]["intact"], true);
     }
 }

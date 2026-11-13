@@ -17,7 +17,7 @@ fn ship_key(ship: &str) -> String {
     } else { upper }
 }
 
-fn project_key(path: &Path) -> String {
+pub(super) fn project_key(path: &Path) -> String {
     let p = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let s = p.to_string_lossy().replace('\\', "/");
     let s = s.trim_start_matches("//?/").trim_end_matches('/').to_string();
@@ -348,9 +348,15 @@ pub(super) fn recover_locked(root: &Path) -> Result<Value> {
             snapshots.push((change.rel.clone(), before, after));
         }
         for rel in &journal.created_dirs { internal_rel_dir(rel)?; guard_path(root, rel)?; }
+        #[cfg(test)] tests::after_recovery_validation()?;
         if marker.is_none() {
-            for (rel, before, _) in &snapshots {
-                if hash_option(&read_optional(root, rel)?) != hash_option(before) {
+            for (rel, before, after) in &snapshots {
+                let current = hash_option(&read_optional(root, rel)?);
+                let before_hash = hash_option(before);
+                if current != before_hash && current != hash_option(after) {
+                    bail!("恢复期间发生外部改动: {rel}。快照已保留, 不会覆盖用户内容");
+                }
+                if current != before_hash {
                     put(root, &dir, rel, before.as_deref())?;
                 }
             }
@@ -467,6 +473,13 @@ mod tests {
     const O: Opts = Opts { dry_run: false, allow_same_ship: false };
 
     thread_local! { static FAULT: std::cell::RefCell<Option<(String, bool)>> = const { std::cell::RefCell::new(None) }; }
+    thread_local! { static EDIT_AFTER_VALIDATION: std::cell::RefCell<Option<(PathBuf, Vec<u8>)>> = const { std::cell::RefCell::new(None) }; }
+    pub(super) fn after_recovery_validation() -> Result<()> {
+        EDIT_AFTER_VALIDATION.with(|cell| {
+            if let Some((path, bytes)) = cell.borrow_mut().take() { std::fs::write(path, bytes)?; }
+            Ok(())
+        })
+    }
     pub(super) fn fault(point: &str) -> Result<()> {
         FAULT.with(|cell| {
             if cell.borrow().as_ref().map(|(name, _)| name.as_str()) == Some(point) {
@@ -547,6 +560,23 @@ mod tests {
         assert_eq!(snap(&f.0), before);
         assert!(uninstall(&f.0, "A", false, false).is_err());
         assert_eq!(snap(&f.0), before);
+    }
+
+    #[test]
+    fn recovery_preserves_user_edit_after_global_validation_before_later_restore() {
+        let f = Fixture::new(); setup_crash(&f);
+        crash_child(&f.0, "after_registry");
+        let journal = snap(&reg_dir(&f.0).join(PENDING));
+        EDIT_AFTER_VALIDATION.with(|cell| *cell.borrow_mut() = Some((f.0.join("new/b"), b"user edit during recovery".to_vec())));
+        let error = recover_pending(&f.0).unwrap_err();
+        assert!(format!("{error:#}").contains("外部改动"), "{error:#}");
+        assert_eq!(std::fs::read(f.0.join("new/b")).unwrap(), b"user edit during recovery");
+        assert_eq!(snap(&reg_dir(&f.0).join(PENDING)), journal);
+        let blocked = snap(&f.0);
+        assert!(install(&f.0, &info("C", "PJSB001"), &[item("c", b"c")], &O).is_err());
+        assert!(uninstall(&f.0, "A", false, false).is_err());
+        assert!(switch(&f.0, &info("B", "PFSB510"), &next_items(), false).is_err());
+        assert_eq!(snap(&f.0), blocked);
     }
 
     #[test]
