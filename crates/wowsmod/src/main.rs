@@ -197,6 +197,8 @@ enum Cmd {
     Mod(m2cmd::ModCmd),
     /// 安装 mod 项目或 .wsmod 包到 res_mods(登记每个文件的哈希/备份, 检查与已装 mod 的冲突, 失败自动回滚)
     Install(m4cmd::InstallArgs),
+    /// 预检并事务性切换到此项目（替换同船 SDK 方案）
+    Apply(preview::ApplyArgs),
     /// 整船装配: SDK visual + geometry + GameParams 挂点 → 带层级的 GLB 与装配表 JSON / assemble a whole ship
     Assemble(m3cmd::AssembleArgs),
     /// 模型写回: list / scale / move / rotate / replace / remove / add / rebuild / export-blender / import-blender / undo / replay
@@ -338,6 +340,7 @@ fn run(cli: Cli) -> Result<i32> {
         Cmd::PortAlbedo { screen, mean_offset } => m2cmd::cmd_port_albedo(&cli, screen, *mean_offset),
         Cmd::Mod(c) => m2cmd::cmd_mod(&cli, c),
         Cmd::Install(a) => m4cmd::cmd_install(&cli, a),
+        Cmd::Apply(a) => preview::cmd_apply(&cli, a),
         Cmd::Uninstall(a) => m4cmd::cmd_uninstall(&cli, a),
         Cmd::Installed(a) => m4cmd::cmd_installed(&cli, a),
         Cmd::Conflicts(a) => m4cmd::cmd_conflicts(&cli, a),

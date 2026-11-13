@@ -2,6 +2,7 @@
 //! 静态前端来自 preview_web/(M5 构建产物); API 按 preview_app/API.md v1。
 pub mod cdp;
 pub mod http;
+pub mod library;
 pub mod state;
 pub mod warm;
 
@@ -17,7 +18,11 @@ use crate::{emit, guide, Cli};
 #[derive(Args, Clone, Debug)]
 pub struct PreviewArgs {
     /// mod 项目目录
-    pub project: PathBuf,
+    #[arg(required_unless_present = "library", conflicts_with = "library")]
+    pub project: Option<PathBuf>,
+    /// 打开本地 Mod 制作库（不加载项目模型）
+    #[arg(long)]
+    pub library: bool,
     /// 端口(被占用则 +1 重试, 最多 20 次)
     #[arg(long, default_value_t = 8960)]
     pub port: u16,
@@ -27,22 +32,39 @@ pub struct PreviewArgs {
 }
 
 pub fn cmd_preview(cli: &Cli, a: &PreviewArgs) -> Result<i32> {
-    let st = Arc::new(state::PreviewState::open(cli, &a.project)?);
+    let st = a.project.as_ref().map(|project| state::PreviewState::open(cli, project).map(Arc::new)).transpose()?;
+    let service = Arc::new(library::PreviewService::new(cli, &crate::m4cmd::home_dir(), st.clone())?);
     let (port, server) = http::bind(a.port)?;
-    let url = format!("http://127.0.0.1:{port}/");
-    let v = json!({"ok": true, "url": url, "port": port, "project": a.project.display().to_string(), "ship": st.ship, "head": st.head_id()});
+    let url = format!("http://127.0.0.1:{port}/{}", if a.library { "?library=1" } else { "" });
+    let v = json!({"ok": true, "url": url, "port": port, "library_mode": a.library, "project": a.project, "ship": st.as_ref().map(|s| &s.ship), "head": st.as_ref().and_then(|s| s.head_id())});
     guide::stash(&v);
     if cli.json {
         emit(cli, &v);
     } else {
         println!("预览服务: {url}");
-        println!("项目: {}  船: {}  head: {}", a.project.display(), st.ship, st.head_id().unwrap_or_else(|| "null".into()));
+        if let Some(st) = &st { println!("项目: {}  船: {}  head: {}", st.project.root.display(), st.ship, st.head_id().unwrap_or_else(|| "null".into())); }
         println!("Ctrl+C 退出。");
     }
     if !a.no_open {
         let _ = open_browser(&url);
     }
-    http::serve(server, st)?;
+    http::serve_library(server, service)?;
+    Ok(0)
+}
+
+#[derive(Args, Debug)]
+pub struct ApplyArgs {
+    /// 已有 mod 项目目录
+    pub project: PathBuf,
+    /// 只检查切换计划，不写项目或客户端
+    #[arg(long)]
+    pub dry_run: bool,
+}
+
+pub fn cmd_apply(cli: &Cli, args: &ApplyArgs) -> Result<i32> {
+    let value = crate::m4cmd::apply_project(cli, &args.project, args.dry_run)?;
+    emit(cli, &value);
+    if !cli.json { println!("{}: {}", if args.dry_run { "应用预检" } else { "已应用" }, args.project.display()); }
     Ok(0)
 }
 

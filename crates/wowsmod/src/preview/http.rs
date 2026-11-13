@@ -8,6 +8,7 @@ use serde_json::{json, Value};
 use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
 
 use super::state::PreviewState;
+use super::library::PreviewService;
 use crate::game;
 
 #[derive(Embed)]
@@ -38,16 +39,29 @@ pub fn serve(server: Server, st: Arc<PreviewState>) -> Result<()> {
 }
 
 pub fn serve_with(server: Server, st: Arc<PreviewState>, ctl: Option<Ctl>) -> Result<()> {
+    serve_service_with(server, Arc::new(PreviewService::legacy(st)?), ctl)
+}
+
+pub fn serve_library(server: Server, service: Arc<PreviewService>) -> Result<()> {
+    serve_service_with(server, service, None)
+}
+
+fn serve_service_with(server: Server, service: Arc<PreviewService>, ctl: Option<Ctl>) -> Result<()> {
+    let port = server.server_addr().to_ip().map(|a| a.port()).unwrap_or(0);
     // 多线程处理: 前端会并行拉 geometry + 多张贴图
     for mut req in server.incoming_requests() {
-        if st.is_shutdown() {
+        if service.default.as_ref().map(|s| s.is_shutdown()).unwrap_or(false) {
             break;
         }
-        let st = Arc::clone(&st);
+        let service = Arc::clone(&service);
         let ctl = ctl.clone();
         std::thread::spawn(move || {
             let method = req.method().clone();
             let url = req.url().to_string();
+            if let Err(e) = validate_origin(&req, port) {
+                let _ = req.respond(json_resp(e.status, &e.body));
+                return;
+            }
             if let Some(c) = &ctl {
                 if url.starts_with("/__wm/") {
                     if let Some(r) = c(&method, &url, &mut req) {
@@ -57,14 +71,10 @@ pub fn serve_with(server: Server, st: Arc<PreviewState>, ctl: Option<Ctl>) -> Re
                 }
             }
             if method == Method::Options {
-                let mut r = Response::from_data(Vec::<u8>::new()).with_status_code(204);
-                r.add_header(Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap());
-                r.add_header(Header::from_bytes(&b"Access-Control-Allow-Methods"[..], &b"GET,POST,OPTIONS"[..]).unwrap());
-                r.add_header(Header::from_bytes(&b"Access-Control-Allow-Headers"[..], &b"Content-Type"[..]).unwrap());
-                let _ = req.respond(r);
+                let _ = req.respond(Response::from_data(Vec::<u8>::new()).with_status_code(204));
                 return;
             }
-            let r = match handle(&st, &method, &url, &mut req) {
+            let r = match handle_service(&service, &method, &url, &mut req, port) {
                 Ok(r) => r,
                 Err(e) => {
                     let (code, body) = api_err(&e);
@@ -77,10 +87,22 @@ pub fn serve_with(server: Server, st: Arc<PreviewState>, ctl: Option<Ctl>) -> Re
     Ok(())
 }
 
-fn handle(st: &Arc<PreviewState>, method: &Method, url: &str, req: &mut Request) -> Result<Response<std::io::Cursor<Vec<u8>>>, Error> {
+fn handle_service(service: &PreviewService, method: &Method, url: &str, req: &mut Request, port: u16) -> Result<Response<std::io::Cursor<Vec<u8>>>, Error> {
+    validate_origin(req, port)?;
     let (path, query) = split_url(url);
+    if path == "/api/v1/health" && method == &Method::Get { return Ok(json_ok(&service.health())); }
+    if path == "/api/v1/library" || path.starts_with("/api/v1/library/") {
+        return library_api(service, method, &path, req);
+    }
+    if let Some(rest) = path.strip_prefix("/api/v1/projects/") {
+        let (id, route) = rest.split_once('/').ok_or_else(|| Error::status(404, "not_found", "缺少项目端点"))?;
+        if id.is_empty() || route.is_empty() { return Err(Error::status(404, "not_found", "缺少项目 ID 或端点")); }
+        let st = service.session(id).map_err(Error::from)?;
+        return api(&st, method, &format!("/api/v1/{route}"), &query, req, Some(id));
+    }
     if path.starts_with("/api/v1/") {
-        return api(st, method, &path, &query, req);
+        let st = service.default.as_ref().ok_or_else(|| Error::status(404, "not_found", "制作库模式需要明确的项目 ID"))?;
+        return api(st, method, &path, &query, req, None);
     }
     if method != &Method::Get && method != &Method::Head {
         return Err(Error::status(405, "method_not_allowed", "只用 GET/POST"));
@@ -88,8 +110,61 @@ fn handle(st: &Arc<PreviewState>, method: &Method, url: &str, req: &mut Request)
     static_file(&path)
 }
 
-fn api(st: &Arc<PreviewState>, method: &Method, path: &str, q: &[(String, String)], req: &mut Request) -> Result<Response<std::io::Cursor<Vec<u8>>>, Error> {
+fn library_api(service: &PreviewService, method: &Method, path: &str, req: &mut Request) -> Result<Response<std::io::Cursor<Vec<u8>>>, Error> {
+    if method == &Method::Get && path == "/api/v1/library" { return Ok(json_ok(&service.listing().map_err(Error::from)?)); }
+    if method != &Method::Post { return Err(Error::status(405, "method_not_allowed", "目录库修改需要 POST")); }
+    let body = read_json(req)?;
+    let store = service.store().map_err(Error::from)?;
+    let string = |key: &str| body[key].as_str().filter(|s| !s.trim().is_empty()).ok_or_else(|| Error::status(400, "invalid_request", &format!("{key} 必须是非空字符串")));
+    let value = match path {
+        "/api/v1/library/add" => json!({"ok": true, "entry": store.add(Path::new(string("path")?)).map_err(Error::catalog)?}),
+        "/api/v1/library/scan" => {
+            let scan = store.scan(Path::new(string("root")?)).map_err(Error::catalog)?;
+            json!({"ok": true, "entries": scan.entries, "warnings": scan.warnings, "visited_dirs": scan.visited_dirs, "truncated": scan.truncated})
+        }
+        _ => {
+            let rest = path.strip_prefix("/api/v1/library/projects/").ok_or_else(|| Error::status(404, "not_found", "未知目录库端点"))?;
+            let (id, action) = rest.split_once('/').ok_or_else(|| Error::status(404, "not_found", "缺少项目操作"))?;
+            if !store.list().map_err(Error::from)?.entries.iter().any(|e| e.entry.id == id) { return Err(Error::status(404, "not_found", "目录库中没有这个项目")); }
+            match action {
+                "update" => {
+                    let patch: crate::library::LibraryPatch = serde_json::from_value(body).map_err(|e| Error::status(400, "invalid_request", &e.to_string()))?;
+                    json!({"ok": true, "entry": store.update(id, patch).map_err(Error::catalog)?})
+                }
+                "relocate" => {
+                    service.invalidate(id).map_err(Error::from)?;
+                    json!({"ok": true, "entry": store.relocate(id, Path::new(string("path")?)).map_err(Error::catalog)?})
+                }
+                "remove" => {
+                    service.invalidate(id).map_err(Error::from)?;
+                    json!({"ok": true, "entry": store.remove(id).map_err(Error::catalog)?})
+                }
+                "open" => {
+                    service.source(id).map_err(Error::from)?;
+                    store.touch_opened(id).map_err(Error::catalog)?;
+                    json!({"ok": true, "url": format!("/?project={id}")})
+                }
+                _ => return Err(Error::status(404, "not_found", "未知目录库操作")),
+            }
+        }
+    };
+    Ok(json_ok(&value))
+}
+
+fn rewrite_urls(value: &mut Value, id: &str) {
+    match value {
+        Value::String(s) if s.starts_with("/api/v1/") && !s.starts_with("/api/v1/projects/") => {
+            *s = format!("/api/v1/projects/{id}/{}", &s["/api/v1/".len()..]);
+        }
+        Value::Array(values) => for value in values { rewrite_urls(value, id); },
+        Value::Object(values) => for value in values.values_mut() { rewrite_urls(value, id); },
+        _ => {},
+    }
+}
+
+fn api(st: &Arc<PreviewState>, method: &Method, path: &str, q: &[(String, String)], req: &mut Request, scope: Option<&str>) -> Result<Response<std::io::Cursor<Vec<u8>>>, Error> {
     let get = |k: &str| q.iter().find(|(a, _)| a == k).map(|(_, v)| v.as_str());
+    let json_ok = |value: &Value| { let mut value = value.clone(); if let Some(id) = scope { rewrite_urls(&mut value, id); } json_resp(200, &value) };
     match (method, path) {
         (Method::Get, "/api/v1/health") => Ok(json_ok(&st.health())),
         (Method::Get, "/api/v1/project") => Ok(json_ok(&st.project_view())),
@@ -120,29 +195,44 @@ fn api(st: &Arc<PreviewState>, method: &Method, path: &str, q: &[(String, String
                 None => Err(Error::status(404, "not_found", "没有这个任务")),
             }
         }
-        (Method::Post, "/api/v1/install") | (Method::Post, "/api/v1/uninstall") => {
-            if !req_json_ct(req) {
-                return Err(Error::status(415, "unsupported_media", "Content-Type 必须是 application/json"));
-            }
+        (Method::Post, "/api/v1/install" | "/api/v1/uninstall" | "/api/v1/apply") => {
+            let body = read_json(req)?;
+            let action = Action::from_path(path).expect("matched action");
+            let dry_run = if action == Action::Apply {
+                body["dry_run"].as_bool().ok_or_else(|| Error::status(400, "invalid_request", "dry_run 必须是布尔值"))?
+            } else { false };
+            if st.game.is_none() { return Err(Error::status(409, "game_unavailable", "指定客户端不可用，请用 --game 指定有效客户端")); }
             if !game::running().is_empty() {
                 return Err(Error::status(409, "game_running", "游戏正在运行, 请先退出"));
             }
-            let install = path.ends_with("install");
-            let id = format!("job{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis());
+            if action == Action::Uninstall {
+                let installed = super::library::install_status(&st.project.root, st.game.as_ref());
+                if installed["project_dir"].is_null() {
+                    return Err(Error::status(409, "not_installed", "当前客户端没有应用此项目，不能按同名或旧清单卸载其他项目"));
+                }
+            }
+            if action == Action::Apply && dry_run {
+                let result = crate::m4cmd::apply_project(&super::library::selected_cli(st.selected_game.clone()), &st.project.root, true).map_err(Error::action)?;
+                return Ok(json_ok(&result));
+            }
+            static NEXT_JOB: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+            let id = format!("job{}", NEXT_JOB.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
             {
                 let mut jobs = st.jobs.lock().unwrap();
-                jobs.insert(id.clone(), json!({"id": id, "state": "running", "progress": 0.0, "message": if install { "安装中" } else { "卸载中" }}));
+                // Bound completed job history while preserving every ongoing job.
+                if jobs.len() >= 128 { jobs.retain(|_, j| j["state"] == "running"); }
+                jobs.insert(id.clone(), json!({"id": id, "state": "running", "progress": 0.0, "message": if action == Action::Uninstall { "卸载中" } else { "应用中" }}));
             }
             st.bump("job", json!({"id": id}));
             let root = st.project.root.clone();
             let st2 = Arc::clone(st);
             let id2 = id.clone();
             std::thread::spawn(move || {
-                let r = if install {
-                    // 通过子进程调用, 避免 Cli 生命周期问题
-                    run_self(&["install", &root.display().to_string()])
+                let r = if action == Action::Apply {
+                    crate::m4cmd::apply_project(&super::library::selected_cli(st2.selected_game.clone()), &root, false)
+                        .unwrap_or_else(|e| json!({"ok": false, "error": {"code": "apply_failed", "message": format!("{e:#}")}}))
                 } else {
-                    run_self(&["uninstall", &root.display().to_string()])
+                    run_self(&action_args(action, &root, st2.selected_game.as_deref().unwrap_or(&st2.game.as_ref().unwrap().root)))
                 };
                 let mut jobs = st2.jobs.lock().unwrap();
                 if let Some(j) = jobs.get_mut(&id2) {
@@ -156,22 +246,31 @@ fn api(st: &Arc<PreviewState>, method: &Method, path: &str, q: &[(String, String
                 st2.bump("job", json!({"id": id2}));
                 st2.bump("project", json!({}));
             });
-            Ok(json_ok(&json!({"ok": true, "job_id": id})))
+            Ok(json_ok(&json!({"ok": true, "job_id": id, "url": format!("/api/v1/jobs/{id}")})))
         }
         (Method::Post, p) if p.contains("/revert") || p.contains("/restore") => Err(Error::status(501, "not_implemented", "撤回/恢复需要对象仓库, 尚未接通; 可用 wowsmod model undo / 重新编辑")),
         _ => Err(Error::status(404, "not_found", &format!("未知端点 {path}"))),
     }
 }
 
-impl PreviewState {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Action { Install, Uninstall, Apply }
+impl Action {
+    fn from_path(path: &str) -> Option<Self> {
+        match path { "/api/v1/install" => Some(Self::Install), "/api/v1/uninstall" => Some(Self::Uninstall), "/api/v1/apply" => Some(Self::Apply), _ => None }
+    }
+    fn command(self) -> &'static str { match self { Self::Install => "install", Self::Uninstall => "uninstall", Self::Apply => "apply" } }
+}
+fn action_args(action: Action, project: &Path, selected_game: &Path) -> Vec<std::ffi::OsString> {
+    vec!["--json".into(), "--game".into(), selected_game.as_os_str().to_os_string(), action.command().into(), project.as_os_str().to_os_string()]
 }
 
-fn run_self(args: &[&str]) -> Value {
+fn run_self(args: &[std::ffi::OsString]) -> Value {
     let exe = match std::env::current_exe() {
         Ok(e) => e,
         Err(e) => return json!({"ok": false, "error": format!("{e}")}),
     };
-    match std::process::Command::new(exe).arg("--json").args(args).output() {
+    match std::process::Command::new(exe).args(args).output() {
         Ok(o) => serde_json::from_slice(&o.stdout).unwrap_or_else(|_| json!({"ok": o.status.success(), "stderr": String::from_utf8_lossy(&o.stderr)})),
         Err(e) => json!({"ok": false, "error": format!("{e}")}),
     }
@@ -199,6 +298,9 @@ fn chrono_now() -> String {
 }
 
 fn static_file(path: &str) -> Result<Response<std::io::Cursor<Vec<u8>>>, Error> {
+    if path.contains('\\') || path.contains(':') || path.split('/').any(|p| p == "..") {
+        return Err(Error::status(404, "not_found", "静态文件不存在"));
+    }
     // WOWSMOD_PREVIEW_WEB 覆盖
     if let Ok(dir) = std::env::var("WOWSMOD_PREVIEW_WEB") {
         let rel = if path == "/" || path.is_empty() { "index.html" } else { path.trim_start_matches('/') };
@@ -273,7 +375,33 @@ fn from_hex(c: u8) -> Option<u8> {
 }
 
 fn req_json_ct(req: &Request) -> bool {
-    req.headers().iter().any(|h| h.field.equiv("Content-Type") && h.value.as_str().contains("application/json"))
+    req.headers().iter().any(|h| h.field.equiv("Content-Type") && h.value.as_str().split(';').next().unwrap_or("").trim().eq_ignore_ascii_case("application/json"))
+}
+
+fn read_json(req: &mut Request) -> Result<Value, Error> {
+    if !req_json_ct(req) { return Err(Error::status(415, "unsupported_media", "Content-Type 必须是 application/json")); }
+    use std::io::Read;
+    const LIMIT: u64 = 65536;
+    let mut bytes = vec![];
+    req.as_reader().take(LIMIT + 1).read_to_end(&mut bytes).map_err(|e| Error::status(400, "invalid_request", &e.to_string()))?;
+    if bytes.len() as u64 > LIMIT { return Err(Error::status(413, "request_too_large", "JSON 请求超过 64 KiB")); }
+    let value: Value = serde_json::from_slice(&bytes).map_err(|e| Error::status(400, "invalid_json", &e.to_string()))?;
+    if !value.is_object() { return Err(Error::status(400, "invalid_request", "请求正文必须是 JSON 对象")); }
+    Ok(value)
+}
+
+fn validate_origin(req: &Request, port: u16) -> Result<(), Error> {
+    let host = req.headers().iter().find(|h| h.field.equiv("Host")).map(|h| h.value.as_str()).unwrap_or("");
+    let allowed = [format!("127.0.0.1:{port}"), format!("localhost:{port}")];
+    if !allowed.iter().any(|s| s.eq_ignore_ascii_case(host)) {
+        return Err(Error::status(403, "invalid_host", "Host 必须匹配本机预览服务地址"));
+    }
+    if let Some(origin) = req.headers().iter().find(|h| h.field.equiv("Origin")) {
+        if !origin.value.as_str().eq_ignore_ascii_case(&format!("http://{host}")) {
+            return Err(Error::status(403, "invalid_origin", "Origin 必须匹配本机预览服务地址"));
+        }
+    }
+    Ok(())
 }
 
 fn json_ok(v: &Value) -> Response<std::io::Cursor<Vec<u8>>> {
@@ -292,8 +420,7 @@ fn bytes_resp(code: u16, b: Vec<u8>, ctype: &str, cache: &str) -> Response<std::
     r.add_header(Header::from_bytes(&b"Cache-Control"[..], cache.as_bytes()).unwrap());
     cors(r)
 }
-fn cors(mut r: Response<std::io::Cursor<Vec<u8>>>) -> Response<std::io::Cursor<Vec<u8>>> {
-    r.add_header(Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap());
+fn cors(r: Response<std::io::Cursor<Vec<u8>>>) -> Response<std::io::Cursor<Vec<u8>>> {
     r
 }
 
@@ -307,17 +434,207 @@ impl Error {
     }
     fn from(e: anyhow::Error) -> Self {
         let msg = format!("{e:#}");
-        let code = if msg.contains("not_found") {
+        let code = if msg.contains("project_unavailable") {
+            "project_unavailable"
+        } else if msg.contains("session_busy") {
+            "session_busy"
+        } else if msg.contains("not_found") {
             "not_found"
         } else if msg.contains("no_model") {
             "no_model"
         } else {
             "internal"
         };
-        let status = if code == "not_found" || code == "no_model" { 404 } else { 500 };
+        let status = if code == "not_found" || code == "no_model" { 404 } else if code == "project_unavailable" || code == "session_busy" { 409 } else { 500 };
         Self::status(status, code, &msg)
     }
+    fn catalog(e: anyhow::Error) -> Self { Self::status(400, "catalog_error", &format!("{e:#}")) }
+    fn action(e: anyhow::Error) -> Self { Self::status(409, "apply_failed", &format!("{e:#}")) }
 }
 fn api_err(e: &Error) -> (u16, Value) {
     (e.status, e.body.clone())
+}
+
+#[cfg(test)]
+mod library_tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    pub struct Fixture { pub root: PathBuf, pub service: PreviewService }
+    impl Fixture {
+        pub fn new() -> Self {
+            static NEXT: AtomicU64 = AtomicU64::new(0);
+            let root = std::env::temp_dir().join(format!("wowsmod_preview_api_{}_{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+            let cli = super::super::library::selected_cli(Some(root.join("missing-client")));
+            let service = PreviewService::new(&cli, &root.join("home"), None).unwrap();
+            Self { root, service }
+        }
+        pub fn project(&self, dir: &str, geometry: &[u8]) -> String {
+            let p = crate::modproj::Project::init(&self.root.join(dir), "same", "UNKNOWN_Example", "loose", "").unwrap();
+            if !geometry.is_empty() {
+                std::fs::create_dir_all(p.root.join(".wowsmod/cache")).unwrap();
+                std::fs::write(p.root.join(".wowsmod/cache/geometry.glb"), geometry).unwrap();
+            }
+            std::fs::write(p.root.join("edits/001_test.json"), br#"{"cmd":"tex_recolor","outputs":[],"time_unix":1}"#).unwrap();
+            self.service.store().unwrap().add(&p.root).unwrap().id
+        }
+        pub fn request(&self, method: &str, path: &str, body: &str, content_type: &str, origin: Option<&str>) -> (u16, Vec<u8>) {
+            let (port, server) = bind(0).unwrap();
+            let mut socket = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+            socket.set_read_timeout(Some(std::time::Duration::from_secs(15))).unwrap();
+            let origin = origin.map(|s| format!("Origin: {s}\r\n")).unwrap_or_default();
+            write!(socket, "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: {content_type}\r\n{origin}Content-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            let mut request = server.recv().unwrap();
+            let method = request.method().clone();
+            let response = handle_service(&self.service, &method, path, &mut request, port).unwrap_or_else(|e| json_resp(e.status, &e.body));
+            request.respond(response).unwrap();
+            let mut raw = Vec::new(); socket.read_to_end(&mut raw).unwrap();
+            let sep = raw.windows(4).position(|s| s == b"\r\n\r\n").unwrap();
+            let status = String::from_utf8_lossy(&raw[..sep]).split_whitespace().nth(1).unwrap().parse().unwrap();
+            (status, raw[sep+4..].to_vec())
+        }
+        fn json(&self, method: &str, path: &str, body: &str) -> (u16, Value) {
+            let (status, bytes) = self.request(method, path, body, "application/json", None);
+            (status, serde_json::from_slice(&bytes).unwrap())
+        }
+    }
+    impl Drop for Fixture { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.root); } }
+
+    #[test]
+    fn catalog_is_read_only_and_missing_ids_do_not_use_another_project() {
+        let f = Fixture::new(); let id = f.project("a", &[]);
+        let before = std::fs::read(f.root.join("a/mod.toml")).unwrap();
+        let (status, list) = f.json("GET", "/api/v1/library", "");
+        assert_eq!(status, 200); assert_eq!(list["projects"][0]["id"], id);
+        assert!(!f.root.join("a/.wowsmod").exists());
+        assert_eq!(std::fs::read(f.root.join("a/mod.toml")).unwrap(), before);
+        assert_eq!(f.json("GET", "/api/v1/projects/no-such/project", "").0, 404);
+        std::fs::remove_file(f.root.join("a/mod.toml")).unwrap();
+        let (status, error) = f.json("GET", &format!("/api/v1/projects/{id}/project"), "");
+        assert_eq!(status, 409); assert_eq!(error["error"]["code"], "project_unavailable");
+    }
+
+    #[test]
+    fn two_same_name_same_revision_sessions_have_scoped_geometry_and_jobs() {
+        let f = Fixture::new(); let a = f.project("a", b"geometry-a"); let b = f.project("b", b"geometry-b");
+        let sa = f.service.session(&a).unwrap(); let sb = f.service.session(&b).unwrap();
+        assert_eq!(sa.head_id(), sb.head_id()); assert!(!Arc::ptr_eq(&sa, &sb));
+        sa.jobs.lock().unwrap().insert("same-job".into(), json!({"state":"done", "result": {"url":"/api/v1/blob/a.png"}}));
+        sb.jobs.lock().unwrap().insert("same-job".into(), json!({"state":"failed"}));
+        let (status, model) = f.json("GET", &format!("/api/v1/projects/{a}/model"), "");
+        assert_eq!(status, 200);
+        let url = model["geometry"]["url"].as_str().unwrap();
+        assert!(url.starts_with(&format!("/api/v1/projects/{a}/geometry/")));
+        assert_eq!(f.request("GET", url, "", "application/json", None).1, b"geometry-a");
+        assert_eq!(f.json("GET", &url.replace(&a, &b), "").0, 404);
+        let (_, job) = f.json("GET", &format!("/api/v1/projects/{a}/jobs/same-job"), "");
+        assert_eq!(job["result"]["url"], format!("/api/v1/projects/{a}/blob/a.png"));
+        assert_eq!(f.json("GET", &format!("/api/v1/projects/{b}/jobs/same-job"), "").1["state"], "failed");
+    }
+
+    #[test]
+    fn scoped_texture_pngs_cannot_be_read_through_another_project() {
+        use wowsmod_formats::{dds::Format, texture::{encode_dds, Image, Quality, read_png}};
+        let f = Fixture::new(); let a = f.project("a", b"geometry"); let b = f.project("b", b"geometry");
+        for (dir, color) in [("a", [255,0,0,255]), ("b", [0,0,255,255])] {
+            let root = f.root.join(dir).join("assets/res_mods/PnFMods/same/UNKNOWN_Example");
+            std::fs::create_dir_all(&root).unwrap();
+            let pixels = Image { width:4, height:4, px: color.repeat(16) };
+            let dds = encode_dds(&[pixels], Format::Rgba8, Quality::Fast, None).unwrap();
+            std::fs::write(root.join("paint.dds"), dds.to_bytes()).unwrap();
+            std::fs::write(root.join("paint.mfm"), "<mfm><fx>PBS_ship.fx</fx><property>diffuseMap<Texture>PnFMods/same/UNKNOWN_Example/paint.dds</Texture></property></mfm>").unwrap();
+        }
+        let (status, model) = f.json("GET", &format!("/api/v1/projects/{a}/model"), "");
+        assert_eq!(status, 200);
+        let url = model["materials"]["paint.mfm"]["textures"]["a"]["url"].as_str().unwrap();
+        assert!(url.starts_with(&format!("/api/v1/projects/{a}/blob/")));
+        let (status, png) = f.request("GET", url, "", "application/json", None);
+        assert_eq!(status, 200); assert_eq!(read_png(&png).unwrap().get(0,0), [255,0,0,255]);
+        assert_eq!(f.json("GET", &url.replace(&a, &b), "").0, 404);
+        let (_, textures) = f.json("GET", &format!("/api/v1/projects/{b}/textures"), "");
+        let url = textures["textures"][0]["url"].as_str().unwrap();
+        assert!(url.starts_with(&format!("/api/v1/projects/{b}/blob/")));
+        let (_, png) = f.request("GET", url, "", "application/json", None);
+        assert_eq!(read_png(&png).unwrap().get(0,0), [0,0,255,255]);
+    }
+
+    #[test]
+    fn catalog_http_mutations_preserve_id_and_only_unregister() {
+        let f = Fixture::new(); let id = f.project("a", &[]);
+        let route = format!("/api/v1/library/projects/{id}");
+        let (_, updated) = f.json("POST", &format!("{route}/update"), r#"{"display_name":"Edited","favorite":true,"tags":["paint"],"status":"review"}"#);
+        assert_eq!(updated["entry"]["favorite"], true);
+        assert_eq!(f.json("POST", &format!("{route}/update"), r#"{"status":"invalid"}"#).0, 400);
+        assert_eq!(f.json("POST", &format!("{route}/open"), "{}").1["url"], format!("/?project={id}"));
+        assert!(!f.root.join("a/.wowsmod").exists());
+        std::fs::rename(f.root.join("a"), f.root.join("moved")).unwrap();
+        let body = json!({"path": f.root.join("moved")}).to_string();
+        assert_eq!(f.json("POST", &format!("{route}/relocate"), &body).1["entry"]["id"], id);
+        assert_eq!(f.json("POST", &format!("{route}/remove"), "{}").0, 200);
+        assert!(f.root.join("moved/mod.toml").is_file());
+        assert_eq!(f.json("POST", &format!("{route}/open"), "{}").0, 404);
+    }
+
+    #[test]
+    fn no_game_actions_validate_json_and_never_spawn_or_autodetect() {
+        let f = Fixture::new(); let id = f.project("a", &[]); let prefix = format!("/api/v1/projects/{id}");
+        for action in ["apply", "install", "uninstall"] {
+            assert_eq!(f.json("POST", &format!("{prefix}/{action}"), "{\"dry_run\":false}").0, 409);
+        }
+        assert_eq!(f.json("POST", &format!("{prefix}/apply"), "not json").0, 400);
+        assert_eq!(f.json("POST", &format!("{prefix}/apply"), "{}").0, 400);
+        assert_eq!(f.request("POST", &format!("{prefix}/apply"), "{}", "text/plain", None).0, 415);
+        assert_eq!(f.request("POST", "/api/v1/library/add", "{}", "application/json", Some("https://evil.example")).0, 403);
+        assert!(f.service.session(&id).unwrap().jobs.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn action_dispatch_and_selected_client_are_exact() {
+        let project = Path::new("fixture project"); let client = Path::new("unavailable selected client");
+        for (route, command) in [("install", "install"), ("uninstall", "uninstall"), ("apply", "apply")] {
+            let action = Action::from_path(&format!("/api/v1/{route}")).unwrap();
+            let args = action_args(action, project, client);
+            assert_eq!(args, ["--json", "--game", "unavailable selected client", command, "fixture project"].map(std::ffi::OsString::from));
+        }
+        assert!(Action::from_path("/api/v1/something/uninstall").is_none());
+        assert!(Action::from_path("/api/v1/install-more").is_none());
+    }
+
+    #[test]
+    fn legacy_render_routes_keep_unscoped_model_and_events() {
+        let mut f = Fixture::new(); let id = f.project("a", b"legacy-geometry");
+        f.service.default = Some(f.service.session(&id).unwrap());
+        assert_eq!(f.json("GET", "/api/v1/health", "").1["library_mode"], false);
+        let (status, model) = f.json("GET", "/api/v1/model", "");
+        assert_eq!(status, 200);
+        assert!(model["geometry"]["url"].as_str().unwrap().starts_with("/api/v1/geometry/"));
+        assert_eq!(f.request("GET", model["geometry"]["url"].as_str().unwrap(), "", "application/json", None).1, b"legacy-geometry");
+        let (status, events) = f.request("GET", "/api/v1/events", "", "application/json", None);
+        assert_eq!(status, 200); assert!(String::from_utf8(events).unwrap().contains("event: hello"));
+        assert_eq!(f.request("GET", "/?library=1", "", "application/json", None).0, 200);
+        assert_eq!(f.json("GET", "/api/v1/library", "").0, 200);
+    }
+
+    #[test]
+    fn warm_control_hook_and_shutdown_remain_compatible() {
+        let f = Fixture::new(); let id = f.project("a", b"warm-geometry");
+        let state = f.service.session(&id).unwrap();
+        let (port, server) = bind(0).unwrap();
+        let control: Ctl = Arc::new(|method, url, _| {
+            (method == &Method::Get && url == "/__wm/status").then(|| json_resp(200, &json!({"ok":true,"warm":true})))
+        });
+        let child = Arc::clone(&state);
+        let server_thread = std::thread::spawn(move || serve_with(server, child, Some(control)).unwrap());
+        let get = |path: &str| {
+            let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+            stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+            write!(stream, "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n").unwrap();
+            let mut data = String::new(); stream.read_to_string(&mut data).unwrap(); data
+        };
+        let result = get("/__wm/status");
+        assert!(result.starts_with("HTTP/1.1 200")); assert!(result.contains("\"warm\":true"));
+        assert!(get("/api/v1/model").contains("/api/v1/geometry/"));
+        state.shutdown(); let _ = get("/__wake"); server_thread.join().unwrap();
+    }
 }

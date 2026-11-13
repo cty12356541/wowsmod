@@ -11,7 +11,7 @@ use sha2::{Digest, Sha256};
 use wowsmod_formats::{mfm, texture::{self, Image}};
 
 use crate::game::{self, GameInstall};
-use crate::modproj::{self, Project};
+use crate::modproj::Project;
 use crate::texcmd;
 use crate::{game_ctx, Cli, GameCtx};
 
@@ -22,6 +22,8 @@ pub struct PreviewState {
     pub ship: String,
     pub hull_model: String,
     pub game: Option<GameInstall>,
+    /// Pin the explicit client even when it is unavailable. Child commands must never auto-detect another client.
+    pub selected_game: Option<PathBuf>,
     pub ctx: Option<GameCtx>,
     pub etag: AtomicU64,
     pub shutting_down: AtomicBool,
@@ -31,6 +33,7 @@ pub struct PreviewState {
     /// hash16 → 如何取贴图
     blobs: RwLock<HashMap<String, BlobSrc>>,
     geom: RwLock<Option<Geom>>,
+    preview_error: RwLock<Option<String>>,
     sim: RwLock<Option<Value>>,
     parts: RwLock<Option<Value>>,
     install: RwLock<Value>,
@@ -99,18 +102,17 @@ impl PreviewState {
     pub fn open(cli: &Cli, root: &Path) -> Result<Self> {
         let project = Project::open(root)?;
         let ship = project.cfg.meta.ship.clone();
-        if ship.is_empty() {
-            bail!("mod.toml 没有 ship");
-        }
         let _ = crate::preview::ensure_steps_json(root, &ship);
-        let ctx = game_ctx(cli, false)?;
-        let game = ctx.as_ref().map(|c| c.install.clone());
+        let (game, _) = game::locate(cli.game.as_deref());
+        let selected_game = cli.game.clone().or_else(|| game.as_ref().map(|g| g.root.clone()));
+        let ctx = game_ctx(cli, false).ok().flatten();
         let hull_model = detect_hull_model(&project, &ship);
         let st = PreviewState {
             project,
             ship: ship.clone(),
             hull_model,
             game,
+            selected_game,
             ctx,
             etag: AtomicU64::new(1),
             shutting_down: AtomicBool::new(false),
@@ -118,6 +120,7 @@ impl PreviewState {
             mats: RwLock::new(HashMap::new()),
             blobs: RwLock::new(HashMap::new()),
             geom: RwLock::new(None),
+            preview_error: RwLock::new(None),
             sim: RwLock::new(None),
             parts: RwLock::new(None),
             install: RwLock::new(json!({"state": "not_installed", "rev": null, "files": 0, "time": null})),
@@ -136,37 +139,10 @@ impl PreviewState {
         Ok(st)
     }
 
-    /// 等级/国家/类型/本地化名: 先查缓存(%TEMP%/wowsmod_shipmeta_<build>_<ship>.json), 否则读 GameParams 后台解析
+    /// Share metadata by canonical client root/build instead of a ship/build-only temp cache.
     fn load_ship_meta(&self) {
-        let Some(ctx) = &self.ctx else { return };
-        let ship = self.ship.clone();
-        let cache = std::env::temp_dir().join(format!("wowsmod_shipmeta_{}_{}.json", ctx.install.build, ship));
-        if let Some(v) = std::fs::read(&cache).ok().and_then(|d| serde_json::from_slice::<Value>(&d).ok()) {
-            *self.ship_meta.write().unwrap() = v;
-            return;
-        }
-        let Some(raw) = ctx.index.get("content/GameParams_py3.data").and_then(|e| ctx.reader.read(e).ok()) else { return };
-        let texts = ctx.install.idx_dir.parent().map(|p| p.join("res").join("texts")).unwrap_or_default();
-        let meta = std::sync::Arc::clone(&self.ship_meta);
-        std::thread::spawn(move || {
-            let code = ship.split('_').next().unwrap_or(&ship).to_string();
-            let Ok(ships) = wowsmod_formats::gameparams::ships_from_raw(&raw) else { return };
-            let Some(sp) = ships.iter().find(|s| s.name == format!("P{ship}") || s.index == format!("P{code}")) else { return };
-            let mut local = None;
-            if let Ok(rd) = std::fs::read_dir(&texts) {
-                let mut dirs: Vec<PathBuf> = rd.flatten().map(|e| e.path()).collect();
-                dirs.sort_by_key(|d| !d.file_name().map(|n| n.to_string_lossy().starts_with("zh")).unwrap_or(false));
-                for d in dirs {
-                    if let Some(m) = std::fs::read(d.join("LC_MESSAGES").join("global.mo")).ok().and_then(|b| wowsmod_formats::mo::parse_mo(&b).ok()) {
-                        local = m.get(&format!("IDS_P{code}")).cloned();
-                        break;
-                    }
-                }
-            }
-            let v = json!({"level": if sp.level > 0 { json!(sp.level) } else { Value::Null }, "nation": sp.nation, "species": sp.species, "name_local": local, "param": sp.name});
-            let _ = std::fs::write(&cache, serde_json::to_vec(&v).unwrap_or_default());
-            *meta.write().unwrap() = v;
-        });
+        let metadata = crate::ship_catalog::ShipCatalog::load(&crate::m4cmd::home_dir(), self.game.as_ref());
+        *self.ship_meta.write().unwrap() = json!(metadata.lookup(&self.ship));
     }
 
     pub fn shutdown(&self) {
@@ -196,7 +172,7 @@ impl PreviewState {
 
     pub fn head_id(&self) -> Option<String> {
         let steps = self.steps.read().unwrap();
-        steps.iter().rev().find(|s| s.state == "active").map(|s| s.id.clone())
+        Some(steps.iter().rev().find(|s| s.state == "active").map(|s| s.id.clone()).unwrap_or_else(|| "current".into()))
     }
 
     pub fn etag(&self) -> u64 {
@@ -255,6 +231,8 @@ impl PreviewState {
         // intermediate: start from base, apply texture outputs from edits
         let mut mats_map = HashMap::new();
         mats_map.insert("base".into(), base_mats.clone());
+        // Imported projects need a real current snapshot even before their first recorded edit.
+        mats_map.insert("current".into(), head_mats.clone());
         let mut cur = base_mats;
         for st in &steps {
             for ed in &st.edits {
@@ -281,8 +259,12 @@ impl PreviewState {
         *self.mats.write().unwrap() = mats_map;
         *self.blobs.write().unwrap() = blobs;
         *self.steps.write().unwrap() = steps;
-        self.ensure_geometry()?;
-        self.ensure_sim_parts()?;
+        *self.preview_error.write().unwrap() = self.ensure_geometry().err().map(|e| format!("{e:#}"));
+        // Missing/corrupt preview data must not hide project metadata or application actions.
+        if self.preview_error.read().unwrap().is_some() {
+            *self.geom.write().unwrap() = None;
+        }
+        let _ = self.ensure_sim_parts();
         // 步骤标题里的贴图名 → 部件中文名
         {
             let parts_doc = self.parts.read().unwrap().clone();
@@ -470,6 +452,10 @@ impl PreviewState {
                 return Ok(());
             }
         }
+        if !cached.is_file() && find_seed(&self.ship).and_then(|s| s.join("geometry.glb").is_file().then_some(s)).is_none()
+            && (self.ship.is_empty() || (self.game.is_none() && std::env::var_os("WOWSMOD_GP").is_none())) {
+            bail!("no_model: 项目没有可用模型缓存；请关联目标船并提供客户端/装配资源后重试");
+        }
         std::fs::create_dir_all(&cache)?;
         let key_on_disk = std::fs::read_to_string(&key_file).ok();
         let bytes = if let Some(k) = &key {
@@ -511,14 +497,19 @@ impl PreviewState {
     }
 
     fn build_geometry_fallback(&self, dest: &Path) -> Result<Vec<u8>> {
+        if self.ship.is_empty() {
+            bail!("no_model: 全局项目未关联舰船，无法装配船体");
+        }
+        if self.game.is_none() && std::env::var_os("WOWSMOD_GP").is_none() {
+            bail!("no_model: 指定客户端不可用，请修正 --game 或提供项目模型缓存");
+        }
         // 调用自身 assemble --full, 再后处理材质名
         let exe = std::env::current_exe()?;
         let out = dest.with_extension("raw.glb");
         let mut c = std::process::Command::new(&exe);
         c.args(["--json", "assemble", &self.ship, "--project"]).arg(&self.project.root).args(["--full", "-o"]).arg(&out);
-        if let Some(g) = &self.game {
-            c.arg("--game").arg(&g.root);
-        }
+        // A deliberately nonexistent path is safer than omitting --game in offline GP mode.
+        c.arg("--game").arg(self.selected_game.clone().unwrap_or_else(|| self.project.root.join(".wowsmod/no-client")));
         // 无完整客户端的环境(如 CI/盒子): WOWSMOD_GP = GameParams 船条目 JSON, WOWSMOD_GEOM_DIR = 原版 .geometry 目录(可多个, 用系统路径分隔符)
         if let Ok(gp) = std::env::var("WOWSMOD_GP") {
             c.arg("--gp").arg(gp);
@@ -560,14 +551,7 @@ impl PreviewState {
     }
 
     pub fn refresh_install(&self) {
-        let Some(g) = &self.game else { return };
-        if let Ok(reg) = crate::registry::load(&g.res_mods) {
-            if let Some(m) = reg.mods.get(&self.project.cfg.meta.name) {
-                *self.install.write().unwrap() = json!({"state": "installed", "rev": self.head_id(), "files": m.files.len(), "time": null, "project_dir": m.project_dir});
-                return;
-            }
-        }
-        *self.install.write().unwrap() = json!({"state": "not_installed", "rev": null, "files": 0, "time": null});
+        *self.install.write().unwrap() = super::library::install_status(&self.project.root, self.game.as_ref());
     }
 
     // ---------- JSON views ----------
@@ -576,6 +560,7 @@ impl PreviewState {
     }
 
     pub fn project_view(&self) -> Value {
+        self.refresh_install();
         let running = game::running();
         let meta = self.ship_meta.read().unwrap().clone();
         let (ver, build, path) = match &self.game {
@@ -591,12 +576,13 @@ impl PreviewState {
                 "format_version": self.project.cfg.meta.format_version, "install_mode": self.project.cfg.install.mode
             },
             "ship": {
-                "code": self.ship, "param": format!("P{}", self.ship.trim_start_matches('P')),
-                "index": format!("P{}", self.ship.trim_start_matches('P').split('_').next().unwrap_or("")),
+                "code": self.ship, "param": meta["param"],
+                "index": crate::ship_catalog::canonical_ship_key(&self.ship),
                 "hull_model": self.hull_model, "name": {"zh": meta["name_local"].as_str().unwrap_or(&self.ship), "en": self.ship.clone(), "ru": meta["name_local"].as_str().unwrap_or(&self.ship)},
                 "level": meta["level"], "nation": meta["nation"], "species": meta["species"]
             },
-            "game": {"client": "Мир кораблей", "version": ver, "build": build, "path": path, "running": !running.is_empty()},
+            "game": {"client": "Мир кораблей", "available": self.game.is_some(), "version": ver, "build": build, "path": path, "running": !running.is_empty()},
+            "capabilities": self.capabilities(),
             "install": self.install.read().unwrap().clone(),
             "activity": self.activity.read().unwrap().clone(),
             "head": self.head_id(), "etag": self.etag(),
@@ -605,6 +591,7 @@ impl PreviewState {
     }
 
     pub fn state_view(&self) -> Value {
+        self.refresh_install();
         let running = !game::running().is_empty();
         json!({"etag": self.etag(), "head": self.head_id(), "activity": self.activity.read().unwrap().clone(),
             "install": self.install.read().unwrap().clone(), "game": {"running": running}, "steps": self.steps.read().unwrap().len()})
@@ -621,7 +608,7 @@ impl PreviewState {
 
     pub fn resolve_rev(&self, r: Option<&str>) -> Result<String> {
         match r {
-            None | Some("") | Some("head") | Some("current") => self.head_id().ok_or_else(|| anyhow!("no_model")),
+            None | Some("") | Some("head") | Some("current") => Ok(self.head_id().unwrap_or_else(|| "base".into())),
             Some("base") => Ok("base".into()),
             Some(x) => {
                 let steps = self.steps.read().unwrap();
@@ -781,10 +768,23 @@ impl PreviewState {
             "effects": {"emission": {"note": "emissionAnimationMode 等参数见 /model 的 materials[].params"}}
         }))
     }
+
+    pub fn capabilities(&self) -> Value {
+        let preview = self.geom.read().unwrap().is_some();
+        let simulation = self.sim.read().unwrap().is_some();
+        json!({"library": true, "preview": preview, "apply": self.game.is_some(), "undo": false, "restore": false,
+            "simulation": simulation, "reasons": {
+                "preview": if preview { None } else { self.preview_error.read().unwrap().clone().or_else(|| Some("项目没有可用的三维模型".into())) },
+                "apply": if self.game.is_some() { None } else { Some("指定客户端不可用；请用 --game 指定有效客户端") },
+                "undo": "撤回需要对象仓库，目前尚未接通", "restore": "恢复需要对象仓库，目前尚未接通",
+                "simulation": if simulation { None } else { Some("此项目没有对应舰船的模拟数据") }
+            }})
+    }
 }
 
 // ---------- helpers ----------
 pub fn find_seed(ship: &str) -> Option<PathBuf> {
+    if ship.is_empty() || !ship.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') { return None; }
     let mut cands = vec![];
     if let Ok(h) = std::env::var("WOWSMOD_HOME") {
         cands.push(PathBuf::from(h).join("preview_seed").join(ship));
@@ -798,8 +798,10 @@ pub fn find_seed(ship: &str) -> Option<PathBuf> {
     // 开发树 / 同级 preview_app
     cands.push(PathBuf::from("crates/wowsmod/preview_seed").join(ship));
     cands.push(PathBuf::from("/workspace/m1/wowsmod/crates/wowsmod/preview_seed").join(ship));
-    cands.push(PathBuf::from("D:/WoWSModding/preview_app/mock/data/FSB510")); // Windows 常见
-    cands.push(PathBuf::from("/workspace/preview_app/mock/data/FSB510"));
+    if crate::ship_catalog::canonical_ship_key(ship) == "PFSB510" {
+        cands.push(PathBuf::from("D:/WoWSModding/preview_app/mock/data/FSB510"));
+        cands.push(PathBuf::from("/workspace/preview_app/mock/data/FSB510"));
+    }
     for c in cands {
         if c.join("geometry.glb").is_file() || c.join("sim.json").is_file() {
             // map FSB510 folder name
@@ -855,7 +857,7 @@ fn hash16(d: &[u8]) -> String {
     h.iter().take(8).map(|b| format!("{b:02x}")).collect()
 }
 
-fn iso_now() -> String {
+pub(super) fn iso_now() -> String {
     // 本地 +08:00 近似(box/用户在上海)
     let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
     let offset = 8 * 3600;
@@ -913,7 +915,7 @@ fn detect_hull_model(p: &Project, ship: &str) -> String {
             }
         }
     }
-    ship.replace("FSB510_", "FSB025_") // 勃艮第常见
+    String::new()
 }
 
 fn walk(dir: &Path, f: &mut dyn FnMut(&Path)) {
@@ -1318,4 +1320,50 @@ fn postprocess_glb_materials(raw: &[u8]) -> Result<Vec<u8>> {
     out.extend_from_slice(b"BIN\0");
     out.extend_from_slice(&bin_pad);
     Ok(out)
+}
+
+#[cfg(test)]
+mod library_tests {
+    use super::*;
+    #[test]
+    fn imported_assets_without_history_expose_a_current_snapshot() {
+        let dir = std::env::temp_dir().join(format!("preview_no_history_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        Project::init(&dir, "same", "UNKNOWN_Example", "loose", "").unwrap();
+        let material_dir = dir.join("assets/res_mods/PnFMods/same/UNKNOWN_Example");
+        std::fs::create_dir_all(&material_dir).unwrap();
+        std::fs::write(material_dir.join("current.mfm"), "<mfm><fx>PBS_ship.fx</fx><property>g_detailScaleU<Float>3</Float></property></mfm>").unwrap();
+        std::fs::create_dir_all(dir.join(".wowsmod/cache")).unwrap();
+        std::fs::write(dir.join(".wowsmod/cache/geometry.glb"), b"project model").unwrap();
+        std::fs::remove_dir(dir.join("edits")).unwrap();
+        let cli = Cli { game: Some(dir.join("missing-client")), json: true, json_out: None, cmd: crate::Cmd::Doctor };
+        let st = PreviewState::open(&cli, &dir).unwrap();
+        assert_eq!(st.head_id().as_deref(), Some("current"));
+        assert_eq!(st.steps_view()["steps"], json!([]));
+        assert_eq!(st.model_view(None).unwrap()["rev"], "current");
+        assert_eq!(st.model_view(None).unwrap()["materials"]["current.mfm"]["params"]["g_detailScaleU"], 3.0);
+        assert_eq!(st.capabilities()["preview"], true);
+        assert!(!dir.join("edits").exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn global_and_unknown_projects_open_without_invented_model_or_client() {
+        for ship in ["", "UNKNOWN_Example"] {
+            let dir = std::env::temp_dir().join(format!("preview_missing_{}_{}", std::process::id(), ship));
+            let _ = std::fs::remove_dir_all(&dir);
+            let p = Project::init(&dir, "same", ship, "loose", "").unwrap();
+            let cli = Cli { game: Some(dir.join("missing-client")), json: true, json_out: None, cmd: crate::Cmd::Doctor };
+            let st = PreviewState::open(&cli, &dir).expect("metadata must remain available without 3D resources");
+            assert!(st.game.is_none());
+            assert_eq!(st.hull_model, "", "never invent a hull from the ship name");
+            let v = st.project_view();
+            assert_eq!(v["capabilities"]["preview"], false);
+            assert_eq!(v["capabilities"]["simulation"], false);
+            assert_eq!(v["capabilities"]["apply"], false);
+            assert!(v["capabilities"]["reasons"]["preview"].is_string());
+            assert_eq!(st.parts_view(None, None).unwrap()["parts"], json!([]));
+            assert!(!p.root.join(".wowsmod").exists(), "unavailable preview must not manufacture source caches");
+            std::fs::remove_dir_all(&dir).unwrap();
+        }
+    }
 }
