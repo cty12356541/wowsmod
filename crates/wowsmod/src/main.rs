@@ -10,6 +10,8 @@ mod shipcolor;
 mod game;
 mod guide;
 mod license;
+mod library;
+mod ship_catalog;
 mod m2cmd;
 mod m3cmd;
 mod m4cmd;
@@ -214,6 +216,8 @@ enum Cmd {
     Render(render::RenderArgs),
     /// 启动本机预览服务(嵌入前端 + /api/v1), 默认打开浏览器 / local preview server
     Preview(preview::PreviewArgs),
+    /// 本地 mod 项目目录库 / local project library
+    Library(library::LibraryArgs),
     /// 总览: 游戏、已装 mod、本机 SDK 素材、项目状态(AI 的第一步) / overview
     Status(ai::StatusArgs),
     /// 技能树(渐进阅读): wowsmod help [节点id] [--children] [--tree] [--search 词] [--check] / skill tree help
@@ -348,6 +352,7 @@ fn run(cli: Cli) -> Result<i32> {
         Cmd::ShipColor(a) => shipcolor::cmd(&cli, a),
         Cmd::Fx(c) => fxcmd::cmd(&cli, c),
         Cmd::Preview(a) => preview::cmd_preview(&cli, a),
+        Cmd::Library(a) => library::cmd_library(&cli, a),
         Cmd::Status(a) => ai::cmd_status(&cli, a),
         Cmd::Help { topic, search, tree, children, check } => ai::cmd_help(&cli, topic.as_deref(), search.as_deref(), *tree, *children, *check),
         Cmd::Mcp => mcp::serve(&cli),
