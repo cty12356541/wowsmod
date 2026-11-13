@@ -132,12 +132,10 @@ fn library_api(service: &PreviewService, method: &Method, path: &str, req: &mut 
                     json!({"ok": true, "entry": store.update(id, patch).map_err(Error::catalog)?})
                 }
                 "relocate" => {
-                    service.invalidate(id).map_err(Error::from)?;
-                    json!({"ok": true, "entry": store.relocate(id, Path::new(string("path")?)).map_err(Error::catalog)?})
+                    json!({"ok": true, "entry": service.relocate(id, Path::new(string("path")?)).map_err(Error::catalog_change)?})
                 }
                 "remove" => {
-                    service.invalidate(id).map_err(Error::from)?;
-                    json!({"ok": true, "entry": store.remove(id).map_err(Error::catalog)?})
+                    json!({"ok": true, "entry": service.remove(id).map_err(Error::catalog_change)?})
                 }
                 "open" => {
                     service.source(id).map_err(Error::from)?;
@@ -449,6 +447,12 @@ impl Error {
         Self::status(status, code, &msg)
     }
     fn catalog(e: anyhow::Error) -> Self { Self::status(400, "catalog_error", &format!("{e:#}")) }
+    fn catalog_change(e: anyhow::Error) -> Self {
+        let message = format!("{e:#}");
+        if message.contains("session_busy:") { Self::from(e) }
+        else if message.starts_with("目录库中没有项目 ") { Self::status(404, "not_found", &message) }
+        else { Self::catalog(e) }
+    }
     fn action(e: anyhow::Error) -> Self { Self::status(409, "apply_failed", &format!("{e:#}")) }
 }
 fn api_err(e: &Error) -> (u16, Value) {
@@ -566,6 +570,7 @@ mod library_tests {
         let (_, updated) = f.json("POST", &format!("{route}/update"), r#"{"display_name":"Edited","favorite":true,"tags":["paint"],"status":"review"}"#);
         assert_eq!(updated["entry"]["favorite"], true);
         assert_eq!(f.json("POST", &format!("{route}/update"), r#"{"status":"invalid"}"#).0, 400);
+        assert_eq!(f.json("POST", &format!("{route}/relocate"), &json!({"path": f.root.join("absent")}).to_string()).0, 400);
         assert_eq!(f.json("POST", &format!("{route}/open"), "{}").1["url"], format!("/?project={id}"));
         assert!(!f.root.join("a/.wowsmod").exists());
         std::fs::rename(f.root.join("a"), f.root.join("moved")).unwrap();

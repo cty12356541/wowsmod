@@ -1,7 +1,8 @@
 //! Lightweight library controller and lazily-created, explicitly identified preview sessions.
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
+use std::sync::atomic::AtomicU64;
 use std::time::Instant;
 
 use anyhow::{anyhow, bail, Result};
@@ -11,7 +12,14 @@ use crate::{game, library::LibraryStore, modproj::Project, ship_catalog::ShipCat
 use super::state::PreviewState;
 
 const MAX_SESSIONS: usize = 8;
-struct Session { state: Arc<PreviewState>, used: Instant }
+struct Session {
+    state: Arc<PreviewState>,
+    used: Instant,
+    fingerprint: u64,
+    // A streamed request or background job can still hold a previous snapshot.
+    // Weak references account for those leases without retaining unused models.
+    retired: Vec<Weak<PreviewState>>,
+}
 
 pub struct PreviewService {
     pub game: Option<game::GameInstall>,
@@ -19,6 +27,7 @@ pub struct PreviewService {
     pub default: Option<Arc<PreviewState>>,
     home: PathBuf,
     sessions: Mutex<HashMap<String, Session>>,
+    epochs: Mutex<HashMap<String, Arc<AtomicU64>>>,
 }
 
 impl PreviewService {
@@ -26,7 +35,7 @@ impl PreviewService {
         let (game, selected_game) = if let Some(st) = &default { (st.game.clone(), st.selected_game.clone()) }
             else { let (game, _) = game::locate(cli.game.as_deref()); let selected = cli.game.clone().or_else(|| game.as_ref().map(|g| g.root.clone())); (game, selected) };
         Ok(Self { selected_game,
-            game, default, home: home.to_path_buf(), sessions: Mutex::new(HashMap::new()) })
+            game, default, home: home.to_path_buf(), sessions: Mutex::new(HashMap::new()), epochs: Mutex::new(HashMap::new()) })
     }
 
     pub fn legacy(st: Arc<PreviewState>) -> Result<Self> {
@@ -80,35 +89,77 @@ impl PreviewService {
     }
 
     pub fn session(&self, id: &str) -> Result<Arc<PreviewState>> {
-        let source = self.source(id)?;
+        // The session gate is outermost. Job checks release their guard before
+        // catalog mutation takes its file lock; job workers never take this gate.
+        // Path resolution belongs inside this gate, so a queued request cannot
+        // carry an old path past a successful relocation/removal.
         let mut sessions = self.sessions.lock().unwrap();
+        let source = self.source(id)?;
         if let Some(session) = sessions.get_mut(id) {
-            if same_path(&session.state.project.root, &source) {
-                session.used = Instant::now();
+            session.used = Instant::now();
+            session.retired.retain(|state| state.strong_count() > 0);
+            let same_source = same_path(&session.state.project.root, &source);
+            if same_source && session.fingerprint == super::state::project_fingerprint(&source) {
                 return Ok(Arc::clone(&session.state));
             }
-            if busy(&session.state) || Arc::strong_count(&session.state) > 1 { bail!("session_busy: 项目任务尚未完成，请稍后重新定位"); }
-            sessions.remove(id);
+            if !same_source && session_busy(session) { bail!("session_busy: 项目任务尚未完成，请稍后重新定位"); }
+            let (state, fingerprint) = self.open_snapshot(id, &source, Some(&session.state))?;
+            if Arc::strong_count(&session.state) > 1 { session.retired.push(Arc::downgrade(&session.state)); }
+            // Capture after preview generation: its own cache output is the
+            // baseline, not another input edit that perpetually rebuilds itself.
+            session.fingerprint = fingerprint;
+            session.state = Arc::clone(&state);
+            return Ok(state);
         }
         if sessions.len() >= MAX_SESSIONS {
-            let oldest = sessions.iter().filter(|(_, s)| !busy(&s.state) && Arc::strong_count(&s.state) == 1)
+            let oldest = sessions.iter().filter(|(_, s)| !session_busy(s))
                 .min_by_key(|(_, s)| s.used).map(|(id, _)| id.clone());
             if let Some(id) = oldest { sessions.remove(&id); }
             else { bail!("session_busy: 预览会话正在使用，请等待任务结束后重试"); }
         }
-        // No available client means no child command may rediscover a real client.
-        let pinned = self.selected_game.clone().or_else(|| Some(self.home.join("unavailable-client")));
-        let state = Arc::new(PreviewState::open(&selected_cli(pinned), &source)?);
-        sessions.insert(id.to_string(), Session { state: Arc::clone(&state), used: Instant::now() });
+        let (state, fingerprint) = self.open_snapshot(id, &source, None)?;
+        sessions.insert(id.to_string(), Session { state: Arc::clone(&state), used: Instant::now(), fingerprint, retired: vec![] });
         Ok(state)
     }
 
-    pub fn invalidate(&self, id: &str) -> Result<()> {
-        let mut sessions = self.sessions.lock().unwrap();
-        if sessions.get(id).map(|s| busy(&s.state) || Arc::strong_count(&s.state) > 1).unwrap_or(false) { bail!("session_busy: 项目任务尚未完成，请稍后重试"); }
-        sessions.remove(id);
-        Ok(())
+    fn open_snapshot(&self, id: &str, source: &Path, previous: Option<&Arc<PreviewState>>) -> Result<(Arc<PreviewState>, u64)> {
+        let pinned = self.selected_game.clone().or_else(|| Some(self.home.join("unavailable-client")));
+        for _ in 0..3 {
+            let before = super::state::project_source_fingerprint(source);
+            let mut state = PreviewState::open(&selected_cli(pinned.clone()), source)?;
+            let fingerprint = state.fingerprint();
+            // An editor may save another asset while assembly is running. Do
+            // not bless that later source stamp as if this snapshot had read it.
+            if before != super::state::project_source_fingerprint(source) { continue; }
+            if let Some(previous) = previous { state.jobs = Arc::clone(&previous.jobs); }
+            // Keep a lightweight per-ID epoch after model eviction, too.
+            state.etag = Arc::clone(self.epochs.lock().unwrap().entry(id.to_string()).or_insert_with(|| Arc::new(AtomicU64::new(0))));
+            state.bump("project", json!({"refreshed": previous.is_some()}));
+            return Ok((Arc::new(state), fingerprint));
+        }
+        bail!("session_busy: 项目文件持续变化，请等待当前编辑完成后重试")
     }
+
+    pub fn relocate(&self, id: &str, path: &Path) -> Result<crate::library::LibraryEntry> {
+        let sessions = self.sessions.lock().unwrap();
+        if sessions.get(id).map(session_busy).unwrap_or(false) { bail!("session_busy: 项目任务尚未完成，请稍后重试"); }
+        // Hold the session gate throughout the catalog's own atomic mutation.
+        // The old idle snapshot remains until the next acquisition rebuilds it,
+        // retaining its completed-job identities and monotonic epoch.
+        self.store()?.relocate(id, path)
+    }
+
+    pub fn remove(&self, id: &str) -> Result<crate::library::LibraryEntry> {
+        let mut sessions = self.sessions.lock().unwrap();
+        if sessions.get(id).map(session_busy).unwrap_or(false) { bail!("session_busy: 项目任务尚未完成，请稍后重试"); }
+        let entry = self.store()?.remove(id)?;
+        sessions.remove(id);
+        Ok(entry)
+    }
+}
+
+fn session_busy(session: &Session) -> bool {
+    busy(&session.state) || Arc::strong_count(&session.state) > 1 || session.retired.iter().any(|state| state.strong_count() > 0)
 }
 
 fn busy(state: &PreviewState) -> bool {
@@ -155,7 +206,13 @@ pub fn install_status(root: &Path, game: Option<&game::GameInstall>) -> Value {
             if crate::modproj::sha256_hex(&installed) != p.sha256 { return Ok(("unknown", Some(format!("已应用文件缺失或已被修改: {}", p.rel)))); }
             if let Some(path) = source.remove(key) {
                 let raw = std::fs::read(path)?;
-                if !crate::modproj::is_binary_stub(&p.rel, &raw) && crate::modproj::sha256_hex(&raw) != p.sha256 { changed = true; }
+                if crate::modproj::is_binary_stub(&p.rel, &raw) {
+                    // A previously custom resource changed back to a placeholder:
+                    // its effective application now needs game-fill, not the
+                    // custom bytes still installed. Only an existing game-fill
+                    // record for this build can justify retaining installed.
+                    if !p.origin.starts_with("game-fill:") { changed = true; }
+                } else if crate::modproj::sha256_hex(&raw) != p.sha256 { changed = true; }
             } else if p.origin == "project" { changed = true; }
         }
         if !source.is_empty() { changed = true; }
@@ -221,7 +278,7 @@ mod tests {
         assert_eq!(service.listing().unwrap()["projects"].as_array().unwrap().len(), 1);
         assert!(service.sessions.lock().unwrap().is_empty());
         let state = service.session(&id).unwrap();
-        assert!(service.invalidate(&id).is_err(), "cannot detach a session already serving a request");
+        assert!(service.remove(&id).is_err(), "cannot detach a session already serving a request");
         state.jobs.lock().unwrap().insert("active".into(), json!({"state":"running"}));
         drop(state);
         for n in 0..MAX_SESSIONS + 3 {
@@ -230,7 +287,7 @@ mod tests {
         }
         assert!(service.sessions.lock().unwrap().len() <= MAX_SESSIONS);
         assert_eq!(service.session(&id).unwrap().jobs.lock().unwrap()["active"]["state"], "running");
-        assert!(service.invalidate(&id).is_err());
+        assert!(service.remove(&id).is_err());
     }
 
     #[test]
@@ -244,5 +301,132 @@ mod tests {
         assert_eq!(service.health()["library_mode"], false);
         assert!(service.listing().is_err());
         assert_eq!(std::fs::read(home.join("library.json")).unwrap(), b"broken");
+    }
+
+    #[test]
+    fn refreshes_same_id_source_config_and_history_without_losing_jobs() {
+        let f = Fixture::new(); let mut project = f.project("changing");
+        let material_dir = project.assets().join("PnFMods/same/UNKNOWN");
+        std::fs::create_dir_all(&material_dir).unwrap();
+        let material = |value: u8| format!("<mfm><fx>PBS_ship.fx</fx><property>g_detailScaleU<Float>{value}</Float></property></mfm>");
+        std::fs::write(material_dir.join("paint.mfm"), material(3)).unwrap();
+        let cache = project.root.join(".wowsmod/cache"); std::fs::create_dir_all(&cache).unwrap();
+        std::fs::write(cache.join("geometry.glb"), b"geometry before").unwrap();
+        let service = PreviewService::new(&selected_cli(Some(f.root.join("no-client"))), &f.root.join("home"), None).unwrap();
+        let id = service.store().unwrap().add(&project.root).unwrap().id;
+        let original = service.session(&id).unwrap();
+        assert_eq!(original.head_id().as_deref(), Some("current"));
+        let etag = original.etag();
+        original.jobs.lock().unwrap().insert("finished".into(), json!({"state":"done", "result":"kept"}));
+        original.jobs.lock().unwrap().insert("active".into(), json!({"state":"running"}));
+        std::fs::write(material_dir.join("paint.mfm"), material(7)).unwrap();
+        let changed = service.session(&id).unwrap();
+        assert_eq!(changed.model_view(None).unwrap()["materials"]["paint.mfm"]["params"]["g_detailScaleU"], 7.0);
+        assert_eq!(changed.head_id(), original.head_id());
+        assert!(changed.etag() > etag);
+        assert_eq!(changed.jobs.lock().unwrap()["finished"]["result"], "kept");
+        original.jobs.lock().unwrap().insert("active".into(), json!({"state":"done"}));
+        original.bump("job", json!({"id":"active"}));
+        assert_eq!(changed.jobs.lock().unwrap()["active"]["state"], "done");
+        // Release the current snapshot; only the old request keeps a lease.
+        // Checking the newest Arc's reference count alone must not pass this.
+        drop(changed);
+        assert!(service.remove(&id).unwrap_err().to_string().contains("session_busy"));
+        assert!(service.relocate(&id, &f.root.join("absent")).unwrap_err().to_string().contains("session_busy"));
+        drop(original);
+        let changed = service.session(&id).unwrap();
+        let etag = changed.etag();
+        project.cfg.meta.name = "changed".into(); project.save_cfg().unwrap();
+        std::fs::rename(project.assets().join("PnFMods/same"), project.assets().join("PnFMods/changed")).unwrap();
+        let renamed = service.session(&id).unwrap();
+        assert_eq!(renamed.project_view()["project"]["name"], "changed");
+        assert_eq!(renamed.model_view(None).unwrap()["materials"]["paint.mfm"]["params"]["g_detailScaleU"], 7.0);
+        assert!(renamed.etag() > etag); drop(changed);
+        let etag = renamed.etag();
+        std::fs::write(project.root.join("edits/001_test.json"), br#"{"cmd":"tex_recolor","outputs":[],"time_unix":1}"#).unwrap();
+        let edited = service.session(&id).unwrap();
+        assert_eq!(edited.head_id().as_deref(), Some("e001")); assert!(edited.etag() > etag); drop(renamed);
+        let etag = edited.etag(); let old_geometry = edited.model_view(None).unwrap()["geometry"]["hash"].clone();
+        std::fs::write(cache.join("geometry.glb"), b"geometry after").unwrap();
+        let geometry = service.session(&id).unwrap();
+        assert_ne!(geometry.model_view(None).unwrap()["geometry"]["hash"], old_geometry);
+        assert!(geometry.etag() > etag); drop(edited);
+        let unchanged = service.session(&id).unwrap();
+        assert!(Arc::ptr_eq(&geometry, &unchanged));
+        assert_eq!(geometry.etag(), unchanged.etag(), "cache reads/writes must not cause refresh loops");
+        std::fs::create_dir_all(project.root.join(".install")).unwrap();
+        std::fs::write(project.root.join(".install/manifest.json"), "{}").unwrap();
+        std::fs::write(cache.join("geometry.model_key"), "preview generated key").unwrap();
+        assert!(Arc::ptr_eq(&geometry, &service.session(&id).unwrap()), "runtime outputs do not change source generation");
+    }
+
+    #[test]
+    fn monotonic_project_epoch_survives_idle_model_eviction() {
+        let f = Fixture::new();
+        let service = PreviewService::new(&selected_cli(Some(f.root.join("no-client"))), &f.root.join("home"), None).unwrap();
+        let p = f.project("oldest"); let id = service.store().unwrap().add(&p.root).unwrap().id;
+        let first = service.session(&id).unwrap(); let epoch = first.etag(); drop(first);
+        for n in 0..MAX_SESSIONS {
+            let p = f.project(&format!("p{n}")); let next = service.store().unwrap().add(&p.root).unwrap().id;
+            drop(service.session(&next).unwrap());
+        }
+        assert!(!service.sessions.lock().unwrap().contains_key(&id));
+        assert!(service.session(&id).unwrap().etag() > epoch);
+    }
+
+    #[test]
+    fn catalog_identity_changes_serialize_with_queued_session_requests() {
+        for relocate in [true, false] {
+            let f = Fixture::new(); let a = f.project("a"); let b = f.project("b");
+            let service = Arc::new(PreviewService::new(&selected_cli(Some(f.root.join("no-client"))), &f.root.join("home"), None).unwrap());
+            let id = service.store().unwrap().add(&a.root).unwrap().id;
+            drop(service.session(&id).unwrap());
+            let lock = f.root.join("home/library.lock"); std::fs::write(&lock, "held by test").unwrap();
+            let controller = Arc::clone(&service); let mutation_id = id.clone();
+            let mutation = std::thread::spawn(move || if relocate { controller.relocate(&mutation_id, &b.root) } else { controller.remove(&mutation_id) });
+            // Observe entry into the critical section without a production timing hook:
+            // before the fix the entry disappears; after the fix the controller holds its gate.
+            let deadline = Instant::now() + std::time::Duration::from_secs(2);
+            loop {
+                match service.sessions.try_lock() {
+                    Ok(sessions) if !sessions.contains_key(&id) => break,
+                    Err(std::sync::TryLockError::WouldBlock) => break,
+                    _ => {},
+                }
+                assert!(Instant::now() < deadline, "mutation did not reach its session gate"); std::thread::yield_now();
+            }
+            let controller = Arc::clone(&service); let requested_id = id.clone();
+            let (send, receive) = std::sync::mpsc::channel();
+            let request = std::thread::spawn(move || { send.send(controller.session(&requested_id)).unwrap(); });
+            let early = receive.recv_timeout(std::time::Duration::from_millis(250)).ok();
+            std::fs::remove_file(&lock).unwrap();
+            let mutation_result = mutation.join().unwrap();
+            let arrived_early = early.is_some();
+            let acquired = early.unwrap_or_else(|| receive.recv_timeout(std::time::Duration::from_secs(5)).unwrap());
+            request.join().unwrap();
+            mutation_result.unwrap();
+            assert!(!arrived_early, "a queued request must not acquire the old source while relocate/remove waits for catalog lock");
+            if relocate { assert!(same_path(&acquired.unwrap().project.root, &f.root.join("b"))); }
+            else { assert!(acquired.err().unwrap().to_string().contains("not_found")); }
+        }
+    }
+
+    #[test]
+    fn real_source_replaced_with_stub_is_outdated_but_game_fill_stubs_remain_valid() {
+        let f = Fixture::new(); let p = f.project("a"); let game = f.game("client"); std::fs::create_dir_all(&game.res_mods).unwrap();
+        std::fs::write(p.assets().join("custom.geometry"), b"CUSTOM-GEOMETRY").unwrap();
+        std::fs::write(p.assets().join("base.geometry"), b"<SDK placeholder/>").unwrap();
+        let info = ModInfo { name: "same".into(), version: p.cfg.meta.version.clone(), ship: p.cfg.meta.ship.clone(), mode: "loose".into(),
+            project_dir: p.root.clone(), source: "project".into(), game_build: "123".into() };
+        crate::registry::install(&game.res_mods, &info, &[
+            InstallItem { rel:"custom.geometry".into(), data:b"CUSTOM-GEOMETRY".to_vec(), origin:"project".into() },
+            InstallItem { rel:"base.geometry".into(), data:b"GAME-GEOMETRY".to_vec(), origin:"game-fill:content/base.geometry".into() },
+        ], &Opts { dry_run:false, allow_same_ship:false }).unwrap();
+        assert_eq!(install_status(&p.root, Some(&game))["state"], "installed");
+        std::fs::write(p.assets().join("custom.geometry"), b"<SDK placeholder/>").unwrap();
+        assert_eq!(install_status(&p.root, Some(&game))["state"], "outdated");
+        assert_eq!(std::fs::read(game.res_mods.join("custom.geometry")).unwrap(), b"CUSTOM-GEOMETRY");
+        std::fs::write(p.assets().join("custom.geometry"), b"CUSTOM-GEOMETRY").unwrap();
+        assert_eq!(install_status(&p.root, Some(&game))["state"], "installed");
     }
 }

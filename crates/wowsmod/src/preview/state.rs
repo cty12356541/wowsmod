@@ -2,7 +2,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Mutex, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
 use anyhow::{anyhow, bail, Context, Result};
 use serde_json::{json, Value};
@@ -25,7 +25,8 @@ pub struct PreviewState {
     /// Pin the explicit client even when it is unavailable. Child commands must never auto-detect another client.
     pub selected_game: Option<PathBuf>,
     pub ctx: Option<GameCtx>,
-    pub etag: AtomicU64,
+    /// Shared by immutable snapshots of the same library project.
+    pub etag: Arc<AtomicU64>,
     pub shutting_down: AtomicBool,
     steps: RwLock<Vec<Step>>,
     /// rev id → materials
@@ -38,7 +39,7 @@ pub struct PreviewState {
     parts: RwLock<Option<Value>>,
     install: RwLock<Value>,
     activity: RwLock<Value>,
-    pub jobs: Mutex<HashMap<String, Value>>,
+    pub jobs: Arc<Mutex<HashMap<String, Value>>>,
     sse: Mutex<Vec<std::sync::mpsc::Sender<Value>>>,
     png_cache: Mutex<HashMap<(String, u32, String), Vec<u8>>>,
     /// 常驻出图增量重载: 项目文件 路径 → (大小, mtime, 是否占位, hash16); 没变的文件不再读
@@ -114,7 +115,7 @@ impl PreviewState {
             game,
             selected_game,
             ctx,
-            etag: AtomicU64::new(1),
+            etag: Arc::new(AtomicU64::new(1)),
             shutting_down: AtomicBool::new(false),
             steps: RwLock::new(vec![]),
             mats: RwLock::new(HashMap::new()),
@@ -125,7 +126,7 @@ impl PreviewState {
             parts: RwLock::new(None),
             install: RwLock::new(json!({"state": "not_installed", "rev": null, "files": 0, "time": null})),
             activity: RwLock::new(json!({"state": "idle", "title": null, "since": null, "step": null})),
-            jobs: Mutex::new(HashMap::new()),
+            jobs: Arc::new(Mutex::new(HashMap::new())),
             sse: Mutex::new(Vec::new()),
             png_cache: Mutex::new(HashMap::new()),
             file_memo: Mutex::new(HashMap::new()),
@@ -822,9 +823,19 @@ fn mtime_ns(m: &std::fs::Metadata) -> u128 {
 
 /// 项目内容指纹: 路径+大小+mtime。跳过出图输出与 .wowsmod(其中 cache/geometry.glb 单独计入)
 pub fn project_fingerprint(root: &Path) -> u64 {
+    fingerprint_files(root, true)
+}
+
+/// Source-only guard for rebuilding: preview-generated cache files cannot make
+/// an otherwise stable source appear to be edited while it is being read.
+pub(super) fn project_source_fingerprint(root: &Path) -> u64 {
+    fingerprint_files(root, false)
+}
+
+fn fingerprint_files(root: &Path, include_cache: bool) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
-    let skip = ["renders", ".render", ".wowsmod", ".git", "target"];
+    let skip = ["renders", ".render", ".wowsmod", ".install", ".git", "target"];
     let mut st = vec![root.to_path_buf()];
     let mut items: Vec<(String, u64, u128)> = Vec::new();
     while let Some(d) = st.pop() {
@@ -843,9 +854,11 @@ pub fn project_fingerprint(root: &Path) -> u64 {
             }
         }
     }
-    let g = root.join(".wowsmod/cache/geometry.glb");
-    if let Ok(md) = std::fs::metadata(&g) {
-        items.push((g.to_string_lossy().into_owned(), md.len(), mtime_ns(&md)));
+    for name in ["geometry.glb", "sim.json", "parts.json"].into_iter().filter(|_| include_cache) {
+        let cached = root.join(".wowsmod/cache").join(name);
+        if let Ok(md) = std::fs::metadata(&cached) {
+            items.push((cached.to_string_lossy().into_owned(), md.len(), mtime_ns(&md)));
+        }
     }
     items.sort();
     items.hash(&mut h);
