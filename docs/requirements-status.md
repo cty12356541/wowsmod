@@ -10,7 +10,7 @@
 | LIB-02 | 同一艘船可以有多套方案，在工作台选择和预览 | 已完成 | 方案通过稳定项目 ID 识别，同名项目保持独立。工作台选择器切换到对应项目，API、资源和任务按项目限定；浏览器实测两标签页打开不同同名方案。见 `1f14192`、`5221de2` 与 [库 API](preview-library-api.md)。 | 切换会完整重载工作台。缺失几何时显示具体原因；用户库加入第二套同船方案后即可在选择器里切换。 |
 | LIB-03 | 在工作台确认并应用同船选中的 Mod | 已完成 · 安装流程已验证 | 应用前显示当前方案、所选方案和目标客户端构建；显式确认后事务替换。同船一次应用一套，发生写入失败可恢复，检测其他项目文件冲突与外部修改。见 `d7885d4`、`c0473ba` 与 `out/integration/apply-delivery/report.json`。 | 通过两个隔离客户端的 CLI 回归和浏览器确认流程，应用后待实机验收。游戏关闭后才能修改客户端；游戏内热切换和同船 SDK 叠装不在这项交付范围。 |
 | GUIDE-01 | 精选打磨工具内置的 Mod 生成与制作 skill | 已完成 | 更新入口、单项操作和完整制作流程，加入[同船方案指引](skill/ref.variants.md)，把个案参数归入[知更鸟案例](skill-cases/2026-11-13-robin-p5-c2-history.md)，保留旧帮助入口。见 `5c7ee4b` 与 `out/integration/help-package.json` 的嵌入二进制校验。 | 精修高频流程。旧 `ai init` 产物需要显式刷新；未证实的自定义发光和游戏动画仍按实验能力或未知处理。 |
-| WORK-01 | 读取更新后的 AGENTS.md，跟进任务时免报功能项数量 | 已遵循 | 已核对本机 `C:/Users/Administrator/.codex/AGENTS.md` 的模型分工、agentdash 和 Superpowers 约定；本表用稳定 ID 对应各需求和证据。 | 后续继续按具体需求更新状态。测试数量可用于指明验证覆盖。 |
+| WORK-01 | 读取并遵循更新后的 AGENTS.md | 已遵循 | 已核对本机 `C:/Users/Administrator/.codex/AGENTS.md` 的模型分工、agentdash 和 Superpowers 约定；本表用稳定 ID 对应各需求和证据。 | 后续继续按具体需求更新状态。测试数量可用于指明验证覆盖。 |
 | LOCAL-01 | 在 Codex 右侧内置浏览器打开本地 WebUI | 已完成 · 本机会话 | 上一波次交付记录确认 IAB 已打开制作库；`out/webui-20261114-updated.json` 与 `out/delivery/mod-library-20261113/release-info.json` 记录入口 `http://127.0.0.1:8973/?library=1`。 | 地址用于本机；服务重启后可从交付目录的 `Start-Workbench.cmd` 恢复。 |
 | LOCAL-02 | 把旧的勃艮第 × 知更鸟项目导入制作库并能打开 | 已完成 · 现有项目已登记 | `out/delivery/mod-library-20261113/wowsmod_data/library.json` 登记 `project-0975bc4e078ee3a5c35fb81f`，`out/sim-20261114/live-library-api.json` 核对项目可用、舰船属性和客户端应用状态。源目录为兼容性复现的 `candidate-project`。 | 导入的是现有带 `mod.toml` 的制作目录。当前未应用；其他旧目录须分别选择登记。 |
 | PERF-01 | 打开实际项目加载太慢，改善首屏 | 已完成 · 已量测 | 游戏 DDS 查找改为一次索引，复用正则和环境图；完整静态预览优先，模拟数据随后加载。隔离项目的预热服务启动用时由旧版约 12.48–15.03 秒降到最终约 7.08 秒，材质清单一致。见 `e6885e5`、`0f503e2`、`efb4944` 与 `out/perf-20261114/delivery-final-report.json`。 | 数字属于同机样本的服务启动；首次生成派生几何、不同硬件与其他项目耗时另计。最终几何因补入真实蒙皮而变化。 |
@@ -19,7 +19,7 @@
 | RENDER-01 | 咨询 WebGPU 是否可行 | 仅讨论 | 现有 Three.js `WebGLRenderer` 已完成当前静态预览和真实蒙皮模拟。参见[模拟设计](superpowers/specs/2026-11-14-preview-simulation-design.md)与 `preview_app/web/src/engine/viewer.ts`。 | 迁移需单独决定，先用当前真实项目对照画质与 GPU 性能。 |
 | UI-01 | 制作库与工作台采用一致的美术风格 | 已完成 | 制作库复用工作台浅灰、白色、蓝色强调及控件样式。1600、700、390 px 复核覆盖舰船分组、方案、筛选、表单和状态，抽测的小字号组合达到 4.5∶1。见 `93b39f8`、`704ad24` 与 `out/library-style-20261114/visual-review.md`。 | 证据覆盖这三档宽度；本轮缩略图布局按 VIEW-02 单独核验。 |
 | VIEW-02 | 制作库展示方案的默认斜俯视截图 | 本轮进行中 | 工作台已有默认 `deck` 机位，制作库缩略图的实现与本轮截图记录待回填。 | 核对已导入的真实方案、缺图状态和刷新后的表现。 |
-| DELIVERY-01 | 提交本轮改动并推送远端 | 待交付 | 既有本地分支为 `codex/mod-library`。本轮提交与远端分支指针待核验。 | 推送后回填分支与远端验证结果。 |
+| DELIVERY-01 | 提交本轮改动并推送远端；主分支以本地版本为准 | 待交付 | 既有本地分支为 `codex/mod-library`。用户追加确认更新远端 `main`；本轮提交与远端分支指针待核验。 | 保留两边提交历史，以已验收本地代码作为合并结果，推送后回填验证结果。 |
 | NEXT-01 | 提出接下来的优化灵感 | 已提出 | 见下方按使用价值和投入排列的候选。 | 候选待选择，实施另行追踪。 |
 
 历史核验可从 `out/integration/verification-summary.json` 和 `out/delivery/mod-library-20261113/release-info.json` 查起，再按表中条目核对对应报告。前一波次通过库、双客户端安装、帮助节点和嵌入预览验证。`70a4454` 基线记录为最终缓存修复前工作区 Rust 152 项，修复后定向状态回归 8 项，最终前端 69 项。独立审查另复测零权重炮塔与离线缓存回退。两波 agentdash 台账及事件归档位于 `.agentdash/waves/mod-library-20261113/` 和 `.agentdash/waves/preview-performance-20261114/`，本机验收材料放在 `out/`。

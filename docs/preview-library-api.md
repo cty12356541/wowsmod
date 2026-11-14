@@ -51,6 +51,29 @@ match the local server origin. Errors use `{ok:false,error:{code,message}}`.
 Unknown IDs return 404. Missing/invalid projects remain listed; opening their
 workbench returns an explicit error. Registration/opening never installs a Mod.
 
+## Default-view covers
+
+`GET /api/v1/library/projects/<id>/thumbnail` returns
+`{ok,state,url,stale,reason,width,height}`. The state is `queued`, `rendering`,
+`ready`, `failed`, or `missing`; `url` and `reason` may be null. A previous cover
+may remain available while `stale` is true. Visible cards request covers lazily;
+the library summary does not wait for rendering. Background jobs use the
+registered project and the selected client's resources, serially.
+
+`POST /api/v1/library/projects/<id>/thumbnail/refresh` accepts `{}` and returns
+the same status shape. It retries generation without discarding the last usable
+cover. It uses the same origin and JSON checks as other catalog mutations.
+
+The root-relative `url` addresses
+`GET /api/v1/library/projects/<id>/thumbnail/<sha256>.png`. Clients must not rewrite
+it to the workbench's project API prefix. Covers are 640 × 360 PNGs using the
+workbench's `deck` camera, current project revision, day lighting and fixed LOD.
+The cache belongs to the application's data directory; it is separate from the
+project's assets and user render exports. Registration, removal, relocation and
+source changes are checked so one variant cannot inherit another one's cover.
+Missing browser/model data or rendering errors leave a usable placeholder and
+an explicit retry action.
+
 ## Workbench capabilities and application
 
 The existing `project` view adds `capabilities` with boolean `library`, `preview`,
