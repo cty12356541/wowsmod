@@ -62,6 +62,6 @@ WEIGHTS = [b[6], b[5], 255-b[6]-b[5], 0] / 255
 
 ## 缓存、兼容与验收
 
-preview generator version 必须参与所有 cache 分支（包括 model_key=None 和已有 seed/cache），不能仅修改模型文件指纹。使用独立 generator version sidecar 或合并 key 均可，但未知/旧版本缓存可重建时自动重建；先成功生成/校验 GLB 后原子替换，再写标记。无法重建的离线缓存继续静态可看并明确能力不足，不能直接标新版本假装具备 rig。模型 hash 变化仍沿用已审查的前端 generation/identity 保留逻辑。
+preview generator version 必须参与所有 cache 分支（包括 model_key=None 和已有 seed/cache），不能仅修改模型文件指纹。使用独立 generator version sidecar 或合并 key 均可。自动升级仅适用于有 model_key/本生成器 provenance 的派生缓存，或已确认的内置 seed 副本；来源不明的无 key 缓存可能是用户导入几何，必须保留而不覆盖。派生旧缓存先成功生成/校验 GLB 后原子替换，再写标记。无法重建的离线缓存继续静态可看并明确能力不足，不能直接标新版本假装具备 rig。模型 hash 变化仍沿用已审查的前端 generation/identity 保留逻辑。
 
 完成标准：实际 candidate project 3 主 +11 副全部真实绑骨；源 evaluator 和 Three 顶点变换误差 <1e-5 模型单位（f32 累积容差必要时按数值尺度放宽并说明）；非零 mount 平移/旋转无双变换；yaw-only 顶点不随 pitch/recoil，barrel 顶点随 pitch/recoil；混合顶点等于各骨线性混合；每个真实 muzzle 跟随并是火焰初始位置/方向依据。FGS036 的自定义 rb_shell 在源文件就是 pitch 绑定，应保留，测试应按 source weights 选顶点，不能凭“外壳”名称重写作者绑定。
