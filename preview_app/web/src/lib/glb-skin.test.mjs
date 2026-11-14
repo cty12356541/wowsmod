@@ -19,7 +19,7 @@ const localPoints = [[-0.5, 0, -2], [0.5, 0, -2], [0, 1, -2]];
 const sample = (mesh, i) => mesh.boneTransform(i, new T.Vector3(...localPoints[i])).applyMatrix4(mesh.matrixWorld);
 function near(a, b) { assert.ok(a.distanceTo(b) < 2e-6, `${a.toArray()} != ${b.toArray()}`); }
 
-function fixture({ rigid = false, inverseBinds = true, oneWeight = false } = {}) {
+function fixture({ rigid = false, inverseBinds = true, singleJoint } = {}) {
   let offset = 0;
   const buffers = [], bufferViews = [], accessors = [], nodes = [], skins = [];
   const accessor = (array, componentType, type, count) => {
@@ -29,7 +29,13 @@ function fixture({ rigid = false, inverseBinds = true, oneWeight = false } = {})
   };
   const position = accessor(new Float32Array(localPoints.flat()), 5126, 'VEC3', 3);
   const joints = accessor(new Uint16Array([0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0]), 5123, 'VEC4', 3);
-  const weights = accessor(new Float32Array(oneWeight ? [0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0] : [1, 0, 0, 0, 0, 1, 0, 0, 0.25, 0.75, 0, 0]), 5126, 'VEC4', 3);
+  let weightValues = [1, 0, 0, 0, 0, 1, 0, 0, 0.25, 0.75, 0, 0];
+  if (singleJoint !== undefined) {
+    const weights = [0, 0, 0, 0];
+    weights[singleJoint] = 1;
+    weightValues = [...weights, ...weights, ...weights];
+  }
+  const weights = accessor(new Float32Array(weightValues), 5126, 'VEC4', 3);
   const identity = new T.Matrix4().toArray();
   const ibm = inverseBinds ? accessor(new Float32Array([...identity, ...identity]), 5126, 'MAT4', 2) : undefined;
   const add = (node) => nodes.push(node) - 1;
@@ -93,7 +99,7 @@ test('GLB shares geometry while each mount deforms its own vertices once in worl
 });
 
 test('picking finds a skinned triangle moved beyond its rest bounds', () => {
-  const { root } = parseGLB(fixture({ inverseBinds: false, oneWeight: true }));
+  const { root } = parseGLB(fixture({ inverseBinds: false, singleJoint: 1 }));
   const first = skinAt(root, names[0]);
   root.getObjectByName(names[0]).getObjectByName('Roll_Back1').position.x += 10;
   root.updateMatrixWorld(true);
@@ -198,4 +204,19 @@ test('a legacy rigid GLB still displays but cannot claim combat readiness', () =
   assert.equal(mounts.length, names.length);
   assert.ok(mounts.every((m) => m.rigged === false && !m.aimed));
   assert.equal(v.fire('main', 'salvo'), 0);
+});
+
+test('a recoil joint referenced only with zero weight does not enable combat', () => {
+  const v = makeViewer();
+  v.loadGeometry(fixture({ singleJoint: 0 })); v.setSimData(sim); v.simEnable(true);
+  const mesh = skinAt(v.ship, names[1]);
+  assert.ok(mesh.isSkinnedMesh && mesh.skeleton.bones.some((b) => b.userData.bone === 'recoil'));
+  v.setCombat(true); v.aimAt(23); v.simWarm(10);
+  assert.equal(v.simSnapshot().mounts.find((m) => m.id === names[1]).rigged, false);
+  assert.equal(v.fire('main', 'salvo'), 0);
+
+  // A weighted recoil descendant also makes its pitch and yaw ancestors active.
+  v.loadGeometry(fixture({ singleJoint: 1 }), { preserveCamera: true }); v.simWarm(10);
+  assert.equal(v.simSnapshot().mounts.find((m) => m.id === names[1]).rigged, true);
+  assert.equal(v.fire('main', 'salvo'), 1);
 });

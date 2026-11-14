@@ -200,6 +200,32 @@ export function clampSector(az: number, sec?: [number, number] | null, dead?: [n
   for (const d of dead || []) if (a > d[0] && a < d[1]) { a = a - d[0] < d[1] - a ? d[0] : d[1]; ok = false; }
   return { a, ok };
 }
+
+// Preview geometry is immutable and may be shared by several mount instances.
+// The joint indices are local to its palette, so cache the indices, not Bones.
+const weightedJointCache = new WeakMap<THREE.BufferGeometry, Set<number>>();
+function weightedJoints(geometry: THREE.BufferGeometry) {
+  const cached = weightedJointCache.get(geometry);
+  if (cached) return cached;
+
+  const result = new Set<number>();
+  const { skinIndex, skinWeight } = geometry.attributes;
+  const index = geometry.index;
+  if (skinIndex && skinWeight) {
+    const { start, count } = geometry.drawRange;
+    const end = Math.min(start + count, index?.count ?? skinWeight.count);
+    for (let i = start; i < end; i++) {
+      const vertex = index ? index.getX(i) : i;
+      if (skinWeight.getX(vertex) > 0) result.add(skinIndex.getX(vertex));
+      if (skinWeight.getY(vertex) > 0) result.add(skinIndex.getY(vertex));
+      if (skinWeight.getZ(vertex) > 0) result.add(skinIndex.getZ(vertex));
+      if (skinWeight.getW(vertex) > 0) result.add(skinIndex.getW(vertex));
+    }
+  }
+  weightedJointCache.set(geometry, result);
+  return result;
+}
+
 export function makeMount(id: string, spec: MountSpec, top: THREE.Object3D, order: number): Mount {
   const find = (role: string) => findBone(top, role);
   const yawN = find('yaw'), pitchN = find('pitch'), recoilN = find('recoil');
@@ -212,8 +238,9 @@ export function makeMount(id: string, spec: MountSpec, top: THREE.Object3D, orde
   top.traverse((o) => {
     if (Number.isInteger(o.userData.muzzle) && !o.userData.synthetic) muzzles.push(o);
     const mesh = o as THREE.SkinnedMesh;
-    if (mesh.isSkinnedMesh) for (const bone of mesh.skeleton.bones) {
-      for (let n: THREE.Object3D | null = bone; n && n !== top && !drivesGeometry.has(n); n = n.parent) drivesGeometry.add(n);
+    if (mesh.isSkinnedMesh) for (const joint of weightedJoints(mesh.geometry)) {
+      const bone = mesh.skeleton.bones[joint];
+      for (let n: THREE.Object3D | undefined | null = bone; n && n !== top && !drivesGeometry.has(n); n = n.parent) drivesGeometry.add(n);
     }
   });
   muzzles.sort((a, b) => a.userData.muzzle - b.userData.muzzle);
