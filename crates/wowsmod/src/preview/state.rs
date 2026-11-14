@@ -1,10 +1,12 @@
 //! 从 mod 项目构建预览状态: 步骤、材质表(base/head/中间)、贴图 hash→来源、几何缓存、模拟数据。
+use std::cell::OnceCell;
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, LazyLock, Mutex, RwLock};
 
 use anyhow::{anyhow, bail, Context, Result};
+use regex::Regex;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
@@ -97,6 +99,34 @@ struct Geom {
     stamp: Option<(u64, u128)>,
     /// 模型编辑指纹(有 model 编辑时 = 项目内真实 .geometry 与全部 .visual 的路径+大小+mtime); 没有编辑为 None
     model_key: Option<String>,
+}
+
+struct GameDdsNames {
+    // None marks a basename that occurs more than once in the game index.
+    by_stem: HashMap<String, Option<usize>>,
+}
+
+impl GameDdsNames {
+    fn new<'a>(paths: impl IntoIterator<Item = &'a str>) -> Self {
+        let mut by_stem = HashMap::new();
+        for (index, path) in paths.into_iter().enumerate() {
+            let basename = path.rsplit('/').next().unwrap_or_default();
+            let Some((stem, ext)) = basename.rsplit_once('.') else {
+                continue;
+            };
+            if ext.eq_ignore_ascii_case("dds") {
+                by_stem
+                    .entry(stem.to_ascii_lowercase())
+                    .and_modify(|match_index| *match_index = None)
+                    .or_insert(Some(index));
+            }
+        }
+        Self { by_stem }
+    }
+
+    fn unique_index(&self, stem: &str) -> Option<usize> {
+        self.by_stem.get(&stem.to_ascii_lowercase()).copied().flatten()
+    }
 }
 
 impl PreviewState {
@@ -227,8 +257,14 @@ impl PreviewState {
         let steps = group_steps(&self.project.root, &edits)?;
         // base materials from SDK copy
         let mut blobs = HashMap::new();
-        let base_mats = self.scan_materials(false, &mut blobs)?;
-        let head_mats = self.scan_materials(true, &mut blobs)?;
+        let (base_mats, head_mats) = {
+            // Base and head share one index, built only if a game fallback is needed.
+            let game_dds_names = OnceCell::new();
+            (
+                self.scan_materials(false, &mut blobs, &game_dds_names)?,
+                self.scan_materials(true, &mut blobs, &game_dds_names)?,
+            )
+        };
         // intermediate: start from base, apply texture outputs from edits
         let mut mats_map = HashMap::new();
         mats_map.insert("base".into(), base_mats.clone());
@@ -290,7 +326,17 @@ impl PreviewState {
         Ok(())
     }
 
-    fn scan_materials(&self, head: bool, blobs: &mut HashMap<String, BlobSrc>) -> Result<BTreeMap<String, Mat>> {
+    fn scan_materials(
+        &self,
+        head: bool,
+        blobs: &mut HashMap<String, BlobSrc>,
+        game_dds_names: &OnceCell<GameDdsNames>,
+    ) -> Result<BTreeMap<String, Mat>> {
+        static IDENTIFIER: LazyLock<Regex> =
+            LazyLock::new(|| Regex::new(r"<identifier>\s*(\S+)\s*</identifier>").unwrap());
+        static MFM_PATH: LazyLock<Regex> =
+            LazyLock::new(|| Regex::new(r"<mfm>\s*(\S+)\s*</mfm>").unwrap());
+
         let ship_dir = if head {
             self.project.assets().join("PnFMods").join(&self.project.cfg.meta.name).join(&self.ship)
         } else {
@@ -309,8 +355,10 @@ impl PreviewState {
             if let Ok(t) = std::fs::read_to_string(p) {
                 // per material block
                 for mat in t.split("<material>").skip(1) {
-                    let id = regex::Regex::new(r"<identifier>\s*(\S+)\s*</identifier>").unwrap().captures(mat).map(|c| c[1].to_string());
-                    let mf = regex::Regex::new(r"<mfm>\s*(\S+)\s*</mfm>").unwrap().captures(mat).map(|c| Path::new(&c[1]).file_name().unwrap().to_string_lossy().to_string());
+                    let id = IDENTIFIER.captures(mat).map(|c| c[1].to_string());
+                    let mf = MFM_PATH.captures(mat).map(|c| {
+                        Path::new(&c[1]).file_name().unwrap().to_string_lossy().to_string()
+                    });
                     if let (Some(id), Some(mf)) = (id, mf) {
                         if id.contains("EMISSIVE") {
                             emissive_id.insert(mf);
@@ -346,7 +394,7 @@ impl PreviewState {
             for (pn, _, v) in mfm::properties(&text) {
                 if let Some((_, slot)) = SLOT.iter().find(|(s, _)| *s == pn) {
                     let tname = Path::new(&v).file_stem().unwrap_or_default().to_string_lossy().to_string();
-                    let (hash, missing, w, h) = self.resolve_tex(&tname, head, Path::new(&v), blobs);
+                    let (hash, missing, w, h) = self.resolve_tex(&tname, head, Path::new(&v), blobs, game_dds_names);
                     textures.insert(slot.to_string(), TexRef { name: tname, hash, missing, width: w, height: h });
                 }
             }
@@ -355,7 +403,14 @@ impl PreviewState {
         Ok(out)
     }
 
-    fn resolve_tex(&self, name: &str, head: bool, rel_in_mfm: &Path, blobs: &mut HashMap<String, BlobSrc>) -> (Option<String>, bool, Option<u32>, Option<u32>) {
+    fn resolve_tex(
+        &self,
+        name: &str,
+        head: bool,
+        rel_in_mfm: &Path,
+        blobs: &mut HashMap<String, BlobSrc>,
+        game_dds_names: &OnceCell<GameDdsNames>,
+    ) -> (Option<String>, bool, Option<u32>, Option<u32>) {
         // 1) project exact path under assets
         if head {
             let under = self.project.assets().join(rel_in_mfm);
@@ -382,23 +437,23 @@ impl PreviewState {
         }
         // 2) game by file name
         if let Some(ctx) = &self.ctx {
-            let hits: Vec<_> = ctx.index.entries.iter().filter(|e| e.path.rsplit('/').next().map(|x| x.eq_ignore_ascii_case(&format!("{name}.dds"))).unwrap_or(false)).collect();
-            if hits.len() == 1 {
-                let vp = hits[0].path.clone();
+            let names = game_dds_names.get_or_init(|| {
+                GameDdsNames::new(ctx.index.entries.iter().map(|entry| entry.path.as_str()))
+            });
+            if let Some(index) = names.unique_index(name) {
+                let entry = &ctx.index.entries[index];
+                let vp = entry.path.clone();
                 if let Some(h) = self.game_memo.lock().unwrap().get(&vp).cloned() {
                     blobs.insert(h.clone(), BlobSrc::Game(vp));
                     return (Some(h), false, None, None);
                 }
                 // hash of game dds header file (not volumes) — use path-stable: read and hash
-                if let Ok(d) = ctx.reader.read(hits[0]) {
+                if let Ok(d) = ctx.reader.read(entry) {
                     let h = hash16(&d);
                     self.game_memo.lock().unwrap().insert(vp.clone(), h.clone());
                     blobs.insert(h.clone(), BlobSrc::Game(vp));
                     return (Some(h), false, None, None);
                 }
-            }
-            if hits.len() != 1 {
-                return (None, true, None, None);
             }
         }
         (None, true, None, None)
@@ -1338,6 +1393,36 @@ fn postprocess_glb_materials(raw: &[u8]) -> Result<Vec<u8>> {
 #[cfg(test)]
 mod library_tests {
     use super::*;
+
+    #[test]
+    fn game_dds_names_match_unique_basenames_with_ascii_case_folding() {
+        let names = GameDdsNames::new([
+            "shared/ordinary.png",
+            "ship/PaInT.DdS",
+            "other/paint.dd0",
+            "ship/Çamo.dds",
+        ]);
+        assert_eq!(names.unique_index("pAiNt"), Some(1));
+        assert_eq!(names.unique_index("ÇAMO"), Some(3));
+        assert_eq!(names.unique_index("çamo"), None);
+        assert_eq!(names.unique_index("ship/paint"), None);
+        assert_eq!(names.unique_index("ordinary"), None);
+        assert_eq!(names.unique_index("missing"), None);
+    }
+
+    #[test]
+    fn game_dds_names_keep_duplicate_basenames_ambiguous() {
+        let names = GameDdsNames::new([
+            "ship/two.dds",
+            "shared/TWO.DDS",
+            "ship/three.dds",
+            "shared/Three.dds",
+            "other/THREE.DDS",
+        ]);
+        assert_eq!(names.unique_index("two"), None);
+        assert_eq!(names.unique_index("three"), None);
+    }
+
     #[test]
     fn imported_assets_without_history_expose_a_current_snapshot() {
         let dir = std::env::temp_dir().join(format!("preview_no_history_{}", std::process::id()));
