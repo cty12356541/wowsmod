@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent }
 import * as D from '@radix-ui/react-dialog';
 import { ArrowLeft, ArrowRight, FolderPlus, FolderSearch, RefreshCw, Search, Star, X, Settings2, AlertTriangle, ChevronDown } from 'lucide-react';
 import { libraryApi } from '../lib/api';
-import { defaultFilters, facetValues, filterProjects, groupProjects, shipLabel, type LibraryFilters } from '../lib/library';
+import { createLibraryListLoader, defaultFilters, facetValues, filterProjects, groupProjects, shipLabel, type LibraryFilters } from '../lib/library';
 import { LibraryThumbnailCache, representativeProject } from '../lib/library-thumbnail';
 import { useStore, actions } from '../store';
 import type { LibraryEntry, LibraryStatus, LibrarySummary } from '../lib/types';
@@ -11,6 +11,7 @@ import { LibraryThumbnail } from './LibraryThumbnail';
 
 const storageKey = 'wm.library.v1';
 interface SavedView { filters: LibraryFilters; selected: string | null; scroll: number }
+type FacetKey = 'nations' | 'levels' | 'species' | 'statuses';
 function readView(): SavedView {
   try {
     const saved = JSON.parse(sessionStorage.getItem(storageKey) || '{}');
@@ -31,12 +32,15 @@ export function Library() {
   const lang = useStore((s) => s.lang); void lang;
   const [saved] = useState(readView);
   const [filters, setFilters] = useState(saved.filters);
+  const [activeFacet, setActiveFacet] = useState<FacetKey | null>(null);
+  const facetRow = useRef<HTMLDivElement>(null);
   const [selected, setSelected] = useState<string | null>(saved.selected);
   const [data, setData] = useState<LibrarySummary | null>(null);
   const [thumbnails] = useState(() => new LibraryThumbnailCache((id, signal, refresh) => refresh ? libraryApi.refreshThumbnail(id, signal) : libraryApi.thumbnail(id, signal)));
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [list] = useState(() => createLibraryListLoader(libraryApi.list, { data: setData, error: setError, loading: setLoading }));
   const [notice, setNotice] = useState('');
   const [pathMode, setPathMode] = useState<'add' | 'scan' | null>(null);
   const [path, setPath] = useState('');
@@ -47,21 +51,38 @@ export function Library() {
   const view = useRef<SavedView>(saved);
   view.current = { filters, selected, scroll: view.current.scroll };
   const persist = () => { view.current.scroll = scroll.current?.scrollTop || 0; saveView(view.current); };
-  async function load() {
-    setLoading(true); setError('');
-    try { const result = await libraryApi.list(); if (alive.current) setData(result); }
-    catch (e: any) { if (alive.current) setError(e.message); }
-    finally { if (alive.current) setLoading(false); }
-  }
-  useEffect(() => { alive.current = true; document.title = t('libTitle') + ' · wowsmod'; load(); return () => { alive.current = false; saveView(view.current); }; }, []);
+  const load = list.load;
+  useEffect(() => { alive.current = true; document.title = t('libTitle') + ' · wowsmod'; load(); return () => { alive.current = false; list.invalidate(); saveView(view.current); }; }, [list, load]);
   useEffect(() => { if (data) thumbnails.revalidateVisible(); }, [data, thumbnails]);
   useEffect(() => { saveView(view.current); }, [filters, selected]);
+  useEffect(() => {
+    if (!activeFacet) return;
+    const current = facetRow.current?.querySelector(`[data-facet="${activeFacet}"]`);
+    const dismiss = (event: PointerEvent) => {
+      if (event.target instanceof Node && !current?.contains(event.target)) {
+        setActiveFacet((open) => open === activeFacet ? null : open);
+      }
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      event.preventDefault();
+      setActiveFacet((open) => open === activeFacet ? null : open);
+      current?.querySelector('summary')?.focus();
+    };
+    document.addEventListener('pointerdown', dismiss);
+    document.addEventListener('keydown', escape);
+    return () => {
+      document.removeEventListener('pointerdown', dismiss);
+      document.removeEventListener('keydown', escape);
+    };
+  }, [activeFacet]);
   useLayoutEffect(() => { if (data && !restored.current && scroll.current) { scroll.current.scrollTop = saved.scroll; restored.current = true; } }, [data, saved]);
   const visible = useMemo(() => filterProjects(data?.projects || [], filters), [data, filters]);
   const groups = useMemo(() => groupProjects(visible), [visible]);
   const current = groups.find((g) => g.key === selected);
   const allCurrent = selected ? (data?.projects || []).filter((p) => groupProjects([p])[0].key === selected) : [];
   const patchFilters = (patch: Partial<LibraryFilters>) => { setFilters((f) => ({ ...f, ...patch })); if (scroll.current) scroll.current.scrollTop = 0; };
+  const toggleFacet = (facet: FacetKey) => setActiveFacet((open) => open === facet ? null : facet);
   async function mutate(operation: () => Promise<any>, message: string) {
     setBusy(true); setError(''); setNotice('');
     try { const result = await operation(); if (!alive.current) return; await load(); setNotice([message, ...(result.warnings || []), result.truncated ? t('libScanTruncated') : ''].filter(Boolean).join(' · ')); setEdit(null); }
@@ -87,11 +108,11 @@ export function Library() {
         {notice && <div role="status" className="library-feedback success">{notice}</div>}
         {!!data?.warnings?.length && <details className="library-warnings"><summary><AlertTriangle size={14} />{t('libWarnings', { n: data.warnings.length })}</summary><ul>{data.warnings.map((warning, i) => <li key={i}>{warning}</li>)}</ul></details>}
         <div className="library-client"><span className={'dot ' + (data?.game.available ? 'ok' : 'warn')} /><span>{data?.game.available ? `${t('libClient')} ${data.game.version || ''} · ${t('libBuild')} ${data.game.build || '—'}` : t('libNoClient')}</span>{data?.game.running && <b>{t('gameRunning')}</b>}<span className="grow" /><span>{t('libCount', { ships: groupProjects(data?.projects || []).length, n: data?.projects.length || 0 })}</span></div>
-        <section className="library-filters" aria-label={t('libFilters')}><label className="input-wrap library-search"><Search size={14} /><span className="sr">{t('libSearch')}</span><input className="input" type="search" placeholder={t('libSearch')} value={filters.search} onChange={(e) => patchFilters({ search: e.target.value })} /></label><div className="library-facet-row">
-          <Facet title={t('libNation')} values={facetValues(data?.projects || [], 'nation')} selected={filters.nations} label={(v) => v === 'unknown' ? t('libUnknown') : t('nation_' + v) || v} onChange={(nations) => patchFilters({ nations })} />
-          <Facet title={t('libTier')} values={facetValues(data?.projects || [], 'level')} selected={filters.levels} label={(v) => v === 'unknown' ? t('libUnknown') : t('tierShort', { n: v })} onChange={(levels) => patchFilters({ levels })} />
-          <Facet title={t('libClass')} values={facetValues(data?.projects || [], 'species')} selected={filters.species} label={(v) => v === 'unknown' ? t('libUnknown') : t('species_' + v) || v} onChange={(species) => patchFilters({ species })} />
-          <Facet title={t('libProduction')} values={['working', 'review', 'complete', 'archived']} selected={filters.statuses} label={(v) => productionLabel(v as LibraryStatus)} onChange={(statuses) => patchFilters({ statuses })} />
+        <section className="library-filters" aria-label={t('libFilters')}><label className="input-wrap library-search"><Search size={14} /><span className="sr">{t('libSearch')}</span><input className="input" type="search" placeholder={t('libSearch')} value={filters.search} onChange={(e) => patchFilters({ search: e.target.value })} /></label><div className="library-facet-row" ref={facetRow}>
+          <Facet facet="nations" active={activeFacet} onToggle={toggleFacet} title={t('libNation')} values={facetValues(data?.projects || [], 'nation')} selected={filters.nations} label={(v) => v === 'unknown' ? t('libUnknown') : t('nation_' + v) || v} onChange={(nations) => patchFilters({ nations })} />
+          <Facet facet="levels" active={activeFacet} onToggle={toggleFacet} title={t('libTier')} values={facetValues(data?.projects || [], 'level')} selected={filters.levels} label={(v) => v === 'unknown' ? t('libUnknown') : t('tierShort', { n: v })} onChange={(levels) => patchFilters({ levels })} />
+          <Facet facet="species" active={activeFacet} onToggle={toggleFacet} title={t('libClass')} values={facetValues(data?.projects || [], 'species')} selected={filters.species} label={(v) => v === 'unknown' ? t('libUnknown') : t('species_' + v) || v} onChange={(species) => patchFilters({ species })} />
+          <Facet facet="statuses" active={activeFacet} onToggle={toggleFacet} title={t('libProduction')} values={['working', 'review', 'complete', 'archived']} selected={filters.statuses} label={(v) => productionLabel(v as LibraryStatus)} onChange={(statuses) => patchFilters({ statuses })} />
           <button className="btn favorite-filter" aria-pressed={filters.favorites} onClick={() => patchFilters({ favorites: !filters.favorites })}><Star size={14} fill={filters.favorites ? 'currentColor' : 'none'} />{t('libFavorites')}</button><span className="grow" /><label className="library-sort"><span className="sr">{t('libSort')}</span><select className="input library-select" value={filters.sort} onChange={(e) => patchFilters({ sort: e.target.value as LibraryFilters['sort'] })}><option value="opened">{t('libSortOpened')}</option><option value="added">{t('libSortAdded')}</option><option value="name">{t('libSortName')}</option></select></label><button className="btn ghost" onClick={() => patchFilters({ ...defaultFilters })}>{t('libReset')}</button>
         </div><p className="note library-filter-hint">{t('libFilterHint')}</p></section>
         {selected && <nav className="library-breadcrumb" aria-label={t('libBreadcrumb')}><button className="btn ghost" onClick={() => { setSelected(null); if (scroll.current) scroll.current.scrollTop = 0; }}><ArrowLeft size={14} />{t('libAllShips')}</button><span aria-hidden>/</span><b>{allCurrent[0] ? shipLabel(allCurrent[0], t) : selected}</b></nav>}
@@ -113,8 +134,8 @@ export function Library() {
   </div>;
 }
 
-function Facet({ title, values, selected, label, onChange }: { title: string; values: string[]; selected: string[]; label: (value: string) => string; onChange: (values: string[]) => void }) {
-  return <details className="library-facet"><summary className="btn">{title}{selected.length > 0 && <span className="count">{selected.length}</span>}<ChevronDown size={12} aria-hidden /></summary><fieldset className="menu"><legend className="sr">{title}</legend>{values.length ? values.map((value) => <label key={value}><input type="checkbox" checked={selected.includes(value)} onChange={(e) => onChange(e.target.checked ? [...selected, value] : selected.filter((v) => v !== value))} />{label(value)}</label>) : <span>{t('libNoValues')}</span>}<button type="button" className="btn ghost" onClick={() => onChange([])}>{t('libClear')}</button></fieldset></details>;
+function Facet({ facet, active, onToggle, title, values, selected, label, onChange }: { facet: FacetKey; active: FacetKey | null; onToggle: (facet: FacetKey) => void; title: string; values: string[]; selected: string[]; label: (value: string) => string; onChange: (values: string[]) => void }) {
+  return <details className="library-facet" data-facet={facet} open={active === facet}><summary className="btn" onClick={(event) => { event.preventDefault(); onToggle(facet); }}>{title}{selected.length > 0 && <span className="count">{selected.length}</span>}<ChevronDown size={12} aria-hidden /></summary><fieldset className="menu"><legend className="sr">{title}</legend>{values.length ? values.map((value) => <label key={value}><input type="checkbox" checked={selected.includes(value)} onChange={(e) => onChange(e.target.checked ? [...selected, value] : selected.filter((v) => v !== value))} />{label(value)}</label>) : <span>{t('libNoValues')}</span>}<button type="button" className="btn ghost" onClick={() => onChange([])}>{t('libClear')}</button></fieldset></details>;
 }
 function Variant({ entry, thumbnails, busy, onOpen, onEdit, onRelocate, onRemove, onFavorite }: { entry: LibraryEntry; thumbnails: LibraryThumbnailCache; busy: boolean; onOpen: () => void; onEdit: () => void; onRelocate: () => void; onRemove: () => void; onFavorite: () => void }) {
   return <article className={'variant-card' + (!entry.available ? ' unavailable' : '')}>

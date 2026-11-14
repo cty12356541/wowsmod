@@ -1,4 +1,28 @@
-import type { LibraryEntry, Project } from './types';
+import type { LibraryEntry, LibrarySummary, Project } from './types';
+
+export function createLibraryListLoader(read: () => Promise<LibrarySummary>, publish: {
+  data: (value: LibrarySummary) => void;
+  error: (message: string) => void;
+  loading: (value: boolean) => void;
+}) {
+  let generation = 0;
+  return {
+    async load() {
+      const current = ++generation;
+      publish.loading(true);
+      publish.error('');
+      try {
+        const result = await read();
+        if (current === generation) publish.data(result);
+      } catch (error) {
+        if (current === generation) publish.error(error instanceof Error ? error.message : String(error));
+      } finally {
+        if (current === generation) publish.loading(false);
+      }
+    },
+    invalidate() { generation++; },
+  };
+}
 
 export interface LibraryFilters {
   search: string; nations: string[]; levels: string[]; species: string[]; statuses: string[];
