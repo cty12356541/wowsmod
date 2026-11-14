@@ -21,13 +21,15 @@ struct Session {
     retired: Vec<Weak<PreviewState>>,
 }
 
+#[derive(Clone)]
 pub struct PreviewService {
     pub game: Option<game::GameInstall>,
     pub selected_game: Option<PathBuf>,
     pub default: Option<Arc<PreviewState>>,
     home: PathBuf,
-    sessions: Mutex<HashMap<String, Session>>,
-    epochs: Mutex<HashMap<String, Arc<AtomicU64>>>,
+    sessions: Arc<Mutex<HashMap<String, Session>>>,
+    epochs: Arc<Mutex<HashMap<String, Arc<AtomicU64>>>>,
+    pub(super) thumbnails: Arc<super::thumbnails::ThumbnailCache>,
 }
 
 impl PreviewService {
@@ -35,7 +37,8 @@ impl PreviewService {
         let (game, selected_game) = if let Some(st) = &default { (st.game.clone(), st.selected_game.clone()) }
             else { let (game, _) = game::locate(cli.game.as_deref()); let selected = cli.game.clone().or_else(|| game.as_ref().map(|g| g.root.clone())); (game, selected) };
         Ok(Self { selected_game,
-            game, default, home: home.to_path_buf(), sessions: Mutex::new(HashMap::new()), epochs: Mutex::new(HashMap::new()) })
+            game, default, home: home.to_path_buf(), sessions: Arc::new(Mutex::new(HashMap::new())), epochs: Arc::new(Mutex::new(HashMap::new())),
+            thumbnails: Arc::new(super::thumbnails::ThumbnailCache::new(home.join("library-thumbnails"))) })
     }
 
     pub fn legacy(st: Arc<PreviewState>) -> Result<Self> {
@@ -170,7 +173,7 @@ pub fn selected_cli(game: Option<PathBuf>) -> Cli {
     Cli { game, json: true, json_out: None, cmd: Cmd::Doctor }
 }
 
-fn path_identity(path: &Path) -> String {
+pub(super) fn path_identity(path: &Path) -> String {
     let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let s = canonical.to_string_lossy().replace('\\', "/").trim_start_matches("//?/").trim_end_matches('/').to_string();
     if cfg!(windows) { s.to_lowercase() } else { s }

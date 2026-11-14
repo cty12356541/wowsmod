@@ -369,6 +369,100 @@ fn dbg_on() -> bool {
     std::env::var("WOWSMOD_CDP_DEBUG").is_ok()
 }
 
+fn render_page_url(base_url: &str) -> String {
+    let (before_fragment, fragment) = match base_url.split_once('#') {
+        Some((before_fragment, fragment)) => (before_fragment, Some(fragment)),
+        None => (base_url, None),
+    };
+    let (location, query) = before_fragment
+        .split_once('?')
+        .unwrap_or((before_fragment, ""));
+    let mut url = location.to_string();
+    let authority_and_path = location
+        .split_once("://")
+        .map_or(location, |(_, rest)| rest);
+    if !authority_and_path.contains('/') {
+        url.push('/');
+    }
+    url.push('?');
+
+    for pair in query.split('&').filter(|pair| !pair.is_empty()) {
+        let key = pair.split_once('=').map_or(pair, |(key, _)| key);
+        if !is_render_parameter(key) {
+            url.push_str(pair);
+            url.push('&');
+        }
+    }
+    url.push_str("render=wait");
+    if let Some(fragment) = fragment {
+        url.push('#');
+        url.push_str(fragment);
+    }
+    url
+}
+
+fn is_render_parameter(key: &str) -> bool {
+    // URLSearchParams 解码键名。识别 render 的编码写法，同时保留其他参数原始编码。
+    let mut bytes = key.as_bytes();
+    for &expected in b"render" {
+        bytes = match bytes {
+            [byte, rest @ ..] if *byte == expected => rest,
+            [b'%', hi, lo, rest @ ..]
+                if char::from(*hi).to_digit(16) == Some(u32::from(expected >> 4))
+                    && char::from(*lo).to_digit(16) == Some(u32::from(expected & 0xf)) =>
+            {
+                rest
+            }
+            _ => return false,
+        };
+    }
+    bytes.is_empty()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::render_page_url;
+
+    #[test]
+    fn render_page_url_accepts_origin_with_or_without_trailing_slash() {
+        let expected = "http://127.0.0.1:1234/?render=wait";
+        assert_eq!(render_page_url("http://127.0.0.1:1234"), expected);
+        assert_eq!(render_page_url("http://127.0.0.1:1234/"), expected);
+    }
+
+    #[test]
+    fn render_page_url_preserves_encoded_project_query() {
+        assert_eq!(
+            render_page_url("http://127.0.0.1:1234/?project=abc%2Fx"),
+            "http://127.0.0.1:1234/?project=abc%2Fx&render=wait"
+        );
+    }
+
+    #[test]
+    fn render_page_url_adds_query_before_fragment() {
+        assert_eq!(
+            render_page_url("http://127.0.0.1:1234#scene?view=front"),
+            "http://127.0.0.1:1234/?render=wait#scene?view=front"
+        );
+    }
+
+    #[test]
+    fn render_page_url_replaces_existing_render_values() {
+        assert_eq!(
+            render_page_url("http://127.0.0.1:1234/?render=now&project=x&re%6Eder=old"),
+            "http://127.0.0.1:1234/?project=x&render=wait"
+        );
+    }
+
+    #[test]
+    fn render_page_url_preserves_explicit_path() {
+        assert_eq!(
+            render_page_url("http://127.0.0.1:1234/viewer.html?project=x#view"),
+            "http://127.0.0.1:1234/viewer.html?project=x&render=wait#view"
+        );
+    }
+}
+
 /// 一个已加载 `?render=wait` 的无头页面。常驻实例长期持有它, 冷启动用完即关。
 pub(crate) struct Page {
     browser: Option<Browser>,
@@ -396,7 +490,7 @@ impl Page {
             c.call("Inspector.enable", json!({}), true, 30).ok();
             let (w, h) = size;
             c.call("Emulation.setDeviceMetricsOverride", json!({"width": w, "height": h, "deviceScaleFactor": 1, "mobile": false}), true, 30)?;
-            let url = format!("{}{}", base_url.trim_end_matches('/'), "/?render=wait");
+            let url = render_page_url(base_url);
             c.call("Page.navigate", json!({"url": url}), true, 60)?;
             if dbg_on() { eprintln!("[cdp] navigated, waiting WM_RENDER_READY"); }
             c.wait_console("WM_RENDER_READY", 60)?;
@@ -474,7 +568,7 @@ impl Page {
             return Ok(v);
         }
         let t0 = Instant::now();
-        let url = format!("{}{}", self.base_url.trim_end_matches('/'), "/?render=wait");
+        let url = render_page_url(&self.base_url);
         self.cdp.events.clear();
         self.cdp.call("Page.navigate", json!({"url": url}), true, 60)?;
         self.cdp.wait_console("WM_RENDER_READY", 60)?;

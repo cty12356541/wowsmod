@@ -15,6 +15,20 @@ use crate::game;
 #[folder = "preview_web/"]
 struct WebAssets;
 
+pub(super) fn web_fingerprint() -> &'static str {
+    static HASH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    HASH.get_or_init(|| {
+        use sha2::{Digest, Sha256};
+        let mut hash = Sha256::new();
+        let mut names: Vec<_> = WebAssets::iter().collect(); names.sort();
+        for name in names {
+            hash.update(name.as_bytes());
+            if let Some(file) = WebAssets::get(&name) { hash.update(&*file.data); }
+        }
+        format!("{:x}", hash.finalize())
+    })
+}
+
 pub fn bind(port: u16) -> Result<(u16, Server)> {
     if port == 0 {
         let s = Server::http("127.0.0.1:0").map_err(|e| anyhow!("bind: {e}"))?;
@@ -92,12 +106,13 @@ fn handle_service(service: &PreviewService, method: &Method, url: &str, req: &mu
     let (path, query) = split_url(url);
     if path == "/api/v1/health" && method == &Method::Get { return Ok(json_ok(&service.health())); }
     if path == "/api/v1/library" || path.starts_with("/api/v1/library/") {
-        return library_api(service, method, &path, req);
+        return library_api(service, method, &path, req, port);
     }
     if let Some(rest) = path.strip_prefix("/api/v1/projects/") {
         let (id, route) = rest.split_once('/').ok_or_else(|| Error::status(404, "not_found", "缺少项目端点"))?;
         if id.is_empty() || route.is_empty() { return Err(Error::status(404, "not_found", "缺少项目 ID 或端点")); }
-        let st = service.session(id).map_err(Error::from)?;
+        let decoded_id = urlencoding_decode(id);
+        let st = service.session(&decoded_id).map_err(Error::from)?;
         return api(&st, method, &format!("/api/v1/{route}"), &query, req, Some(id));
     }
     if path.starts_with("/api/v1/") {
@@ -110,8 +125,26 @@ fn handle_service(service: &PreviewService, method: &Method, url: &str, req: &mu
     static_file(&path)
 }
 
-fn library_api(service: &PreviewService, method: &Method, path: &str, req: &mut Request) -> Result<Response<std::io::Cursor<Vec<u8>>>, Error> {
+fn library_api(service: &PreviewService, method: &Method, path: &str, req: &mut Request, port: u16) -> Result<Response<std::io::Cursor<Vec<u8>>>, Error> {
     if method == &Method::Get && path == "/api/v1/library" { return Ok(json_ok(&service.listing().map_err(Error::from)?)); }
+    if let Some((id, action)) = path.strip_prefix("/api/v1/library/projects/").and_then(|rest| rest.split_once('/')) {
+        let id = urlencoding_decode(id);
+        if action == "thumbnail" && method == &Method::Get {
+            return Ok(json_ok(&service.thumbnails.request(service, &id, port, false).map_err(Error::from)?));
+        }
+        if action == "thumbnail/refresh" && method == &Method::Post {
+            read_json(req)?;
+            return Ok(json_ok(&service.thumbnails.request(service, &id, port, true).map_err(Error::from)?));
+        }
+        if let Some(hash) = action.strip_prefix("thumbnail/").and_then(|name| name.strip_suffix(".png")) {
+            if method != &Method::Get { return Err(Error::status(405, "method_not_allowed", "封面图片需要 GET")); }
+            let bytes = service.thumbnails.image(service, &id, hash).map_err(Error::from)?;
+            let mut response = bytes_resp(200, bytes, "image/png", "private, no-cache");
+            response.add_header(Header::from_bytes("ETag", format!("\"{hash}\"")).unwrap());
+            return Ok(response);
+        }
+        if action.starts_with("thumbnail") { return Err(Error::status(405, "method_not_allowed", "封面状态需要 GET，刷新需要 POST")); }
+    }
     if method != &Method::Post { return Err(Error::status(405, "method_not_allowed", "目录库修改需要 POST")); }
     let body = read_json(req)?;
     let store = service.store().map_err(Error::from)?;
@@ -509,6 +542,46 @@ mod library_tests {
         }
     }
     impl Drop for Fixture { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.root); } }
+
+    #[test]
+    fn thumbnail_missing_sources_and_write_guards_are_independent_of_sessions() {
+        let f = Fixture::new(); let id = f.project("thumbnail-missing", &[]);
+        let route = format!("/api/v1/library/projects/{id}/thumbnail");
+        std::fs::remove_file(f.root.join("thumbnail-missing/mod.toml")).unwrap();
+        let (status, value) = f.json("GET", &route, "");
+        assert_eq!(status, 200);
+        assert_eq!(value["state"], "missing");
+        assert!(value["url"].is_null());
+        assert_eq!(value["width"], 640); assert_eq!(value["height"], 360);
+        assert!(!f.root.join("thumbnail-missing/.wowsmod").exists());
+        assert_eq!(f.json("GET", "/api/v1/library/projects/unknown/thumbnail", "").0, 404);
+        assert_eq!(f.request("POST", &format!("{route}/refresh"), "{}", "text/plain", None).0, 415);
+        assert_eq!(f.request("POST", &format!("{route}/refresh"), "{}", "application/json", Some("https://other.invalid")).0, 403);
+    }
+
+    #[test]
+    fn thumbnail_png_api_honors_encoded_ids_and_rechecks_registration() {
+        let f = Fixture::new(); let original = f.project("thumbnail-image", b"model"); let other = f.project("thumbnail-other", b"model");
+        let unusual = "../方案/one ?#%";
+        let catalog = f.root.join("home/library.json");
+        let mut document: Value = serde_json::from_slice(&std::fs::read(&catalog).unwrap()).unwrap();
+        for entry in document["entries"].as_array_mut().unwrap() { if entry["id"] == original { entry["id"] = json!(unusual); } }
+        crate::library::atomic_write(&catalog, &serde_json::to_vec(&document).unwrap()).unwrap();
+        let source = f.service.source(unusual).unwrap();
+        let key = crate::modproj::sha256_hex(&serde_json::to_vec(&(unusual, super::super::library::path_identity(&source))).unwrap());
+        let png = wowsmod_formats::texture::write_png(&wowsmod_formats::texture::Image { width: 640, height: 360, px: [12, 34, 56, 255].repeat(640 * 360) }, false).unwrap();
+        let hash = crate::modproj::sha256_hex(&png);
+        crate::library::atomic_write(&f.root.join("home/library-thumbnails").join(key).join(format!("{hash}.png")), &png).unwrap();
+        let encoded = super::super::thumbnails::encode_id(unusual);
+        let route = format!("/api/v1/library/projects/{encoded}/thumbnail/{hash}.png");
+        let (status, actual) = f.request("GET", &route, "", "application/json", None);
+        assert_eq!(status, 200); assert_eq!(actual, png);
+        assert_eq!(f.request("GET", &format!("/api/v1/library/projects/{other}/thumbnail/{hash}.png"), "", "application/json", None).0, 404);
+        assert_eq!(f.json("GET", &format!("/api/v1/projects/{encoded}/model"), "").0, 200, "scoped CDP can use the same encoded ID");
+        f.service.remove(unusual).unwrap();
+        assert_eq!(f.request("GET", &route, "", "application/json", None).0, 404);
+        assert!(source.join("mod.toml").is_file());
+    }
 
     #[test]
     fn catalog_is_read_only_and_missing_ids_do_not_use_another_project() {

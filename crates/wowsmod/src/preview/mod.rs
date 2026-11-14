@@ -4,6 +4,7 @@ pub mod cdp;
 pub mod http;
 pub mod library;
 pub mod state;
+mod thumbnails;
 pub mod warm;
 
 use std::path::PathBuf;
