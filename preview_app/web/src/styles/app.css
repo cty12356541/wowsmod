@@ -474,7 +474,7 @@ button { cursor: default; }
 .firerow { display: flex; gap: 4px; align-items: center; height: var(--row-h-lg); }
 .firerow .lbl { flex: 1; min-width: 0; font-size: var(--fs-sm); color: var(--g8); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mounts { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 8px; margin-top: 2px; }
-.mount { position: relative; display: grid; grid-template-columns: 34px 1fr 1fr auto; align-items: center; gap: 4px; height: 20px; font-size: var(--fs-xs); color: var(--g8); padding: 0 4px; border-radius: var(--r-sm); background: var(--g1); overflow: hidden; }
+.mount { position: relative; display: grid; grid-template-columns: 42px 1fr 1fr auto; align-items: center; gap: 4px; height: 20px; font-size: var(--fs-xs); color: var(--g8); padding: 0 4px; border-radius: var(--r-sm); background: var(--g1); overflow: hidden; }
 .mount .id { color: var(--g7); }
 .mount .st { text-align: right; color: var(--g6); white-space: nowrap; }
 .mount[data-st="ready"] .st { color: var(--ok); }
