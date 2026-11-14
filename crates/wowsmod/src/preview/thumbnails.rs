@@ -186,7 +186,7 @@ impl ThumbnailCache {
             Ok(rendered) => {
                 let hash = sha256_hex(&rendered.png);
                 let dir = self.root.join(&work.key);
-                atomic_write(&dir.join(format!("{hash}.png")), &rendered.png)?;
+                write_cache_file(&dir.join(format!("{hash}.png")), &rendered.png)?;
                 // Keep the session lease until the descriptor has been atomically
                 // published; remove/relocate therefore retain their busy guard.
                 verify_source(service, work)?;
@@ -219,7 +219,7 @@ impl ThumbnailCache {
     }
 
     fn save(&self, key: &str, descriptor: &Descriptor) -> Result<()> {
-        atomic_write(&self.root.join(key).join("cover.json"), &serde_json::to_vec(descriptor)?)
+        write_cache_file(&self.root.join(key).join("cover.json"), &serde_json::to_vec(descriptor)?)
     }
 
     fn read_png(&self, key: &str, hash: &str) -> Result<Vec<u8>> {
@@ -282,6 +282,17 @@ impl ThumbnailCache {
             if std::fs::remove_dir(&path).is_ok() { excess -= 1; }
         }
     }
+}
+
+fn write_cache_file(path: &Path, bytes: &[u8]) -> Result<()> {
+    let parent = path.parent().ok_or_else(|| anyhow!("封面缓存文件缺少父目录"))?;
+    std::fs::create_dir_all(parent)?;
+    // Rust's filesystem functions support long Windows paths, but the shared
+    // atomic writer calls MoveFileExW directly. Canonicalizing the existing
+    // parent supplies the verbatim \\?\ prefix to BOTH destination and staging
+    // filename, which can exceed MAX_PATH even when the PNG name itself fits.
+    let native = std::fs::canonicalize(parent)?.join(path.file_name().ok_or_else(|| anyhow!("封面缓存文件名为空"))?);
+    atomic_write(&native, bytes)
 }
 
 struct Rendered { png: Vec<u8>, _lease: Option<Arc<state::PreviewState>> }
@@ -586,5 +597,34 @@ mod tests {
             output()
         });
         assert_eq!(f.value(&work)["state"], "ready");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn thumbnail_long_windows_paths_publish_and_replace_atomically() {
+        let f = Fixture::new(); let mut work = f.project("long-path");
+        // An override lets acceptance exercise the exact deployed data-home
+        // depth; the identity is unique to this fixture and cleaned below.
+        let root = std::env::var_os("WOWSMOD_THUMBNAIL_TEST_ROOT").map(PathBuf::from)
+            .unwrap_or_else(|| f.root.join("long-thumbnail-cache-path-segment".repeat(4)));
+        let cache = ThumbnailCache::new(root);
+        let png_path = cache.root.join(&work.key).join(format!("{}.png", "a".repeat(64)));
+        assert!(png_path.to_string_lossy().len() + 24 > 260, "include the atomic temporary filename in the Windows path limit");
+        assert!(!png_path.to_string_lossy().starts_with(r"\\?\"));
+        cache.enqueue(work.clone()); cache.drain(&f.service, &|_, _| output());
+        let value = cache.queue.lock().unwrap().entries[&work.key].value(&work.id);
+        assert_eq!(value["state"], "ready", "long-path publish failed: {value}");
+        let first = cache.load(&work.key);
+        assert!(cache.image(&f.service, &work.id, first.png.as_ref().unwrap()).is_ok());
+        work.force = true;
+        cache.enqueue(work.clone());
+        cache.drain(&f.service, &|_, _| Ok(Rendered { png: png([200, 10, 20, 255]), _lease: None }));
+        let second = cache.load(&work.key);
+        assert_ne!(first.png, second.png);
+        assert!(cache.image(&f.service, &work.id, second.png.as_ref().unwrap()).is_ok());
+        assert!(cache.image(&f.service, &work.id, first.png.as_ref().unwrap()).is_ok());
+        let owned = cache.root.join(&work.key);
+        for file in std::fs::read_dir(&owned).unwrap().flatten() { std::fs::remove_file(file.path()).unwrap(); }
+        std::fs::remove_dir(owned).unwrap();
     }
 }
