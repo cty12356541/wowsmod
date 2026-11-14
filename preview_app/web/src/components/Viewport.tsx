@@ -116,7 +116,7 @@ function ViewBar() {
         opts={[{ v: 'day', label: <Sun size={14} />, tip: t('lightDay') }, ...(s.look === 'studio' ? [{ v: 'dusk' as const, label: <Sunset size={14} />, tip: t('lightDusk') }] : []), { v: 'night', label: <Moon size={14} />, tip: t('lightNight') }]} />
       <div className="vsep" />
       <Menu align="end" trigger={<IconBtn icon={<Camera size={16} />} label={t('views')} />}
-        items={[{ heading: t('views') }, ...['hero', 'side', 'bow', 'stern', 'top', 'port', 'funnel'].map((v, i) => ({ label: t('v_' + v), kbd: String(i + 5 <= 9 ? '' : ''), onSelect: () => viewer?.preset(v) })),
+        items={[{ heading: t('views') }, ...['deck', 'hero', 'side', 'bow', 'stern', 'top', 'port', 'funnel'].map((v) => ({ label: t('v_' + v), onSelect: () => viewer?.preset(v) })),
           { sep: true }, { label: t('focusSel'), disabled: !s.selected, onSelect: () => s.selected && viewer?.focus([s.selected]), kbd: 'F' }]} />
       <DisplayMenu />
     </div>

@@ -58,20 +58,21 @@ export function SimPanel() {
         <Prop k={t('reloadReal')} src="exact" srcTip={t('reloadRealTip')}><Switch on={s.reloadReal} onChange={actions.setReloadReal} label={t('reloadReal')} /></Prop>
         {groups.map((g) => {
           const ms = mounts.filter((m) => m.group === g); if (!ms.length) return null;
-          const spec = sim.mounts[ms[0].id];
+          const spec = sim.mounts[ms[0].id], canFire = ms.some((m) => m.rigged);
           return (
             <div key={g} className="gungroup">
               <div className="firerow">
                 <span className="lbl">{t('group_' + g)}<span className="faint num"> · {ms.length}× {spec?.barrelDiameter ? Math.round(spec.barrelDiameter * 1000) + ' mm' : ''}</span></span>
-                <Tip label={t('salvoTip')} kbd={g === 'main' ? 'Space' : 'R'}><button className="btn" onClick={() => actions.fire(g, 'salvo')}><Flame size={14} />{t('salvo')}</button></Tip>
-                <Tip label={t('singleTip')} kbd={g === 'main' ? 'F' : undefined}><button className="btn" onClick={() => actions.fire(g, 'single')}>{t('single1')}</button></Tip>
+                <Tip label={t('salvoTip')} kbd={g === 'main' ? 'Space' : 'R'}><button className="btn" disabled={!canFire} onClick={() => actions.fire(g, 'salvo')}><Flame size={14} />{t('salvo')}</button></Tip>
+                <Tip label={t('singleTip')} kbd={g === 'main' ? 'F' : undefined}><button className="btn" disabled={!canFire} onClick={() => actions.fire(g, 'single')}>{t('single1')}</button></Tip>
               </div>
               <div className="mounts">
                 {ms.map((m) => {
-                  const sp = sim.mounts[m.id]; const st = !s.combat ? 'rest' : !m.inSector ? 'blocked' : m.reload > 0 ? 'reload' : m.aimed ? 'ready' : 'turning';
+                  const sp = sim.mounts[m.id]; const st = !m.rigged ? 'static' : !s.combat ? 'rest' : !m.inSector ? 'blocked' : m.reload > 0 ? 'reload' : m.aimed ? 'ready' : 'turning';
                   return (
                     <Tip key={m.id} side="left" label={<div className="num" style={{ lineHeight: '18px' }}>
                       <div><b>{m.id}</b> · {sp?.model}</div>
+                      {!m.rigged && <div>{t('staticRigTip')}</div>}
                       <div>{t('rotSpeed')}: {sp?.rotationSpeed ? `${sp.rotationSpeed[0]}°/s` : '–'} <span className="faint">({t('src_exact')})</span></div>
                       <div>{t('horizSector')}: {sp?.horizSector ? `${sp.horizSector[0]}° … ${sp.horizSector[1]}°` : '–'}</div>
                       <div>{t('vertSector')}: {sp?.vertSector ? `${sp.vertSector[0]}° … ${sp.vertSector[1]}°` : '–'}</div>
@@ -79,8 +80,8 @@ export function SimPanel() {
                     </div>}>
                       <div className="mount" data-st={st}>
                         <span className="id mono">{m.id.replace('HP_', '')}</span>
-                        <span className="num">{fmtDeg(m.yaw)}</span>
-                        <span className="num faint">{m.pitch.toFixed(1)}°</span>
+                        <span className="num">{m.rigged ? fmtDeg(m.yaw) : '–'}</span>
+                        <span className="num faint">{m.rigged ? `${m.pitch.toFixed(1)}°` : '–'}</span>
                         <span className="st">{st === 'reload' ? <span className="num">{m.reload.toFixed(1)}s</span> : t('mst_' + st)}</span>
                         <i className="bar" style={{ width: m.reloadMax ? (1 - m.reload / m.reloadMax) * 100 + '%' : '100%' }} />
                       </div>

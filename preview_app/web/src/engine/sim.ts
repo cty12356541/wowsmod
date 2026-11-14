@@ -188,6 +188,7 @@ export class Particles {
 // ---------------------------------------------------------------- 炮塔
 export interface Mount {
   id: string; spec: MountSpec; top: THREE.Object3D; yawN?: THREE.Object3D; pitchN?: THREE.Object3D; recoilN?: THREE.Object3D; muzzles: THREE.Object3D[];
+  rigged: boolean;
   yawQ0?: THREE.Quaternion; pitchQ0?: THREE.Quaternion; recoil0?: THREE.Vector3;
   yaw: number; pitch: number; wantYaw: number; wantPitch: number; inSector: boolean; aimed: boolean;
   reload: number; shotT: number; order: number;
@@ -200,12 +201,26 @@ export function clampSector(az: number, sec?: [number, number] | null, dead?: [n
   return { a, ok };
 }
 export function makeMount(id: string, spec: MountSpec, top: THREE.Object3D, order: number): Mount {
-  const find = (role: string) => top.children.length ? findBone(top, role) : undefined;
+  const find = (role: string) => findBone(top, role);
   const yawN = find('yaw'), pitchN = find('pitch'), recoilN = find('recoil');
   const muzzles: THREE.Object3D[] = [];
-  top.traverse((o) => { if (o.userData && o.userData.muzzle !== undefined) muzzles.push(o); });
+  const drivesGeometry = new Set<THREE.Object3D>();
+  const isUnder = (o: THREE.Object3D, parent: THREE.Object3D) => {
+    for (let n = o.parent; n && n !== top; n = n.parent) if (n === parent) return true;
+    return false;
+  };
+  top.traverse((o) => {
+    if (Number.isInteger(o.userData.muzzle) && !o.userData.synthetic) muzzles.push(o);
+    const mesh = o as THREE.SkinnedMesh;
+    if (mesh.isSkinnedMesh) for (const bone of mesh.skeleton.bones) {
+      for (let n: THREE.Object3D | null = bone; n && n !== top && !drivesGeometry.has(n); n = n.parent) drivesGeometry.add(n);
+    }
+  });
   muzzles.sort((a, b) => a.userData.muzzle - b.userData.muzzle);
-  return { id, spec, top, yawN, pitchN, recoilN, muzzles, yawQ0: yawN?.quaternion.clone(), pitchQ0: pitchN?.quaternion.clone(), recoil0: recoilN?.position.clone(),
+  const rigged = !!(yawN && pitchN && recoilN && isUnder(pitchN, yawN) && isUnder(recoilN, pitchN) &&
+    drivesGeometry.has(yawN) && drivesGeometry.has(pitchN) && drivesGeometry.has(recoilN) &&
+    muzzles.length && muzzles.every((m) => isUnder(m, recoilN)));
+  return { id, spec, top, yawN, pitchN, recoilN, muzzles, rigged, yawQ0: yawN?.quaternion.clone(), pitchQ0: pitchN?.quaternion.clone(), recoil0: recoilN?.position.clone(),
     yaw: 0, pitch: 0, wantYaw: 0, wantPitch: 0, inSector: true, aimed: false, reload: 0, shotT: 99, order };
 }
 function findBone(o: THREE.Object3D, role: string): THREE.Object3D | undefined {
@@ -213,6 +228,7 @@ function findBone(o: THREE.Object3D, role: string): THREE.Object3D | undefined {
 }
 const _q = new THREE.Quaternion(), _ax = new THREE.Vector3();
 export function poseMount(m: Mount, m2u: number) {
+  if (!m.rigged) return;
   if (m.yawN && m.yawQ0) m.yawN.quaternion.copy(m.yawQ0).multiply(_q.setFromAxisAngle(_ax.set(0, 1, 0), -m.yaw * D2R));
   if (m.pitchN && m.pitchQ0) m.pitchN.quaternion.copy(m.pitchQ0).multiply(_q.setFromAxisAngle(_ax.set(1, 0, 0), m.pitch * D2R));
   if (m.recoilN && m.recoil0) {
@@ -231,6 +247,7 @@ export function elevFor(spec: MountSpec, distM: number) {
 }
 /** 每帧：转向目标（按 rotationSpeed 限速） */
 export function stepMount(m: Mount, dt: number, targetLocal: THREE.Vector3 | null, distM: number, combat: boolean, instant = false) {
+  if (!m.rigged) return;
   const s = m.spec; const rs = s.rotationSpeed || [20, 10];
   if (combat && targetLocal) {
     const az = Math.atan2(targetLocal.x, -targetLocal.z) / D2R;
@@ -244,6 +261,6 @@ export function stepMount(m: Mount, dt: number, targetLocal: THREE.Vector3 | nul
     const dy = m.wantYaw - m.yaw; m.yaw += Math.sign(dy) * Math.min(Math.abs(dy), ys * dt);
     const dp = m.wantPitch - m.pitch; m.pitch += Math.sign(dp) * Math.min(Math.abs(dp), ps * dt);
   }
-  m.aimed = combat && m.inSector && Math.abs(m.wantYaw - m.yaw) < 1.0 && Math.abs(m.wantPitch - m.pitch) < 1.0;
+  m.aimed = combat && !!targetLocal && m.inSector && Math.abs(m.wantYaw - m.yaw) < 1.0 && Math.abs(m.wantPitch - m.pitch) < 1.0;
   m.reload = Math.max(0, m.reload - dt); m.shotT += dt;
 }

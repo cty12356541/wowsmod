@@ -5,7 +5,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
-import { parseGLB } from '../lib/glb';
+import { disposeModelGeometry, parseGLB, skinBounds } from '../lib/glb';
 import { getTex, FALLBACK, setAniso, texGC, texGpuBytes, clearTexCache } from '../lib/tex';
 import type { Manifest, MaterialDef, SimData } from '../lib/types';
 import * as S from './shaders';
@@ -44,9 +44,16 @@ const LOD_COLORS = ['#3f9a6b', '#3b78d0', '#c88a1e', '#c0473f'];
 
 interface PartRec { id: string; meshes: THREE.Mesh[]; visible: boolean; verts: number; tris: number; lods: { lod: number; extent: number }[]; lod: number; center: THREE.Vector3; top: THREE.Object3D }
 
+const meshBox = new T.Box3();
+function expandMeshBounds(box: THREE.Box3, mesh: THREE.Mesh) {
+  const skinned = mesh as THREE.SkinnedMesh;
+  if (skinned.isSkinnedMesh) box.union(skinBounds(skinned, meshBox).applyMatrix4(mesh.matrixWorld));
+  else box.expandByObject(mesh);
+}
+
 export interface SimSnapshot {
   speedKn: number; tel: Telegraph; rudder: number; rudderCmd: number; heading: number; heel: number; roll: number; pitch: number;
-  mounts: { id: string; group: string; yaw: number; pitch: number; wantYaw: number; aimed: boolean; inSector: boolean; reload: number; reloadMax: number }[];
+  mounts: { id: string; group: string; rigged: boolean; yaw: number; pitch: number; wantYaw: number; aimed: boolean; inSector: boolean; reload: number; reloadMax: number }[];
   lod: Record<string, number>; camDist: number; aim: { az: number; distM: number } | null;
 }
 
@@ -73,11 +80,12 @@ export class Viewer {
   flashT = 0; flashSet = new Set<string>(); passIsA = false;
   BOX = new T.Box3(new T.Vector3(-1.2, -0.65, -8.9), new T.Vector3(1.2, 3.2, 8.9)); WL = 0; FLOOR_Y = -0.98; baseFov = 34; baseAspect = 1;
   camTween: { from: { pos: THREE.Vector3; tgt: THREE.Vector3 }; to: { pos: THREE.Vector3; tgt: THREE.Vector3 }; t: number } | null = null;
+  private cameraEdited = false;
   clock = new T.Clock(); time = 0; dirty = 3; lastInput = 0; frameTimes: number[] = []; fps = 0; cpuMs = 0; idle = false; drawCalls = 0; tris = 0; paused = false; lost = false; bench = false;
   pickCb: ((id: string | null) => void) | null = null; frameCb: (() => void) | null = null; aimCb: ((p: THREE.Vector3 | null) => void) | null = null;
   // 模拟
   simData: SimData | null = null; motion: ShipMotion | null = null; simOn = false; combat = false; camMode: CamMode = 'orbit';
-  mounts: Mount[] = []; aimLocal: THREE.Vector3 | null = null; aimWorld: THREE.Vector2 | null = null; aimFromCenter = false; aimMarker!: THREE.Mesh;
+  mounts: Mount[] = []; aimMarker!: THREE.Mesh;
   wake!: Trail; bowL!: Trail; bowR!: Trail; sideFoam!: THREE.Mesh; foamMat!: THREE.ShaderMaterial; particles!: Particles; rng = mulberry32(7);
   lodMode: 'auto' | number = 0; lodBias = 1; lodTint = false; reloadReal = true; emitAcc = 0; freeCamWorld: { pos: THREE.Vector3; tgt: THREE.Vector3 } | null = null;
   fx: FxTheme | null = null; fxNodes: THREE.Object3D[] = []; funnelAcc = 0;
@@ -96,7 +104,7 @@ export class Viewer {
     const c = this.controls = new OrbitControls(cam, r.domElement);
     c.target.set(0, 0.95, -0.5); c.enableDamping = !opts.deterministic; c.dampingFactor = 0.09;
     c.minDistance = 1.2; c.maxDistance = 260; c.maxPolarAngle = Math.PI * 0.62;
-    c.addEventListener('start', () => { this.camTween = null; this.poke(); });
+    c.addEventListener('start', () => { this.cameraEdited = true; this.camTween = null; this.poke(); });
     c.addEventListener('change', () => this.poke());
 
     this.U = {
@@ -280,11 +288,11 @@ export class Viewer {
   // ---------------------------------------------------------------- 几何
   loadGeometry(buf: ArrayBuffer, options: { preserveCamera?: boolean } = {}) {
     const { root } = parseGLB(buf);
+    const firstGeometry = !this.ship;
     if (this.ship) {
-      const oldGeometry = new Set<THREE.BufferGeometry>();
-      this.ship.traverse((node: any) => { if (node.geometry) oldGeometry.add(node.geometry); });
-      this.shipFrame.remove(this.ship); oldGeometry.forEach((geometry) => geometry.dispose());
+      this.shipFrame.remove(this.ship); disposeModelGeometry(this.ship);
       this.meshes.length = 0; this.parts = {}; this.mounts = [];
+      this.pendingShots = [];
     }
     root.updateMatrixWorld(true);
     const box = new T.Box3();
@@ -301,11 +309,11 @@ export class Viewer {
         o.userData.part = pid; p.meshes.push(o); this.meshes.push(o);
         if ((o.userData.lod || 0) === 0) {
           const g = o.geometry; p.verts += g.attributes.position.count; p.tris += (g.index ? g.index.count : g.attributes.position.count) / 3;
-          box.expandByObject(o); pb.expandByObject(o);
+          expandMeshBounds(pb, o);
         }
         o.userData.pickable = true; o.onBeforeRender = this.onMeshRender;
       });
-      if (!pb.isEmpty()) pb.getCenter(p.center);
+      if (!pb.isEmpty()) { box.union(pb); pb.getCenter(p.center); }
     });
     if (!box.isEmpty()) { this.BOX = box; this.fitStage(); }
     this.ship = root; this.shipFrame.add(root);
@@ -316,7 +324,7 @@ export class Viewer {
     this.applyLod(true);
     if (this.simData) this.setupMounts();
     this.renderer.shadowMap.needsUpdate = true;
-    if (!options.preserveCamera) this.preset('hero', true);
+    if (firstGeometry && !options.preserveCamera && !this.cameraEdited) this.goTo(this.presetPose('deck')!, true);
     const out: Record<string, any> = {}; let tv = 0, tt = 0;
     Object.values(this.parts).forEach((p) => { out[p.id] = { verts: p.verts, tris: p.tris, prims: p.meshes.filter((m) => !m.userData.lod).length, lods: p.lods.length }; tv += p.verts; tt += p.tris; });
     return { parts: out, verts: tv, tris: tt, prims: this.meshes.filter((m) => !m.userData.lod).length, bounds: { min: this.BOX.min.toArray(), max: this.BOX.max.toArray() } };
@@ -328,8 +336,13 @@ export class Viewer {
     const lod0 = this.meshes.filter((m) => !m.userData.lod); let total = 0;
     lod0.forEach((m) => { total += m.geometry.attributes.position.count; });
     const step = Math.max(1, Math.floor(total / 6000)); const pts: THREE.Vector3[] = [];
-    lod0.forEach((m) => { const a = m.geometry.attributes.position; m.updateMatrixWorld(); const M = m.matrixWorld;
-      for (let i = 0; i < a.count; i += step) pts.push(new T.Vector3(a.getX(i), a.getY(i), a.getZ(i)).applyMatrix4(M)); });
+    lod0.forEach((m) => { const a = m.geometry.attributes.position; const M = m.matrixWorld, skinned = m as THREE.SkinnedMesh;
+      for (let i = 0; i < a.count; i += step) {
+        const p = new T.Vector3().fromBufferAttribute(a, i);
+        if (skinned.isSkinnedMesh) skinned.boneTransform(i, p);
+        pts.push(p.applyMatrix4(M));
+      }
+    });
     this.fitPts = pts;
   }
   /** 水线处船体半宽轮廓（船体 LOD0 中 |y| 小的顶点），用于舷侧白沫与船首浪 */
@@ -535,6 +548,7 @@ export class Viewer {
 
   // ---------------------------------------------------------------- 相机
   static PRESETS: Record<string, { dir?: number[]; pos?: number[]; tgt: number[]; fill?: number }> = {
+    deck: { dir: [-0.76, 0.78, -0.64], tgt: [0, 0.65, 0], fill: 0.87 },
     hero: { dir: [0.86, 0.17, -0.47], tgt: [0, 0.6, -0.2], fill: 0.86 },
     side: { dir: [1, 0.04, 0], tgt: [0, 0.55, 0.05], fill: 0.92 },
     bow: { dir: [0.62, 0.22, -0.75], tgt: [0, 0.6, -0.6], fill: 0.88 },
@@ -591,9 +605,10 @@ export class Viewer {
     if (instant) { this.camera.position.copy(to.pos); this.controls.target.copy(to.tgt); this.controls.update(); this.camTween = null; this.syncFreeCam(); this.poke(); return; }
     this.camTween = { from: { pos: this.camera.position.clone(), tgt: this.controls.target.clone() }, to, t: 0 }; this.poke();
   }
-  preset(name: string, instant?: boolean) { const to = this.presetPose(name); if (to) this.goTo(to, instant); }
+  preset(name: string, instant?: boolean) { const to = this.presetPose(name); if (to) { this.cameraEdited = true; this.goTo(to, instant); } }
   /** 方位角（度，0 = 船首方向，正 = 右舷）、俯仰（度）、距离（模型单位；省略 = 自动取景）、目标点 */
   orbit(az: number, el: number, dist?: number, tgt?: number[], instant = true) {
+    this.cameraEdited = true;
     const a = T.MathUtils.degToRad(az), e = T.MathUtils.degToRad(el);
     const dir = new T.Vector3(Math.sin(a) * Math.cos(e), Math.sin(e), -Math.cos(a) * Math.cos(e));
     const t = new T.Vector3(...((tgt || [0, 0.6, 0]) as [number, number, number]));
@@ -603,7 +618,7 @@ export class Viewer {
   }
   partsBox(ids: string[]) {
     const b = new T.Box3();
-    ids.forEach((id) => { const p = this.parts[id]; if (p && p.visible) p.meshes.filter((m) => m.visible || !m.userData.lod).forEach((m) => { if (!m.userData.lod) b.expandByObject(m); }); });
+    ids.forEach((id) => { const p = this.parts[id]; if (p && p.visible) p.meshes.forEach((m) => { if (!m.userData.lod) expandMeshBounds(b, m); }); });
     return b;
   }
   /** 把一组部件框进画面（保持当前观察方向，或给定方向） */
@@ -612,14 +627,16 @@ export class Viewer {
     const c = b.getCenter(new T.Vector3());
     const d0 = dir ? dir.clone().normalize() : this.camera.position.clone().sub(this.controls.target).normalize();
     const d = Math.max(0.6, this.fitDistance(d0, c, fill, b));
+    this.cameraEdited = true;
     this.goTo({ pos: c.clone().addScaledVector(d0, d), tgt: c }, instant);
     return true;
   }
-  setView(pos: number[], tgt: number[]) { this.camera.position.set(pos[0], pos[1], pos[2]); this.controls.target.set(tgt[0], tgt[1], tgt[2]); this.controls.update(); this.camTween = null; this.syncFreeCam(); this.poke(); }
+  setView(pos: number[], tgt: number[]) { this.cameraEdited = true; this.goTo({ pos: new T.Vector3().fromArray(pos), tgt: new T.Vector3().fromArray(tgt) }, true); }
   getView() { return { pos: this.camera.position.toArray().map((v) => +v.toFixed(3)), tgt: this.controls.target.toArray().map((v) => +v.toFixed(3)) }; }
   camDistance() { return this.camera.position.distanceTo(this.controls.target); }
   /** 距离预设（LOD 检查）：沿当前方向把相机放到给定距离 */
   setDistance(d: number, instant = false) {
+    this.cameraEdited = true;
     const dir = this.camera.position.clone().sub(this.controls.target).normalize();
     const tgt = new T.Vector3(0, 0.6, 0);
     this.goTo({ pos: tgt.clone().addScaledVector(dir, d), tgt }, instant);
@@ -637,7 +654,7 @@ export class Viewer {
   setSimData(d: SimData | null) {
     if (!d) {
       this.simEnable(false); this.simData = null; this.motion = null; this.mounts = []; this.pendingShots = [];
-      this.combat = false; this.aimLocal = null; this.aimWorld = null; this.updateSimVis(); return;
+      this.combat = false; this.clearAim(); return;
     }
     this.simData = d; this.motion = new ShipMotion(d.ship);
     this.motion.m2u = (this.BOX.max.z - this.BOX.min.z) / (d.ship.size_m?.[0] || 250);
@@ -647,13 +664,11 @@ export class Viewer {
   private setupMounts() {
     if (!this.simData || !this.ship) return;
     if (this.motion) this.motion.m2u = (this.BOX.max.z - this.BOX.min.z) / (this.simData.ship.size_m?.[0] || 250);
-    this.mounts = []; let i = 0;
+    this.mounts = []; this.pendingShots = []; let i = 0;
     for (const [id, spec] of Object.entries(this.simData.mounts)) {
       const p = this.parts[id] || Object.values(this.parts).find((q) => q.id.startsWith(id + '|')); if (!p) continue;
-      if (spec.bones && spec.bones.includes('yaw')) { const m = makeMount(id, spec, p.top, i++); if (m.yawN || m.muzzles.length) { this.mounts.push(m); continue; } }
-      // 没有骨骼的几何(盒子/CI 装配): 静态炮位 + 由网格前端估计炮口, 只用于开火特效预览(炮塔不转)
-      const n = spec.numBarrels || spec.muzzles || 0; if (!n) continue;
-      const m = makeMount(id, spec, p.top, i++); this.syntheticMuzzles(m, n); if (m.muzzles.length) this.mounts.push(m);
+      const m = makeMount(id, spec, p.top, i++);
+      this.mounts.push(m);
     }
   }
   /** 估计炮口: 炮位局部坐标里最靠前(-z)的一段顶点, 按 x 均分 n 管 */
@@ -667,18 +682,35 @@ export class Viewer {
     let x0 = Infinity, x1 = -Infinity, y = 0; tip.forEach((q) => { x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); y += q.y; }); y /= tip.length;
     for (let k = 0; k < n; k++) { const o = new T.Object3D(); o.position.set(n === 1 ? (x0 + x1) / 2 : x0 + (x1 - x0) * (k + 0.5) / n, y, zmin); o.userData.muzzle = k; o.userData.synthetic = true; top.add(o); m.muzzles.push(o); }
   }
+  private resetPose() {
+    for (const m of this.mounts) {
+      m.yaw = m.pitch = m.wantYaw = m.wantPitch = 0; m.aimed = false; m.inSector = true; m.shotT = 99;
+      poseMount(m, this.m2u());
+    }
+    this.shipFrame.position.set(0, 0, 0); this.shipFrame.rotation.set(0, 0, 0);
+    this.shipFrame.updateMatrixWorld(true);
+    this.particles.clear(); this.flashLight.intensity = 0;
+  }
   simEnable(on: boolean) {
+    const wasOn = this.simOn;
     this.simOn = on && !!this.motion;
-    if (!this.simOn) { this.mounts.forEach((m) => { m.yaw = m.pitch = 0; m.shotT = 99; poseMount(m, this.m2u()); }); this.shipFrame.position.set(0, 0, 0); this.shipFrame.rotation.set(0, 0, 0); this.particles.clear(); }
-    if (!this.simOn && this.camMode === 'game') this.setCamMode('orbit');
+    if (!this.simOn) {
+      this.pendingShots.forEach(({ m }) => { m.reload = 0; }); this.pendingShots = [];
+      this.resetPose();
+      if (this.camMode === 'game') this.setCamMode('orbit');
+    } else if (!wasOn) this.syncFreeCam();
     this.updateSimVis(); this.renderer.shadowMap.needsUpdate = true; this.poke();
   }
   simReset() {
     if (!this.simData) return;
+    const waves = this.motion?.waves ?? 1, az = this.aimAz();
     this.motion = new ShipMotion(this.simData.ship); this.motion.m2u = (this.BOX.max.z - this.BOX.min.z) / (this.simData.ship.size_m?.[0] || 250);
-    this.wake.clear(); this.bowL.clear(); this.bowR.clear(); this.particles.clear(); this.rng = mulberry32(7); this.pendingShots = []; this.emitAcc = 0; this.funnelAcc = 0;
-    this.mounts.forEach((m) => { m.yaw = m.pitch = 0; m.reload = 0; m.shotT = 99; });
+    this.motion.waves = waves;
+    if (az !== null) this.aimAt(az);
+    this.wake.clear(); this.bowL.clear(); this.bowR.clear(); this.rng = mulberry32(7); this.pendingShots = []; this.singleIdx = {}; this.emitAcc = 0; this.funnelAcc = 0;
+    this.mounts.forEach((m) => { m.reload = 0; }); this.resetPose();
     this.WU.uShipP.value.set(0, 0); this.WU.uShipPsi.value = 0;
+    this.syncFreeCam(); this.renderer.shadowMap.needsUpdate = true; this.poke();
   }
   private updateSimVis() {
     if (!this.foamMat) return;
@@ -716,6 +748,9 @@ export class Viewer {
     this.aimAt(az);
   }
   setCamMode(m: CamMode) {
+    if (m === this.camMode) return;
+    this.cameraEdited = true;
+    if (this.camMode === 'game') this.camTween = null;
     this.camMode = m; const c = this.controls;
     if (m === 'game') {
       c.enablePan = false; c.minPolarAngle = Math.PI * 0.36; c.maxPolarAngle = Math.PI * 0.485; c.minDistance = 9; c.maxDistance = 34;
@@ -738,11 +773,31 @@ export class Viewer {
     const a = m.toLocal(W.pos.x, W.pos.z), b = m.toLocal(W.tgt.x, W.tgt.z);
     this.camera.position.set(a.x, W.pos.y, a.y); this.controls.target.set(b.x, W.tgt.y, b.y);
   }
-  readyMounts(group: string) { return this.mounts.filter((m) => m.spec.group === group && m.muzzles.length && m.reload <= 0 && (!this.combat ? false : m.inSector && Math.abs(m.wantYaw - m.yaw) < 3)); }
+  private stepMounts(dt: number) {
+    const mo = this.motion!;
+    const az = this.aimAz();
+    const tl = this.combat && az !== null ? new T.Vector3(Math.sin(T.MathUtils.degToRad(az)) * 1000, this.WL, -Math.cos(T.MathUtils.degToRad(az)) * 1000) : null;
+    const local = new T.Vector3();
+    for (const m of this.mounts) {
+      if (!m.rigged) continue;
+      stepMount(m, dt, tl ? m.top.worldToLocal(local.copy(tl)) : null, this.aimDistKm * 1000, this.combat);
+      if (dt > 0) poseMount(m, mo.m2u);
+    }
+  }
+  readyMounts(group: string) {
+    if (!this.simOn || !this.combat || this.aimBearing === null) return [];
+    this.stepMounts(0);
+    return this.mounts.filter((m) => m.spec.group === group && m.rigged && m.aimed && m.reload <= 0);
+  }
   /** 开火：salvo = 该组所有就绪炮塔（按序号错开 40 ms）；single = 下一座就绪炮塔 */
   fire(group: 'main' | 'secondary', how: 'salvo' | 'single', force = false) {
     if (!this.simOn) return 0;
-    let ready = force ? this.mounts.filter((m) => m.spec.group === group && m.muzzles.length) : this.readyMounts(group);
+    let ready = force ? this.mounts.filter((m) => {
+      if (m.spec.group !== group) return false;
+      // Only the explicit offline rendering path may estimate a muzzle.
+      if (!m.muzzles.length) this.syntheticMuzzles(m, m.spec.numBarrels || m.spec.muzzles || 0);
+      return m.muzzles.length > 0;
+    }) : this.readyMounts(group);
     if (!ready.length) return 0;
     if (how === 'single') { const k = (this.singleIdx[group] || 0) % ready.length; ready = [ready[k]]; this.singleIdx[group] = k + 1; }
     ready.forEach((m, i) => this.pendingShots.push({ m, t: how === 'salvo' ? i * 0.04 : 0 }));
@@ -759,7 +814,7 @@ export class Viewer {
     const shipV = new T.Vector3(-Math.sin(mo.psi) * mo.speedU(), 0, -Math.cos(mo.psi) * mo.speedU());
     for (const mz of m.muzzles) {
       const p = mz.getWorldPosition(new T.Vector3()); mean.add(p);
-      const q = mz.getWorldQuaternion(new T.Quaternion()); const dir = new T.Vector3(0, 0, -1).applyQuaternion(q);
+      const dir = new T.Vector3(0, 0, -1).transformDirection(mz.matrixWorld);
       const toW = (v: THREE.Vector3) => { const w = mo.toWorld(v.x, v.z); return new T.Vector3(w.x, v.y, w.y); };
       const dirW = (v: THREE.Vector3) => { const c = Math.cos(mo.psi), s = Math.sin(mo.psi); return new T.Vector3(c * v.x + s * v.z, v.y, -s * v.x + c * v.z); };
       const pw = toW(p), dw = dirW(dir);
@@ -806,7 +861,7 @@ export class Viewer {
     mo.step(dt);
     this.WU.uShipP.value.copy(mo.P); this.WU.uShipPsi.value = mo.psi;
     const D2R = Math.PI / 180;
-    this.shipFrame.position.set(0, mo.heave, 0); this.shipFrame.rotation.set(mo.pitch * D2R, 0, mo.roll * D2R, 'XZY'); this.shipFrame.updateMatrixWorld(true);
+    this.shipFrame.position.set(0, mo.heave, 0); this.shipFrame.rotation.set(mo.pitch * D2R, 0, mo.roll * D2R, 'XZY');
     // 尾迹
     const sp = Math.abs(mo.speedKn) / mo.maxKn, F = this.footprint;
     this.emitAcc += dt;
@@ -825,15 +880,9 @@ export class Viewer {
     this.wake.step(dt); this.bowL.step(dt); this.bowR.step(dt);
     this.emitFunnel(dt);
     // 炮塔
-    const tl = this.aimBearing !== null ? new T.Vector3() : null;
-    if (tl) { const far = 1000; const wx = mo.P.x - Math.sin(this.aimBearing!) * far, wz = mo.P.y - Math.cos(this.aimBearing!) * far; const l = mo.toLocal(wx, wz); tl.set(l.x, this.WL, l.y); }
-    for (const m of this.mounts) {
-      let loc: THREE.Vector3 | null = null;
-      if (tl) loc = m.top.worldToLocal(tl.clone());
-      stepMount(m, dt, loc, this.aimDistKm * 1000, this.combat);
-      poseMount(m, mo.m2u);
-    }
-    for (let i = this.pendingShots.length - 1; i >= 0; i--) { const s = this.pendingShots[i]; s.t -= dt; if (s.t <= 0) { this.pendingShots.splice(i, 1); this.shoot(s.m); } }
+    this.stepMounts(dt);
+    this.shipFrame.updateMatrixWorld(true);
+    this.pendingShots = this.pendingShots.filter((s) => { s.t -= dt; if (s.t > 0) return true; this.shoot(s.m); return false; });
     this.particles.step(dt);
     this.flashLight.intensity *= Math.exp(-dt * 30);
     if (this.aimBearing !== null) { const az = mo.psi - this.aimBearing; this.aimMarker.position.set(Math.sin(az) * this.aimMarkDist, this.WL + 0.01, -Math.cos(az) * this.aimMarkDist); this.aimMarker.scale.setScalar(Math.max(1, this.aimMarkDist / 25)); }
@@ -854,13 +903,13 @@ export class Viewer {
     const mo = this.motion; if (!mo) return null;
     const az = this.aimAz();
     return { speedKn: mo.speedKn, tel: mo.tel, rudder: mo.rudder, rudderCmd: mo.rudderCmd, heading: ((-mo.psi * 180 / Math.PI) % 360 + 360) % 360, heel: mo.heel, roll: mo.roll, pitch: mo.pitch,
-      mounts: this.mounts.map((m) => ({ id: m.id, group: m.spec.group, yaw: m.yaw, pitch: m.pitch, wantYaw: m.wantYaw, aimed: m.aimed, inSector: m.inSector, reload: m.reload, reloadMax: this.reloadReal ? (m.spec.shotDelay || 5) : Math.min(m.spec.shotDelay || 2, 2) })),
+      mounts: this.mounts.map((m) => ({ id: m.id, group: m.spec.group, rigged: m.rigged, yaw: m.yaw, pitch: m.pitch, wantYaw: m.wantYaw, aimed: m.aimed, inSector: m.inSector, reload: m.reload, reloadMax: this.reloadReal ? (m.spec.shotDelay || 5) : Math.min(m.spec.shotDelay || 2, 2) })),
       lod: this.lodState(), camDist: this.camDistance(), aim: az === null ? null : { az: ((az + 540) % 360) - 180, distM: this.aimDistKm * 1000 } };
   }
   /** 确定性预热：用固定步长推进 seconds 秒（无头出图时让尾迹/姿态进入稳态） */
   simWarm(seconds: number, dt = 1 / 30) { const n = Math.round(seconds / dt); for (let i = 0; i < n; i++) { this.stepSim(dt); this.time += dt; } this.U.uTime.value = this.time; }
   /** 直接设定炮塔姿态（无头出图） */
-  snapTurrets() { for (const m of this.mounts) { m.yaw = m.wantYaw; m.pitch = m.wantPitch; poseMount(m, this.m2u()); } }
+  snapTurrets() { for (const m of this.mounts) { m.yaw = m.wantYaw; m.pitch = m.wantPitch; poseMount(m, this.m2u()); } this.shipFrame.updateMatrixWorld(true); }
 
   // ---------------------------------------------------------------- 输入
   private bindPointer() {
@@ -991,12 +1040,14 @@ export class Viewer {
   dispose() {
     if (this.disposed) return; this.disposed = true;
     this.renderer.setAnimationLoop(null); this.resizeObserver?.disconnect(); this.controls.dispose();
+    if (this.ship) { disposeModelGeometry(this.ship); this.shipFrame.remove(this.ship); }
     const geometries = new Set<THREE.BufferGeometry>(), materials = new Set<THREE.Material>();
     [this.scene, this.envScene, this.compScene].forEach((scene) => scene.traverse((node: any) => {
       if (node.geometry) geometries.add(node.geometry);
       if (node.material) (Array.isArray(node.material) ? node.material : [node.material]).forEach((material: THREE.Material) => materials.add(material));
     }));
     this.matCache.forEach((material) => materials.add(material));
+    if (this.neutral) materials.add(this.neutral);
     geometries.forEach((geometry) => geometry.dispose()); materials.forEach((material) => material.dispose()); this.matCache.clear();
     this.rtA?.dispose(); this.rtB?.dispose(); this.envRT?.dispose(); this.pmrem.dispose(); this.bloom.dispose(); this.sun.shadow.map?.dispose(); clearTexCache();
     this.pickCb = null; this.frameCb = null; this.aimCb = null;

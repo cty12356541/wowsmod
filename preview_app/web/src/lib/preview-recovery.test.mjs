@@ -30,6 +30,7 @@ const { boot, disposeWorkbench, resync, useStore } = await import('../store.ts')
 const factory = () => { created++; return {
   loadGeometry(bytes, options) { loaded.push({ generation: new Uint8Array(bytes)[0], options }); },
   setFx(value) { effects.push(value); }, setSimData(value) { simulations.push(value); },
+  setWaves() {}, setCombat() {}, setTelegraph() {}, setRudder() {}, setReloadReal() {}, setAimDistKm() {},
   applyManifest: async (side, manifest) => {
     materials.push([side, manifest.geometry.hash]);
     if (failMaterial) throw new Error('Material data unavailable');

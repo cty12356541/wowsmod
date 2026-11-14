@@ -21,8 +21,9 @@ globalThis.fetch = async (url) => {
   const value = url.endsWith('/project') ? { project: { name: 'Changing ship', dir: 'C:/mods/B' }, ship: { code: ship, param: ship }, game: { running: false }, install: { state: 'not_installed' }, capabilities: { preview: true, simulation, reasons: {} } } : url.endsWith('/steps') ? { steps: [], head: 'current' } : url.includes('/model?') ? { rev: 'current', geometry: { hash: geometry, url: `/api/v1/projects/B/geometry/${geometry}.glb` }, materials: {} } : url.includes('/parts?') ? { parts: [] } : url.includes('/textures?') ? { textures: [] } : url.endsWith('/sim') ? { ship: { code: ship }, mounts: {} } : { ok: true, etag: 1 };
   return new Response(JSON.stringify(value), { headers: { 'Content-Type': 'application/json' } });
 };
-const { boot, disposeWorkbench, resync, useStore } = await import('../store.ts');
-const fakeViewer = { loadGeometry() {}, setFx() {}, applyManifest: async () => ({ failed: [] }), gc() {}, setSimData(value) { viewerSimulation.push(value); } };
+const { actions, boot, disposeWorkbench, resync, useStore } = await import('../store.ts');
+const fakeViewer = { loadGeometry() {}, setFx() {}, applyManifest: async () => ({ failed: [] }), gc() {}, setSimData(value) { viewerSimulation.push(value); },
+  setWaves() {}, setCombat() {}, setTelegraph() {}, setRudder() {}, setReloadReal() {}, setAimDistKm() {} };
 async function waitFor(predicate) {
   for (let i = 0; i < 100 && !predicate(); i++) await new Promise((resolve) => setTimeout(resolve, 1));
   assert.ok(predicate(), 'expected workbench transition did not occur');
@@ -157,5 +158,35 @@ test('startup probes a legacy project with no simulation capability field', asyn
   await boot(() => fakeViewer);
   await waitFor(() => useStore.getState().sim?.ship.code === 'J');
   await resync(); assert.equal(simRequests, before + 1);
+});
+
+test('waves stay applied after simulation loads, resets and re-entry; game camera exits in sync', async () => {
+  disposeWorkbench(); ship = 'K'; simulation = true; pendingSim = null;
+  const target = { ...fakeViewer,
+    setSimData(data) { this.motion = data ? { waves: 1 } : null; },
+    simEnable(on) { if (!on && this.camMode === 'game') this.setCamMode('orbit'); },
+    simReset() { this.motion = { waves: 1 }; },
+    setWaves(w) { if (this.motion) this.motion.waves = w; },
+    setCamMode(m) { this.camMode = m; },
+    setTelegraph(t) { this.motion.tel = t; },
+    setRudder(r) { this.motion.rudder = r; },
+    setLodMode() {}, setLodTint() {}, setLodBias() {}, setCombat() {}, setReloadReal() {}, setAimDistKm() {}, setEmisOverride() {}, setMode() {},
+  };
+  actions.setWaves(0.35);
+  await boot(() => target);
+  await waitFor(() => useStore.getState().sim?.ship.code === 'K');
+  assert.equal(target.motion.waves, 0.35);
+  actions.setWorkspace('sim');
+  actions.setTel('full'); actions.setRudder(1); actions.setCamMode('game');
+  actions.simReset();
+  assert.equal(target.motion.waves, 0.35);
+  assert.equal(target.motion.tel, 'stop'); assert.equal(target.motion.rudder, 0);
+  assert.equal(useStore.getState().tel, 'stop'); assert.equal(useStore.getState().rudder, 0);
+  assert.equal(useStore.getState().camMode, 'game');
+  actions.setWorkspace('review');
+  assert.equal(useStore.getState().camMode, 'orbit');
+  assert.equal(target.camMode, 'orbit');
+  actions.setWorkspace('sim');
+  assert.equal(target.camMode, 'orbit'); assert.equal(target.motion.waves, 0.35);
 });
 test.after(() => disposeWorkbench());

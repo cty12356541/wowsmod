@@ -115,7 +115,17 @@ let simulationEpoch = 0, attemptedSimulationEpoch = -1;
 
 function clearSimulation() {
   viewer?.setSimData(null);
-  set({ sim: null, simOn: false, workspace: 'review', rightTab: 'history', snap: null, tel: 'stop', rudder: 0, combat: false });
+  set({ sim: null, simOn: false, workspace: 'review', rightTab: 'history', snap: null, tel: 'stop', rudder: 0, combat: false, camMode: get().camMode === 'game' ? 'orbit' : get().camMode });
+}
+
+function applySimulationSettings(target: Viewer, s = get()) {
+  target.setWaves(s.waves); target.setCombat(s.combat);
+  target.setTelegraph(s.tel); target.setRudder(s.rudder); target.setReloadReal(s.reloadReal);
+  target.setAimDistKm(s.aimKm); target.aimFollowMouse = s.aimMouse;
+  if (s.simOn) {
+    target.setCamMode(s.camMode); target.setLodMode(s.lodMode); target.setLodBias(s.lodBias); target.setLodTint(s.lodTint);
+    target.setEmisOverride(s.emisMode, s.emisSpeed);
+  }
 }
 
 async function loadSimulation(target: Viewer) {
@@ -128,6 +138,8 @@ async function loadSimulation(target: Viewer) {
     const sim: SimData = await api.sim();
     if (!active || epoch !== simulationEpoch || boot !== bootSeq || viewer !== target) return;
     target.setSimData(sim);
+    if (get().simOn) target.simEnable(true);
+    applySimulationSettings(target);
     set({ sim });
   } catch { /* Missing simulation is represented as unavailable. */ }
 }
@@ -371,14 +383,13 @@ export const actions = {
   // ---------- 工作区 / 模拟
   setWorkspace(w: Workspace) {
     const s = get(); if (w === 'sim' && (!s.sim || !supports('simulation'))) { toast('error', s.project?.capabilities?.reasons.simulation || t('simUnavailable')); return; }
-    set({ workspace: w, rightTab: w === 'sim' ? 'sim' : 'history', simOn: w === 'sim' });
+    const on = w === 'sim';
+    set({ workspace: w, rightTab: on ? 'sim' : 'history', simOn: on, camMode: !on && s.camMode === 'game' ? 'orbit' : s.camMode });
     if (!viewer) return;
-    viewer.simEnable(w === 'sim');
-    viewer.setLodMode(w === 'sim' ? s.lodMode : 0); viewer.setLodTint(w === 'sim' && s.lodTint);
-    if (w === 'sim') { viewer.setCombat(s.combat); viewer.setTelegraph(s.tel); viewer.setRudder(s.rudder); viewer.setReloadReal(s.reloadReal); viewer.setAimDistKm(s.aimKm); viewer.aimFollowMouse = s.aimMouse; viewer.setEmisOverride(s.emisMode, s.emisSpeed); }
-    else { viewer.setEmisOverride(-1); if (s.mode !== 'single') viewer.setMode(s.mode); }
-    if (w === 'sim' && s.mode !== 'single') { viewer.setMode('single'); }
-    else if (w === 'review') viewer.setMode(s.mode);
+    viewer.simEnable(on);
+    if (on) applySimulationSettings(viewer);
+    else { viewer.setLodMode(0); viewer.setLodTint(false); viewer.setEmisOverride(-1); }
+    viewer.setMode(on ? 'single' : s.mode);
   },
   setTel(t2: Telegraph) { viewer?.setTelegraph(t2); set({ tel: t2 }); },
   setRudder(r: number) { viewer?.setRudder(r); set({ rudder: r }); },
@@ -398,5 +409,5 @@ export const actions = {
   setLodBias(b: number) { viewer?.setLodBias(b); set({ lodBias: b }); },
   setLodTint(on: boolean) { viewer?.setLodTint(on); set({ lodTint: on }); },
   setDist(p: 'near' | 'mid' | 'far') { if (!viewer) return; if (p === 'near') viewer.preset('hero'); else viewer.setDistance(p === 'mid' ? 30 : 110); set({ distPreset: p }); },
-  simReset() { viewer?.simReset(); set({ tel: 'stop', rudder: 0 }); viewer?.setTelegraph('stop'); viewer?.setRudder(0); },
+  simReset() { viewer?.simReset(); set({ tel: 'stop', rudder: 0 }); if (viewer) applySimulationSettings(viewer); },
 };
