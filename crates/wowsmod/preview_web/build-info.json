@@ -1,16 +1,16 @@
 {
   "schema": 1,
   "frontend_baseline": "1a1fba8",
-  "source_git_commit": "efb49445d3c3c6624279ace1be71ebad056e3240",
-  "source_sha256": "024a6435813ba0135e78e5be8cf33d8d1ae6854daaba29c49bfd8335e06cc564",
+  "source_git_commit": "421167947a97e7c0642a10f8503ef3fb2c8ff35e",
+  "source_sha256": "4c8a4197177e4f96a6a51285ac8795d1f10fcee42715f3f8b0aba3fced7f1fbf",
   "files": [
     {
       "path": "assets/app.js",
-      "sha256": "c3df90edc97278bd94c4295f2618432596f3793675aa41f5fb8b0a46519fa34e"
+      "sha256": "2b6a02d69b1ccde9d5ed2dba35ac76392407d2115ffbd57478edff54f4be4ac7"
     },
     {
       "path": "assets/style.css",
-      "sha256": "0bfacaaf17d3ab9c7466696cd6ab1798445d052547d5853554c0d52013cda4f4"
+      "sha256": "fc596d9f26244156c0a8fd01d7ca17825b75a911c9bc118523642d1b5172d260"
     },
     {
       "path": "index.html",
