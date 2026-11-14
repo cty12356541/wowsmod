@@ -52,6 +52,7 @@ def s06(pg):
     pg.evaluate('WM.V.preset("hero", true)'); settle(pg, 4); still(pg)
 
 def sim(pg, env='water', light='day'):
+    pg.wait_for_function('() => !!(window.WM?.store.getState().sim && window.WM.V?.motion)', timeout=30000)
     pg.evaluate('WM.actions.setWorkspace("sim")'); pg.evaluate(f'WM.actions.setEnv({J(env)})'); pg.evaluate(f'WM.actions.setLight({J(light)})')
 
 @scene('07_sim_sailing_wake')
