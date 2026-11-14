@@ -28,6 +28,14 @@ export default function App() {
 function Workbench() {
   const lang = useStore((s) => s.lang);
   const applyMessage = useStore((s) => s.applyMessage);
+  const [compact, setCompact] = useState(() => window.matchMedia('(max-width: 700px)').matches);
+  useEffect(() => {
+    const query = window.matchMedia('(max-width: 700px)');
+    const update = () => setCompact(query.matches);
+    query.addEventListener('change', update);
+    update();
+    return () => query.removeEventListener('change', update);
+  }, []);
   return (
     <RT.Provider delayDuration={450} skipDelayDuration={150}>
       <div className="app" lang={lang === 'zh' ? 'zh-CN' : lang}>
@@ -35,7 +43,7 @@ function Workbench() {
         <WorkbenchNav />
         {applyMessage && <div className="apply-message" role="status">{applyMessage}</div>}
         <OfflineBar />
-        <PanelGroup direction="horizontal" autoSaveId="wm.layout" className="main">
+        <PanelGroup direction={compact ? 'vertical' : 'horizontal'} autoSaveId={compact ? 'wm.layout.compact' : 'wm.layout'} className={'main' + (compact ? ' compact' : '')}>
           <Panel defaultSize={19} minSize={14} maxSize={32} order={1}><LeftPanel /></Panel>
           <PanelResizeHandle className="rh" />
           <Panel minSize={36} order={2}><Viewport /></Panel>

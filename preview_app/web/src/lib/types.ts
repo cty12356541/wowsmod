@@ -22,11 +22,48 @@ export type Capabilities = Record<Capability, boolean> & { reasons: Partial<Reco
 export type LibraryStatus = 'working' | 'review' | 'complete' | 'archived';
 export interface LibraryEntry {
   id: string; path: string; display_name: string; tags: string[]; favorite: boolean; status: LibraryStatus;
-  added_unix: number; opened_unix: number | null; available: boolean; warnings: string[];
+  added_unix: number; opened_unix: number | null; modified_unix?: number | null; available: boolean; warnings: string[];
   project: null | { name: string; version: string; ship: string; ship_key: string; game_build: string; mode: string };
   ship_metadata: { key: string; known: boolean; level: number | null; nation: string | null; species: string | null; name_local: string | null; param: string | null; warning?: string | null };
   install: InstallState;
+  verification?: VerificationRecord | null;
 }
+export type VerificationOutcome = 'passed' | 'issues' | 'failed';
+export interface VerificationRecord {
+  id: string; project_id: string; revision: string; build: string; outcome: VerificationOutcome;
+  scene: string; note: string; evidence: string[]; recorded_unix: number;
+}
+export interface VerificationRequest {
+  expected_revision: string; build: string; outcome: VerificationOutcome; scene: string; note: string; evidence: string[];
+}
+export interface CompatibilityInfo {
+  ok: boolean; project_id: string; project_build: string | null; target_build: string | null;
+  current_revision: string | null; install: InstallState; records: VerificationRecord[];
+  matching_record_id: string | null; warnings: string[];
+}
+export interface ScanCandidate {
+  candidate_id: string; path: string; project: LibraryEntry['project'];
+  status: 'new' | 'registered' | 'invalid'; existing_id: string | null; warning: string | null;
+}
+export interface ScanPreview {
+  ok: boolean; scan_id: string; root: string; candidates: ScanCandidate[];
+  warnings: string[]; visited_dirs: number; truncated: boolean; expires_unix: number;
+}
+export interface ScanImportResult { ok: boolean; entries: unknown[]; already_registered: unknown[]; warnings: string[] }
+export interface ComparisonStatus {
+  ok: boolean; id: string; state: 'queued' | 'rendering' | 'ready' | 'failed' | 'missing';
+  left: { project_id: string; revision: string | null; url: string | null };
+  right: { project_id: string; revision: string | null; url: string | null };
+  camera: import('../render/camera').ExactCamera | null; recipe: unknown; stale: boolean; reason: string | null;
+}
+export interface Checkpoint {
+  id: string; label: string; created_unix: number; revision: string; scope_version: number;
+  file_count: number; total_bytes: number; project_build: string; target_build: string | null;
+  preview: { state: 'pending' | 'ready' | 'failed'; url: string | null; reason: string | null };
+}
+export interface CheckpointList { ok: boolean; checkpoints: Checkpoint[]; scope_version: number; excluded_roots: string[] }
+export interface CheckpointDiff { ok: boolean; checkpoint_revision: string; current_revision: string; added: string[]; removed: string[]; changed: string[]; unchanged_count: number }
+export interface CheckpointRestore { ok: boolean; entry: { id: string; path: string } | null; checkpoint_id: string; revision: string; url: string | null; warnings: string[]; restored_path?: string }
 export interface LibrarySummary {
   ok: boolean; projects: LibraryEntry[]; ships: unknown[]; facets: unknown; warnings: string[];
   game: { available: boolean; path: string | null; build: string | null; version: string | null; running: boolean };

@@ -102,3 +102,66 @@ Selecting/opening a project never triggers either request.
 client, including an explicitly unavailable path; they must not auto-select a
 different client or follow a project manifest that names another installation.
 Existing render and warm-render routes remain compatible.
+
+## Source identity and user verification
+
+`GET /api/v1/library/projects/:id/source-revision` returns
+`{ok,project_id,revision}`. Content identity includes ordinary project source files,
+`mod.toml`, assets, edits, FX and design files; root-level build/cache/install
+directories are excluded. It hashes content rather than relying on timestamps.
+
+`GET .../:id/compatibility` returns current source revision, project and target
+builds, actual install state, historical observations and `matching_record_id`.
+`POST .../:id/verifications` accepts
+`{expected_revision,build,outcome,scene,note,evidence}`, where outcome is
+`passed|issues|failed`. The server rejects a changed source with
+409 `source_changed`. Evidence is descriptive text; the server does not fetch it.
+Only the latest appended observation with matching project/revision/build counts
+as current. Cards show historical records without claiming uncomputed validity.
+
+## Selective scanning
+
+`POST /api/v1/library/scan/preview {root}` discovers without registering. It
+returns `scan_id`, candidates with `new|registered|invalid` status, warnings,
+truncation and expiry. `POST /api/v1/library/scan/import
+{scan_id,candidate_ids}` registers only the selected candidates. Tokens expire
+after ten minutes; at most sixteen scans are retained. Any selected candidate
+whose directory identity or manifest changed makes the entire batch fail with
+409 `scan_changed`. Concurrent existing registrations are returned without
+duplicates. The original `/scan` endpoint retains its register-all behavior.
+
+## Comparing independent variants
+
+`POST /api/v1/library/comparisons {left_id,right_id,refresh?}` queues an ordered
+pair of distinct registered variants of the same ship. `GET
+/api/v1/library/comparisons/:id` returns `queued|rendering|ready|failed|missing`,
+both project IDs, revisions and image URLs, common camera, recipe, stale flag
+and reason. Request/refresh verifies content in a bounded background queue;
+status polling does not repeatedly hash project assets.
+
+Both final images share exact numerical camera position, target, up, FOV,
+clipping planes and aspect. The recipe is 640×360, DPR 1, high quality,
+day/studio, LOD 0, current revision and time zero. Initial library covers are
+explicitly unsynchronized placeholders. The pair becomes ready only after both
+images and their metadata validate and the descriptor is atomically published.
+Source/build/external-resource/geometry/frontend changes invalidate cached pairs.
+Image routes are `/comparisons/:id/:side/:hash.png`.
+
+## Checkpoints and recovery
+
+`GET /api/v1/library/projects/:id/checkpoints` returns saved checkpoints and
+source scope. `POST` accepts `{label,expected_revision}` and captures a verified
+content-addressed source snapshot. Frozen preview generation is asynchronous;
+preview failure leaves the saved source recoverable. The image route is
+`.../:id/checkpoints/:checkpoint/preview/:hash.png`.
+
+`GET .../:id/checkpoints/:checkpoint/diff` reports files added, removed and
+changed relative to the checkpoint. `POST .../:checkpoint/restore
+{destination,expected_revision}` materializes and verifies a new directory,
+then registers a new variant. Existing destinations, source/game/store
+directories and reparse paths are rejected. Recovery never restores installation
+state or overwrites the source. Missing original source still allows recovery.
+If registration fails after successful materialization, the result retains
+`ok:true`, `entry:null`, `restored_path` and actionable warnings; the completed
+directory can be registered later. `expected_revision` identifies the checkpoint
+being restored, not the current mutable source.

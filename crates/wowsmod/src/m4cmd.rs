@@ -803,6 +803,37 @@ mod apply_tests {
     }
 
     #[test]
+    fn apply_dry_run_reports_source_build_mismatch_without_writing() {
+        let f = Fixture::new();
+        let installed = f.project("Installed");
+        let mut candidate = f.project("Candidate");
+        apply_project_inner(&f.cli, &installed.root, false, &[]).unwrap();
+
+        for source_build in ["122", "123", ""] {
+            candidate.cfg.meta.game_build = source_build.into();
+            candidate.save_cfg().unwrap();
+            let before = snap(&f.root);
+            let result = apply_project_inner(&f.cli, &candidate.root, true, &[]).unwrap();
+            assert_eq!(result["ok"], true);
+            assert_eq!(result["target_build"], "123");
+            assert_eq!(result["target_client"], f.cli.game.as_ref().unwrap().display().to_string());
+            assert_eq!(result["previous"][0]["name"], "Installed");
+            assert_eq!(result["manifest_updated"], false);
+            let warnings = result["warnings"].as_array().unwrap();
+            if source_build == "122" {
+                assert!(warnings.iter().any(|w| w.as_str().map(|text|
+                    text.contains("122") && text.contains("123") && text.contains("不同")
+                ).unwrap_or(false)));
+            } else {
+                assert!(warnings.is_empty(), "matching or unspecified build is not a mismatch: {warnings:?}");
+            }
+            assert_eq!(snap(&f.root), before, "dry run changed files for source build {source_build:?}");
+            assert_eq!(registry::names(&registry::load(&f.rm).unwrap()),
+                std::collections::BTreeSet::from(["Installed".into()]));
+        }
+    }
+
+    #[test]
     fn prepare_failure_and_running_game_do_not_mutate_projects_or_client() {
         let f = Fixture::new(); let a = f.project("A"); let b = f.project("B");
         let before = snap(&f.root);

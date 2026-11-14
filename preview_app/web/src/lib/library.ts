@@ -26,7 +26,7 @@ export function createLibraryListLoader(read: () => Promise<LibrarySummary>, pub
 
 export interface LibraryFilters {
   search: string; nations: string[]; levels: string[]; species: string[]; statuses: string[];
-  favorites: boolean; sort: 'opened' | 'added' | 'name';
+  favorites: boolean; sort: 'opened' | 'added' | 'name' | 'modified';
 }
 export const defaultFilters: LibraryFilters = { search: '', nations: [], levels: [], species: [], statuses: [], favorites: false, sort: 'opened' };
 export function libraryRefreshKey(project: Project | null, catalogEpoch: number): string {
@@ -44,7 +44,13 @@ export function filterProjects(projects: LibraryEntry[], filters: LibraryFilters
     const search = [entry.display_name, entry.project?.name, entry.project?.ship, entry.project?.ship_key, meta.name_local, meta.param, ...entry.tags].filter(Boolean).join(' ').toLocaleLowerCase();
     return words.every((word) => search.includes(word));
   }).sort((a, b) => {
-    const order = filters.sort === 'name' ? a.display_name.localeCompare(b.display_name, 'zh-CN') : filters.sort === 'added' ? b.added_unix - a.added_unix : (b.opened_unix || 0) - (a.opened_unix || 0);
+    let order: number;
+    switch (filters.sort) {
+      case 'name': order = a.display_name.localeCompare(b.display_name, 'zh-CN'); break;
+      case 'added': order = b.added_unix - a.added_unix; break;
+      case 'modified': order = (b.modified_unix ?? -1) - (a.modified_unix ?? -1); break;
+      default: order = (b.opened_unix || 0) - (a.opened_unix || 0);
+    }
     return order || a.id.localeCompare(b.id);
   });
 }

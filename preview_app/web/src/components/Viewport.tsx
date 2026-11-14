@@ -31,7 +31,8 @@ export function Viewport() {
   }, []);
   useEffect(() => keyboard(), []);
   const dark = s.light === 'night' || (s.light === 'dusk' && s.env === 'water');
-  const hasA = s.mode !== 'single' && s.workspace === 'review';
+  const wantsA = s.mode !== 'single' && s.workspace === 'review';
+  const hasA = wantsA && s.compareStatus === 'ready';
   const cur = s.steps.find((x) => x.id === (s.viewRev || s.head));
   const b = baseRev(); const baseStep = s.steps.find((x) => x.id === b);
   const baseName = b === 'base' ? t('original') : t('stepN', { n: baseStep?.index ?? '' });
@@ -49,6 +50,12 @@ export function Viewport() {
           <div className="reviewbar"><span>{t('reviewing', { n: cur?.index ?? '', h: s.steps.find((x) => x.id === s.head)?.index ?? '' })}</span>
             <button className="btn ghost" onClick={() => actions.view(s.head!)}>{t('latest')}</button></div>
         )}
+        {wantsA && s.phase === 'ready' && s.compareStatus !== 'ready' && <div className="compare-load-status" role={s.compareStatus === 'error' ? 'alert' : 'status'}>
+          {s.compareStatus === 'error' ? t('compareLoadFailed') : t('compareLoading')}
+          {s.compareProg && <span> {s.compareProg.d}/{s.compareProg.n}</span>}
+          {s.compareError && <div>{s.compareError}</div>}
+          {s.compareStatus === 'error' && <button className="btn" onClick={() => actions.retryComparison()}>{t('retry')}</button>}
+        </div>}
         {s.workspace === 'sim' && <SimHud />}
         {s.workspace === 'sim' && s.camMode === 'game' && <div className="crosshair" />}
         {s.workspace === 'review' && s.phase === 'ready' && !hasA && <div className="vfoot">{t('vpHint')}</div>}

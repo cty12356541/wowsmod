@@ -30,6 +30,9 @@ pub struct PreviewService {
     sessions: Arc<Mutex<HashMap<String, Session>>>,
     epochs: Arc<Mutex<HashMap<String, Arc<AtomicU64>>>>,
     pub(super) thumbnails: Arc<super::thumbnails::ThumbnailCache>,
+    pub(super) scans: Arc<super::scan::ScanSessions>,
+    pub(super) comparisons: Arc<super::comparison::ComparisonCache>,
+    pub(super) checkpoints: Arc<super::checkpoints::CheckpointStore>,
 }
 
 impl PreviewService {
@@ -38,7 +41,10 @@ impl PreviewService {
             else { let (game, _) = game::locate(cli.game.as_deref()); let selected = cli.game.clone().or_else(|| game.as_ref().map(|g| g.root.clone())); (game, selected) };
         Ok(Self { selected_game,
             game, default, home: home.to_path_buf(), sessions: Arc::new(Mutex::new(HashMap::new())), epochs: Arc::new(Mutex::new(HashMap::new())),
-            thumbnails: Arc::new(super::thumbnails::ThumbnailCache::new(home.join("library-thumbnails"))) })
+            thumbnails: Arc::new(super::thumbnails::ThumbnailCache::new(home.join("library-thumbnails"))),
+            scans: Arc::new(super::scan::ScanSessions::default()),
+            comparisons: Arc::new(super::comparison::ComparisonCache::new(home.join("library-comparisons"))),
+            checkpoints: Arc::new(super::checkpoints::CheckpointStore::open(home)?) })
     }
 
     pub fn legacy(st: Arc<PreviewState>) -> Result<Self> {
@@ -46,6 +52,80 @@ impl PreviewService {
     }
 
     pub fn store(&self) -> Result<LibraryStore> { LibraryStore::open(&self.home) }
+
+    pub fn source_revision(&self, id: &str) -> Result<Value> {
+        let root = self.source(id)?;
+        let manifest = crate::project_revision::read_source_manifest(&root)?;
+        Ok(json!({"ok": true, "project_id": id, "revision": manifest.revision}))
+    }
+
+    pub fn list_checkpoints(&self, id: &str) -> Result<Value> {
+        self.store()?.entry(id)?;
+        let mut checkpoints = self.checkpoints.list(id)?;
+        // Persisted pending snapshots survive server restarts. Opening their history
+        // resumes the bounded frozen-source queue; live source files are not required.
+        for checkpoint in checkpoints.iter_mut().filter(|c| c.preview.state == super::checkpoints::PreviewStatus::Pending).take(8) {
+            if let Err(error) = self.checkpoints.queue_preview(id, &checkpoint.id, self.selected_game.clone()) {
+                checkpoint.preview.state = super::checkpoints::PreviewStatus::Failed;
+                checkpoint.preview.reason = Some(format!("{error:#}"));
+            }
+        }
+        Ok(json!({"ok": true, "checkpoints": checkpoints,
+            "scope_version": crate::project_revision::SOURCE_SCOPE_VERSION,
+            "excluded_roots": crate::project_revision::EXCLUDED_ROOTS}))
+    }
+
+    pub fn create_checkpoint(&self, id: &str, request: super::checkpoints::CreateCheckpoint) -> Result<Value> {
+        let root = self.source(id)?;
+        let mut checkpoint = self.checkpoints.create_with_context(id, &root, request, self.game.as_ref().map(|g| g.build.as_str()))?;
+        // A preview failure must not turn a successfully saved source snapshot into a failed save.
+        if let Err(error) = self.checkpoints.queue_preview(id, &checkpoint.id, self.selected_game.clone()) {
+            checkpoint.preview.state = super::checkpoints::PreviewStatus::Failed;
+            checkpoint.preview.reason = Some(format!("{error:#}"));
+        }
+        Ok(json!({"ok": true, "checkpoint": checkpoint}))
+    }
+
+    pub fn restore_checkpoint(&self, id: &str, checkpoint: &str, destination: &Path, revision: &str) -> Result<Value> {
+        let store = self.store()?;
+        store.entry(id)?;
+        let mut forbidden: Vec<_> = store.entries()?.into_iter().map(|e| e.path).collect();
+        if let Some(game) = &self.selected_game { forbidden.push(game.clone()); }
+        let restored = self.checkpoints.restore_with_context(id, checkpoint, destination, revision, &forbidden)?;
+        let mut warnings = restored.warnings;
+        let entry = match store.add(&restored.path) {
+            Ok(entry) => Some(entry),
+            Err(error) => { warnings.push(format!("源文件已恢复，登记失败；可通过添加项目登记 {}：{error:#}", restored.path.display())); None }
+        };
+        let url = entry.as_ref().map(|e| format!("/?project={}", super::thumbnails::encode_id(&e.id)));
+        Ok(json!({"ok": true, "entry": entry, "checkpoint_id": restored.checkpoint_id,
+            "revision": restored.revision, "url": url, "warnings": warnings, "restored_path": restored.path}))
+    }
+
+    pub fn compatibility(&self, id: &str) -> Result<Value> {
+        let entry = self.store()?.entry(id)?;
+        let records = crate::workbench_records::VerificationStore::open(&self.home)?.list(id)?;
+        let mut warnings = vec![];
+        let current_revision = match crate::project_revision::read_source_manifest(&entry.path) {
+            Ok(manifest) => Some(manifest.revision),
+            Err(e) => { warnings.push(format!("{e:#}")); None }
+        };
+        let project_build = crate::library::read_project_config(&entry.path).ok().map(|config| config.meta.game_build);
+        let target_build = self.game.as_ref().map(|game| game.build.as_str());
+        let matching_record_id = current_revision.as_deref().zip(target_build)
+            .and_then(|(revision, build)| crate::workbench_records::latest_matching(&records, id, revision, build))
+            .map(|record| record.id.clone());
+        Ok(json!({"ok": true, "project_id": id, "project_build": project_build,
+            "target_build": target_build, "current_revision": current_revision,
+            "install": install_status(&entry.path, self.game.as_ref()), "records": records,
+            "matching_record_id": matching_record_id, "warnings": warnings}))
+    }
+
+    pub fn record_verification(&self, id: &str, request: crate::workbench_records::VerificationRequest) -> Result<Value> {
+        let root = self.source(id)?;
+        let record = crate::workbench_records::VerificationStore::open(&self.home)?.append(id, &root, request)?;
+        Ok(json!({"ok": true, "record": record}))
+    }
 
     pub fn health(&self) -> Value {
         json!({"ok": true, "api_version": 1, "server": "wowsmod", "version": env!("CARGO_PKG_VERSION"), "library_mode": self.default.is_none(), "time": super::state::iso_now()})
@@ -59,6 +139,8 @@ impl PreviewService {
         let mut levels = std::collections::BTreeSet::new();
         let mut species = std::collections::BTreeSet::new();
         let mut projects = vec![];
+        let records = crate::workbench_records::VerificationStore::open(&self.home)?;
+        let mut record_warnings = vec![];
         for entry in listing.entries {
             let ship = metadata.lookup(entry.project.as_ref().map(|p| p.ship.as_str()).unwrap_or_default());
             let mut value = serde_json::to_value(&entry)?;
@@ -71,9 +153,14 @@ impl PreviewService {
             group["projects"] = json!(group["projects"].as_u64().unwrap_or(0) + 1);
             value["ship_metadata"] = serde_json::to_value(ship)?;
             value["install"] = install_status(&entry.entry.path, self.game.as_ref());
+            value["verification"] = match records.latest(&entry.entry.id) {
+                Ok(record) => serde_json::to_value(record)?,
+                Err(e) => { record_warnings.push(format!("{}: {e:#}", entry.entry.id)); Value::Null }
+            };
             projects.push(value);
         }
         let mut warnings = listing.warnings;
+        warnings.extend(record_warnings);
         warnings.extend(metadata.source.warnings.clone());
         Ok(json!({"ok": true, "projects": projects, "ships": ships.into_values().collect::<Vec<_>>(),
             "facets": {"nations": nations, "levels": levels, "species": species, "statuses": ["working", "review", "complete", "archived"]},
@@ -92,6 +179,15 @@ impl PreviewService {
     }
 
     pub fn session(&self, id: &str) -> Result<Arc<PreviewState>> {
+        self.acquire_session(id, None)
+    }
+
+    /// Comparisons verify source bytes, so they must never inherit a metadata-only session hit.
+    pub(super) fn comparison_session(&self, id: &str, context: &str) -> Result<Arc<PreviewState>> {
+        self.acquire_session(id, Some(context))
+    }
+
+    fn acquire_session(&self, id: &str, comparison_context: Option<&str>) -> Result<Arc<PreviewState>> {
         // The session gate is outermost. Job checks release their guard before
         // catalog mutation takes its file lock; job workers never take this gate.
         // Path resolution belongs inside this gate, so a queued request cannot
@@ -102,11 +198,13 @@ impl PreviewService {
             session.used = Instant::now();
             session.retired.retain(|state| state.strong_count() > 0);
             let same_source = same_path(&session.state.project.root, &source);
-            if same_source && session.fingerprint == super::state::project_fingerprint(&source) {
+            if comparison_context.is_none() && same_source && session.fingerprint == super::state::project_fingerprint(&source) {
                 return Ok(Arc::clone(&session.state));
             }
             if !same_source && session_busy(session) { bail!("session_busy: 项目任务尚未完成，请稍后重新定位"); }
             let (state, fingerprint) = self.open_snapshot(id, &source, Some(&session.state))?;
+            if let Some(context) = comparison_context { state.prepare_comparison_geometry(context)?; }
+            let fingerprint = if comparison_context.is_some() { state.fingerprint() } else { fingerprint };
             if Arc::strong_count(&session.state) > 1 { session.retired.push(Arc::downgrade(&session.state)); }
             // Capture after preview generation: its own cache output is the
             // baseline, not another input edit that perpetually rebuilds itself.
@@ -121,6 +219,8 @@ impl PreviewService {
             else { bail!("session_busy: 预览会话正在使用，请等待任务结束后重试"); }
         }
         let (state, fingerprint) = self.open_snapshot(id, &source, None)?;
+        if let Some(context) = comparison_context { state.prepare_comparison_geometry(context)?; }
+        let fingerprint = if comparison_context.is_some() { state.fingerprint() } else { fingerprint };
         sessions.insert(id.to_string(), Session { state: Arc::clone(&state), used: Instant::now(), fingerprint, retired: vec![] });
         Ok(state)
     }
@@ -193,22 +293,23 @@ pub fn install_status(root: &Path, game: Option<&game::GameInstall>) -> Value {
     let m = matches[0];
     let check = || -> Result<(&str, Option<String>)> {
         if m.game_build != game.build { return Ok(("unknown", Some("安装登记的构建号与当前客户端不同".into()))); }
-        let project = Project::open(root)?;
+        let root = std::path::absolute(root)?;
+        let config = crate::library::read_project_config(&root)?;
         let mut source = HashMap::new();
-        for path in project.files()? {
-            let rel = crate::modproj::rel_slash_pub(&project.assets(), &path).to_lowercase();
+        for path in crate::library::source_asset_files(&root)? {
+            let rel = crate::modproj::rel_slash_pub(&root.join(crate::modproj::ASSETS), &path).to_lowercase();
             source.insert(rel, path);
         }
-        let mut changed = project.cfg.install.mode != m.mode || project.cfg.meta.name != m.name
-            || project.cfg.meta.version != m.version || crate::ship_catalog::canonical_ship_key(&project.cfg.meta.ship) != crate::ship_catalog::canonical_ship_key(&m.ship);
+        let mut changed = config.install.mode != m.mode || config.meta.name != m.name
+            || config.meta.version != m.version || crate::ship_catalog::canonical_ship_key(&config.meta.ship) != crate::ship_catalog::canonical_ship_key(&m.ship);
         for key in &m.files {
             let p = reg.paths.get(key).ok_or_else(|| anyhow!("登记文件缺失: {key}"))?;
             // Refuse malformed registry paths before reading outside the selected client's root.
             if p.rel.contains(':') || p.rel.replace('\\', "/").split('/').any(|c| c == ".." || c.is_empty()) { bail!("登记文件路径无效: {}", p.rel); }
-            let installed = std::fs::read(game.res_mods.join(&p.rel))?;
+            let installed = crate::project_revision::read_plain_file(&game.res_mods.join(&p.rel), 512 * 1024 * 1024)?;
             if crate::modproj::sha256_hex(&installed) != p.sha256 { return Ok(("unknown", Some(format!("已应用文件缺失或已被修改: {}", p.rel)))); }
             if let Some(path) = source.remove(key) {
-                let raw = std::fs::read(path)?;
+                let raw = crate::project_revision::read_plain_file(&path, 512 * 1024 * 1024)?;
                 if crate::modproj::is_binary_stub(&p.rel, &raw) {
                     // A previously custom resource changed back to a placeholder:
                     // its effective application now needs game-fill, not the
@@ -246,6 +347,81 @@ mod tests {
         }
     }
     impl Drop for Fixture { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.root); } }
+    #[cfg(windows)]
+    #[test]
+    fn listing_installed_project_rejects_asset_junction_without_following_it() {
+        let f = Fixture::new(); let project = f.project("linked-installed"); let game = f.game("safe-client");
+        std::fs::create_dir_all(&game.res_mods).unwrap();
+        std::fs::write(project.assets().join("paint.txt"), b"paint").unwrap();
+        let info = ModInfo { name: project.cfg.meta.name.clone(), version: project.cfg.meta.version.clone(), ship: project.cfg.meta.ship.clone(), mode: "loose".into(), project_dir: project.root.clone(), source: "project".into(), game_build: "123".into() };
+        crate::registry::install(&game.res_mods, &info, &[InstallItem { rel: "paint.txt".into(), data: b"paint".to_vec(), origin: "project".into() }], &Opts { dry_run: false, allow_same_ship: false }).unwrap();
+        let home = f.root.join("home");
+        let mut service = PreviewService::new(&selected_cli(Some(game.root.clone())), &home, None).unwrap();
+        service.store().unwrap().add(&project.root).unwrap(); service.game = Some(game);
+        assert_eq!(service.listing().unwrap()["projects"][0]["install"]["state"], "installed");
+        let assets = project.root.join("assets").join("res_mods");
+        let link = assets.join("cycle");
+        let output = std::process::Command::new("cmd").args(["/C", "mklink", "/J"]).arg(&link).arg(&assets).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        let listing = service.listing().unwrap();
+        assert!(listing["projects"][0]["modified_unix"].is_null());
+        assert_eq!(listing["projects"][0]["install"]["state"], "unknown");
+        assert!(!listing["projects"][0]["warnings"].as_array().unwrap().is_empty());
+        std::fs::remove_dir(&link).unwrap();
+    }
+    #[test]
+    fn opening_history_resumes_pending_checkpoint_after_service_restart() {
+        let f = Fixture::new(); let project = f.project("checkpoint-resume");
+        let home = f.root.join("home"); let cli = selected_cli(Some(f.root.join("no-client")));
+        let first = PreviewService::new(&cli, &home, None).unwrap();
+        let id = first.store().unwrap().add(&project.root).unwrap().id;
+        let request = super::super::checkpoints::CreateCheckpoint { label: "pending".into(), expected_revision: crate::project_revision::read_source_manifest(&project.root).unwrap().revision };
+        let saved = first.checkpoints.create_with_context(&id, &project.root, request, Some("unavailable-captured-client")).unwrap();
+        drop(first);
+        std::fs::remove_dir_all(&project.root).unwrap();
+        let reopened = PreviewService::new(&cli, &home, None).unwrap();
+        assert_eq!(reopened.checkpoints.list(&id).unwrap()[0].preview.state, super::super::checkpoints::PreviewStatus::Pending);
+        reopened.list_checkpoints(&id).unwrap();
+        let until = Instant::now() + std::time::Duration::from_secs(3);
+        loop {
+            let current = reopened.checkpoints.list(&id).unwrap().remove(0);
+            if current.preview.state != super::super::checkpoints::PreviewStatus::Pending {
+                assert_eq!(current.id, saved.id); assert_eq!(current.revision, saved.revision);
+                assert_eq!(current.preview.state, super::super::checkpoints::PreviewStatus::Failed);
+                assert!(current.preview.reason.unwrap().contains("build"));
+                break;
+            }
+            assert!(Instant::now() < until, "reopened pending preview never resumed");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn comparison_refresh_pins_fresh_materials_and_preserves_session_jobs() {
+        let f = Fixture::new(); let project = f.project("comparison-fresh");
+        let material_dir = project.assets().join("PnFMods/same/UNKNOWN");
+        std::fs::create_dir_all(&material_dir).unwrap();
+        let material = material_dir.join("paint.mfm");
+        let value = |n| format!("<mfm><fx>PBS_ship.fx</fx><property>g_detailScaleU<Float>{n}</Float></property></mfm>");
+        std::fs::write(&material, value(3)).unwrap();
+        let stamp = std::fs::metadata(&material).unwrap().modified().unwrap();
+        let cache = project.root.join(".wowsmod/cache"); std::fs::create_dir_all(&cache).unwrap();
+        std::fs::write(cache.join("geometry.glb"), b"custom geometry").unwrap();
+        let service = PreviewService::new(&selected_cli(Some(f.root.join("no-client"))), &f.root.join("home"), None).unwrap();
+        let id = service.store().unwrap().add(&project.root).unwrap().id;
+        let old = service.session(&id).unwrap();
+        old.jobs.lock().unwrap().insert("kept".into(), json!({"state":"done"}));
+        std::fs::write(&material, value(7)).unwrap();
+        std::fs::File::options().write(true).open(&material).unwrap().set_times(std::fs::FileTimes::new().set_modified(stamp)).unwrap();
+        let fresh = service.comparison_session(&id, "context").unwrap();
+        assert!(!Arc::ptr_eq(&old, &fresh));
+        assert_eq!(fresh.model_view(None).unwrap()["materials"]["paint.mfm"]["params"]["g_detailScaleU"], 7.0);
+        assert_eq!(fresh.jobs.lock().unwrap()["kept"]["state"], "done");
+        assert!(Arc::ptr_eq(&fresh, &service.session(&id).unwrap()), "prepared cache fingerprint must match the published session");
+        assert!(service.remove(&id).is_err(), "retired and current render leases block removal");
+        assert_eq!(std::fs::read(cache.join("geometry.glb")).unwrap(), b"custom geometry", "unmarked authored cache is preserved");
+    }
+
     #[test]
     fn installed_identity_and_content_are_independent_from_name_and_revision() {
         let f = Fixture::new(); let mut a = f.project("a"); let b = f.project("b"); let game = f.game("client");

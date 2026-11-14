@@ -89,12 +89,13 @@ test('unmount rejects a late same-identity simulation result', async () => {
   assert.equal(viewerSimulation.length, count); assert.equal(useStore.getState().sim, null);
 });
 
-test('boot finishes both material sides before starting optional simulation', async () => {
+for (const mode of ['single', 'split']) test(`${mode} boot finishes its required full material sides before optional simulation`, async () => {
   disposeWorkbench(); ship = 'F'; simulation = true; pendingSim = true;
+  useStore.setState({ mode, workspace: 'review' });
   const before = simRequests;
   const B = Promise.withResolvers(), A = Promise.withResolvers();
   const started = [], committed = [];
-  const target = { ...fakeViewer, async applyManifest(side) {
+  const target = { ...fakeViewer, mode: 'single', setMode(next) { this.mode = next; }, async applyManifest(side) {
     started.push(side);
     await (side === 'B' ? B.promise : A.promise);
     committed.push(side);
@@ -110,11 +111,15 @@ test('boot finishes both material sides before starting optional simulation', as
     await waitFor(() => started.length || simRequests > before);
     assert.equal(simRequests, before, 'simulation must not start ahead of B materials');
     assert.deepEqual(started, ['B']); assert.deepEqual(ready, []);
-    B.resolve(); await waitFor(() => started.includes('A'));
-    assert.equal(simRequests, before, 'simulation must not start ahead of A materials');
-    assert.deepEqual(committed, ['B']); assert.deepEqual(ready, []);
-    A.resolve(); await waitFor(() => bootFinished && typeof pendingSim === 'function');
-    assert.deepEqual(ready.at(-1), ['B', 'A']);
+    B.resolve();
+    if (mode === 'split') {
+      await waitFor(() => started.includes('A'));
+      assert.equal(simRequests, before, 'comparison startup must not start ahead of A materials');
+      assert.deepEqual(committed, ['B']); assert.deepEqual(ready, []);
+      A.resolve();
+    }
+    await waitFor(() => bootFinished && typeof pendingSim === 'function');
+    assert.deepEqual(ready.at(-1), mode === 'single' ? ['B'] : ['B', 'A']);
     assert.equal(useStore.getState().sim, null);
     await Promise.all([resync(), resync()]);
     assert.equal(simRequests, before + 1);
@@ -123,7 +128,7 @@ test('boot finishes both material sides before starting optional simulation', as
   } finally {
     unsubscribe(); B.resolve(); A.resolve();
     if (typeof pendingSim === 'function') pendingSim();
-    disposeWorkbench(); await loading;
+    disposeWorkbench(); useStore.setState({ mode: 'single' }); await loading;
   }
 });
 

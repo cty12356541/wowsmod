@@ -10,7 +10,7 @@ import { getTex, FALLBACK, setAniso, texGC, texGpuBytes, clearTexCache } from '.
 import type { Manifest, MaterialDef, SimData } from '../lib/types';
 import * as S from './shaders';
 import { palette, gameLook, type EnvName, type LightName, type Palette, type LookName, type GameLook } from './env';
-import { ShipMotion, Trail, Particles, makeMount, poseMount, stepMount, mulberry32, type Mount, type Telegraph } from './sim';
+import { ShipMotion, Trail, Particles, makeMount, mountReadiness, poseMount, stepMount, mulberry32, type FireReadiness, type Mount, type Telegraph } from './sim';
 
 const T = THREE;
 const lin = (hex: string) => new T.Color(hex).convertSRGBToLinear();
@@ -53,8 +53,9 @@ function expandMeshBounds(box: THREE.Box3, mesh: THREE.Mesh) {
 
 export interface SimSnapshot {
   speedKn: number; tel: Telegraph; rudder: number; rudderCmd: number; heading: number; heel: number; roll: number; pitch: number;
-  mounts: { id: string; group: string; rigged: boolean; yaw: number; pitch: number; wantYaw: number; aimed: boolean; inSector: boolean; reload: number; reloadMax: number }[];
-  lod: Record<string, number>; camDist: number; aim: { az: number; distM: number } | null;
+  mounts: { id: string; group: string; rigged: boolean; yaw: number; pitch: number; wantYaw: number; aimed: boolean; inSector: boolean; reload: number; reloadMax: number; readiness: FireReadiness }[];
+  lod: Record<string, number>; availableLods: number[]; autoLodAvailable: boolean;
+  camDist: number; aim: { az: number; distM: number } | null;
 }
 
 export interface ViewerOpts { quality?: Quality; preserve?: boolean; fixed?: [number, number]; deterministic?: boolean; onContextLost?: () => void }
@@ -73,6 +74,8 @@ export class Viewer {
   parts: Record<string, PartRec> = {}; meshes: THREE.Mesh[] = [];
   sets: { A: Record<string, THREE.Material>; B: Record<string, THREE.Material> } = { A: {}, B: {} };
   changedMfm = new Set<string>(); matCache = new Map<string, THREE.MeshStandardMaterial>(); neutral: THREE.MeshStandardMaterial | null = null;
+  private baselineSignatures: Record<string, string> | null = null;
+  private retiredMaterials = new Set<THREE.Material>();
   mode: Mode = 'single'; channel = 0; env: EnvName = 'studio'; light: LightName = 'day'; pal: Palette = palette('studio', 'day');
   /** 外观: game = 港口对齐(默认, 用于定稿与验收), studio = 影棚展台 */
   look: LookName = 'game'; lookOv: Partial<GameLook> = {}; envSkyMat!: THREE.ShaderMaterial;
@@ -88,6 +91,7 @@ export class Viewer {
   mounts: Mount[] = []; aimMarker!: THREE.Mesh;
   wake!: Trail; bowL!: Trail; bowR!: Trail; sideFoam!: THREE.Mesh; foamMat!: THREE.ShaderMaterial; particles!: Particles; rng = mulberry32(7);
   lodMode: 'auto' | number = 0; lodBias = 1; lodTint = false; reloadReal = true; emitAcc = 0; freeCamWorld: { pos: THREE.Vector3; tgt: THREE.Vector3 } | null = null;
+  availableLods: number[] = []; autoLodAvailable = false;
   fx: FxTheme | null = null; fxNodes: THREE.Object3D[] = []; funnelAcc = 0;
   footprint: { z: number; w: number }[] = []; shadowTick = 0; emisOverride = -1; emisOvSpeed = 1; singleIdx: Record<string, number> = {};
 
@@ -296,27 +300,42 @@ export class Viewer {
     }
     root.updateMatrixWorld(true);
     const box = new T.Box3();
+    const availableLods = new Set<number>();
     // 特效挂点(extras.fx: HP_FX_Smoke_* / HP_FX_WakeTrace* …)不是部件, 单独收起来
     this.fxNodes = root.children.filter((o) => o.userData && o.userData.fx);
     // 顶层节点 = 部件（船体分段 / 挂点）
     root.children.forEach((top) => {
       if (top.userData && top.userData.fx) return;
       const pid = top.userData.part || top.name;
-      const p: PartRec = this.parts[pid] = { id: pid, meshes: [], visible: true, verts: 0, tris: 0, lods: top.userData.lods || [{ lod: 0, extent: 1e9 }], lod: 0, center: new T.Vector3(), top };
-      const pb = new T.Box3();
+      const p: PartRec = this.parts[pid] = { id: pid, meshes: [], visible: true, verts: 0, tris: 0, lods: [], lod: -1, center: new T.Vector3(), top };
+      const levels = new Set<number>();
       top.traverse((o: any) => {
         if (!o.isMesh) return;
         o.userData.part = pid; p.meshes.push(o); this.meshes.push(o);
-        if ((o.userData.lod || 0) === 0) {
-          const g = o.geometry; p.verts += g.attributes.position.count; p.tris += (g.index ? g.index.count : g.attributes.position.count) / 3;
-          expandMeshBounds(pb, o);
-        }
+        levels.add(o.userData.lod);
         o.userData.pickable = true; o.onBeforeRender = this.onMeshRender;
       });
+      const declared = new Map<number, number>();
+      for (const { lod, extent } of top.userData.lods || []) declared.set(lod, extent);
+      p.lods = [...levels].sort((a, b) => a - b).map((lod) => {
+        availableLods.add(lod);
+        return { lod, extent: declared.get(lod) ?? Infinity };
+      });
+      const pb = new T.Box3();
+      for (const mesh of p.meshes) {
+        if (mesh.userData.lod !== p.lods[0]?.lod) continue;
+        const g = mesh.geometry;
+        p.verts += g.attributes.position.count;
+        p.tris += (g.index?.count ?? g.attributes.position.count) / 3;
+        expandMeshBounds(pb, mesh);
+      }
       if (!pb.isEmpty()) { box.union(pb); pb.getCenter(p.center); }
     });
+    this.availableLods = [...availableLods].sort((a, b) => a - b);
+    this.autoLodAvailable = Object.values(this.parts).some((p) => p.lods.length > 1 && Number.isFinite(p.lods[0].extent));
     if (!box.isEmpty()) { this.BOX = box; this.fitStage(); }
     this.ship = root; this.shipFrame.add(root);
+    this.lodMode = this.resolveLodMode(this.lodMode);
     // model animate: 由 .seq 采样的独立模型(extras.anim.frames = glTF 世界矩阵)
     this.animNodes = root.children.filter((o: any) => o.userData.anim && o.userData.anim.frames && o.userData.anim.frames.length);
     this.meshes.forEach((m) => { m.material = this.neutralMat(); this.applyMeshFlags(m, m.material as any); });
@@ -326,8 +345,10 @@ export class Viewer {
     this.renderer.shadowMap.needsUpdate = true;
     if (firstGeometry && !options.preserveCamera && !this.cameraEdited) this.goTo(this.presetPose('deck')!, true);
     const out: Record<string, any> = {}; let tv = 0, tt = 0;
-    Object.values(this.parts).forEach((p) => { out[p.id] = { verts: p.verts, tris: p.tris, prims: p.meshes.filter((m) => !m.userData.lod).length, lods: p.lods.length }; tv += p.verts; tt += p.tris; });
-    return { parts: out, verts: tv, tris: tt, prims: this.meshes.filter((m) => !m.userData.lod).length, bounds: { min: this.BOX.min.toArray(), max: this.BOX.max.toArray() } };
+    let prims = 0;
+    Object.values(this.parts).forEach((p) => { const n = p.meshes.filter((m) => m.userData.lod === p.lods[0]?.lod).length;
+      out[p.id] = { verts: p.verts, tris: p.tris, prims: n, lods: p.lods.length }; tv += p.verts; tt += p.tris; prims += n; });
+    return { parts: out, verts: tv, tris: tt, prims, bounds: { min: this.BOX.min.toArray(), max: this.BOX.max.toArray() } };
   }
 
   /** 取景用的采样点（LOD0 顶点抽样，约 6000 个）：比包围盒角点紧，斜视角不会留大片空白 */
@@ -450,6 +471,11 @@ export class Viewer {
   }
   private static SLOTS: [string, boolean][] = [['a', true], ['n', false], ['mg', false], ['ao', false]];
   private sigOf(def: MaterialDef) { const t: any = def.textures || {}; return [def.family, JSON.stringify(def.params || {}), ...Viewer.SLOTS.map(([s]) => t[s] ? `${t[s].url}|${t[s].hash}` : '-')].join('|'); }
+  /** Change highlighting only needs signatures, not an invisible baseline's PNGs. */
+  setBaselineManifest(manifest: Manifest) {
+    this.baselineSignatures = Object.fromEntries(Object.entries(manifest.materials || {}).map(([mfm, def]) => [mfm, this.sigOf(def) + '|' + this.Q.tex]));
+    this.recomputeChanged(); this.poke();
+  }
 
   async applyManifest(side: 'A' | 'B', manifest: Manifest, onProgress?: (d: number, t: number) => void, isCurrent: () => boolean = () => true) {
     const mats = manifest.materials || {}, max = this.Q.tex;
@@ -457,22 +483,33 @@ export class Viewer {
     let done = 0, total = 0; const pending: Promise<void>[] = [];
     Object.entries(mats).forEach(([mfm, def]) => {
       const sig = this.sigOf(def) + '|' + max; next[mfm] = sig;
-      if (this.matCache.has(sig)) return;
+      const cached = this.matCache.get(sig);
+      if (cached && !cached.userData.textureFailures) return;
       const tex: Record<string, THREE.Texture> = {}, defT: any = def.textures || {};
+      let failed = false;
       pending.push(Promise.all(Viewer.SLOTS.map(async ([slot, srgb]) => {
         const ti = defT[slot]; if (!ti) return;
         if (ti.missing || !ti.url) { result.missing.push(ti.name || mfm + ':' + slot); return; }
         total++;
-        try { tex[slot] = await getTex(ti, { srgb, max }); } catch { result.failed.push(ti.name); }
+        try { tex[slot] = await getTex(ti, { srgb, max }); } catch { failed = true; result.failed.push(ti.name); }
         done++; onProgress && onProgress(done, total);
-      })).then(() => { if (!this.disposed && isCurrent() && !this.matCache.has(sig)) this.matCache.set(sig, this.buildMaterial(def, tex, sig)); }));
+      })).then(() => {
+        const previous = this.matCache.get(sig);
+        if (!this.disposed && isCurrent() && (!previous || previous.userData.textureFailures)) {
+          const material = this.buildMaterial(def, tex, sig); material.userData.textureFailures = failed;
+          if (previous) (this.retiredMaterials ??= new Set()).add(previous);
+          this.matCache.set(sig, material);
+        }
+      }));
     });
     onProgress && onProgress(done, total);
     await Promise.all(pending);
     // The caller can be superseded while getTex is pending. Check before any
     // visible commit; checking after this promise returns would be too late.
     if (this.disposed || !isCurrent()) return result;
-    if (manifest.camo && manifest.camo.color0) this.U.uCamoCol.value.setRGB(...manifest.camo.color0);
+    // A is only made visible once it is complete; a failed request can be retried.
+    if (side === 'A' && result.failed.length) return result;
+    if (side === 'B' && manifest.camo && manifest.camo.color0) this.U.uCamoCol.value.setRGB(...manifest.camo.color0);
     this.sets[side] = {}; Object.entries(next).forEach(([mfm, sig]) => { this.sets[side][mfm] = this.matCache.get(sig)!; });
     this.recomputeChanged();
     if (side === 'B') this.meshes.forEach((m) => { const mt = this.sets.B[m.userData.mfm]; if (mt) { m.material = mt; this.applyMeshFlags(m, mt); } });
@@ -480,10 +517,17 @@ export class Viewer {
     return result;
   }
   clearSide(side: 'A' | 'B') { this.sets[side] = {}; this.recomputeChanged(); this.poke(); }
-  private recomputeChanged() { this.changedMfm = new Set(); Object.keys(this.sets.B).forEach((mfm) => { if (this.sets.A[mfm] && this.sets.A[mfm] !== this.sets.B[mfm]) this.changedMfm.add(mfm); }); }
+  private recomputeChanged() {
+    this.changedMfm = new Set();
+    Object.keys(this.sets.B).forEach((mfm) => {
+      const baseline = this.baselineSignatures?.[mfm];
+      if (baseline ? baseline !== this.sets.B[mfm].userData.sig : this.sets.A[mfm] && this.sets.A[mfm] !== this.sets.B[mfm]) this.changedMfm.add(mfm);
+    });
+  }
   gc() {
     const used = new Set([...Object.values(this.sets.A), ...Object.values(this.sets.B)]); const keep = new Set<THREE.Texture>();
     this.matCache.forEach((m, k) => { if (used.has(m)) { [m.map, m.normalMap, m.roughnessMap, m.userData.aoTex].forEach((t) => t && keep.add(t)); } else { m.dispose(); this.matCache.delete(k); } });
+    this.retiredMaterials?.forEach((m) => { if (!used.has(m)) { m.dispose(); this.retiredMaterials.delete(m); } });
     return texGC(keep);
   }
   changedParts() { const s = new Set<string>(); this.meshes.forEach((m) => { if (this.changedMfm.has(m.userData.mfm)) s.add(m.userData.part); }); return [...s]; }
@@ -491,23 +535,43 @@ export class Viewer {
   emissiveAnimModes() { const s = new Set<number>(); Object.values(this.sets.B).forEach((m: any) => { if (m && m.userData.family === 'emissive') s.add(0); }); return s; }
 
   // ---------------------------------------------------------------- LOD
-  /** 自动：相机到部件中心的距离 ≤ extent × 偏移 的最低一级；超过最后一级的 extent 就不画（与 BigWorld .model 链一致） */
+  /** 自动使用真实级别的切换距离，超过最后一级时保留该级别。 */
   applyLod(force = false) {
-    const camL = this.shipFrame.worldToLocal(this.camera.position.clone());
+    const mode = this.lodMode;
+    const camL = mode === 'auto' ? this.shipFrame.worldToLocal(this.camera.position.clone()) : null;
     let changed = false;
     for (const p of Object.values(this.parts)) {
-      let lod = 0;
-      if (this.lodMode === 'auto') {
-        const d = camL.distanceTo(p.center); lod = -1;
-        for (const l of p.lods) { if (d <= l.extent * this.lodBias) { lod = l.lod; break; } }
-      } else lod = Math.min(this.lodMode as number, p.lods.length - 1);
-      if (lod !== p.lod || force) { p.lod = lod; changed = true; p.meshes.forEach((m) => { m.visible = p.visible && (m.userData.lod || 0) === lod; }); }
+      let lod = p.lods[0]?.lod ?? -1;
+      if (mode === 'auto' && camL && p.lods.length > 1) {
+        const d = camL.distanceTo(p.center);
+        lod = (p.lods.find((l) => d <= l.extent * this.lodBias) ?? p.lods[p.lods.length - 1]).lod;
+      } else if (mode !== 'auto') {
+        for (const level of p.lods) {
+          if (level.lod > mode) break;
+          lod = level.lod;
+        }
+      }
+      if (lod !== p.lod || force) { p.lod = lod; changed = true; p.meshes.forEach((m) => { m.visible = p.visible && m.userData.lod === lod; }); }
     }
     if (changed) this.renderer.shadowMap.needsUpdate = true;
     return changed;
   }
-  lodState() { const o: Record<string, number> = {}; Object.values(this.parts).forEach((p) => { o[p.id] = p.lod; }); return o; }
-  setLodMode(m: 'auto' | number) { this.lodMode = m; this.applyLod(true); this.poke(); }
+  lodState() {
+    return Object.fromEntries(Object.values(this.parts).filter((p) => p.lods.length).map((p) => [p.id, p.visible ? p.lod : -1]));
+  }
+  resolveLodMode(m: 'auto' | number) {
+    if (!this.ship) return m;
+    const levels = this.availableLods;
+    if (!levels.length) return m;
+    if (m === 'auto') return this.autoLodAvailable ? m : levels[0];
+    let fallback = levels[0];
+    for (const level of levels) {
+      if (level > m) break;
+      fallback = level;
+    }
+    return fallback;
+  }
+  setLodMode(m: 'auto' | number) { this.lodMode = this.resolveLodMode(m); this.applyLod(true); this.poke(); return this.lodMode; }
   setLodBias(b: number) { this.lodBias = b; this.applyLod(); this.poke(); }
   setLodTint(on: boolean) { this.lodTint = on; this.poke(); }
 
@@ -666,8 +730,9 @@ export class Viewer {
     if (this.motion) this.motion.m2u = (this.BOX.max.z - this.BOX.min.z) / (this.simData.ship.size_m?.[0] || 250);
     this.mounts = []; this.pendingShots = []; let i = 0;
     for (const [id, spec] of Object.entries(this.simData.mounts)) {
-      const p = this.parts[id] || Object.values(this.parts).find((q) => q.id.startsWith(id + '|')); if (!p) continue;
-      const m = makeMount(id, spec, p.top, i++);
+      const p = this.parts[id] || Object.values(this.parts).find((q) => q.id.startsWith(id + '|'));
+      if (!p && spec.group === 'aa') continue;
+      const m = makeMount(id, spec, p?.top ?? new T.Group(), i++);
       this.mounts.push(m);
     }
   }
@@ -785,9 +850,9 @@ export class Viewer {
     }
   }
   readyMounts(group: string) {
-    if (!this.simOn || !this.combat || this.aimBearing === null) return [];
+    const context = { simOn: this.simOn, combat: this.combat, hasTarget: this.aimAz() !== null };
     this.stepMounts(0);
-    return this.mounts.filter((m) => m.spec.group === group && m.rigged && m.aimed && m.reload <= 0);
+    return this.mounts.filter((m) => m.spec.group === group && mountReadiness(m, context).ready);
   }
   /** 开火：salvo = 该组所有就绪炮塔（按序号错开 40 ms）；single = 下一座就绪炮塔 */
   fire(group: 'main' | 'secondary', how: 'salvo' | 'single', force = false) {
@@ -902,9 +967,11 @@ export class Viewer {
   simSnapshot(): SimSnapshot | null {
     const mo = this.motion; if (!mo) return null;
     const az = this.aimAz();
+    const context = { simOn: this.simOn, combat: this.combat, hasTarget: az !== null };
+    this.stepMounts(0);
     return { speedKn: mo.speedKn, tel: mo.tel, rudder: mo.rudder, rudderCmd: mo.rudderCmd, heading: ((-mo.psi * 180 / Math.PI) % 360 + 360) % 360, heel: mo.heel, roll: mo.roll, pitch: mo.pitch,
-      mounts: this.mounts.map((m) => ({ id: m.id, group: m.spec.group, rigged: m.rigged, yaw: m.yaw, pitch: m.pitch, wantYaw: m.wantYaw, aimed: m.aimed, inSector: m.inSector, reload: m.reload, reloadMax: this.reloadReal ? (m.spec.shotDelay || 5) : Math.min(m.spec.shotDelay || 2, 2) })),
-      lod: this.lodState(), camDist: this.camDistance(), aim: az === null ? null : { az: ((az + 540) % 360) - 180, distM: this.aimDistKm * 1000 } };
+      mounts: this.mounts.map((m) => ({ id: m.id, group: m.spec.group, rigged: m.rigged, yaw: m.yaw, pitch: m.pitch, wantYaw: m.wantYaw, aimed: m.aimed, inSector: m.inSector, reload: m.reload, reloadMax: this.reloadReal ? (m.spec.shotDelay || 5) : Math.min(m.spec.shotDelay || 2, 2), readiness: mountReadiness(m, context) })),
+      lod: this.lodState(), availableLods: this.availableLods, autoLodAvailable: this.autoLodAvailable, camDist: this.camDistance(), aim: az === null ? null : { az: ((az + 540) % 360) - 180, distM: this.aimDistKm * 1000 } };
   }
   /** 确定性预热：用固定步长推进 seconds 秒（无头出图时让尾迹/姿态进入稳态） */
   simWarm(seconds: number, dt = 1 / 30) { const n = Math.round(seconds / dt); for (let i = 0; i < n; i++) { this.stepSim(dt); this.time += dt; } this.U.uTime.value = this.time; }
@@ -1047,6 +1114,7 @@ export class Viewer {
       if (node.material) (Array.isArray(node.material) ? node.material : [node.material]).forEach((material: THREE.Material) => materials.add(material));
     }));
     this.matCache.forEach((material) => materials.add(material));
+    this.retiredMaterials.forEach((material) => materials.add(material)); this.retiredMaterials.clear();
     if (this.neutral) materials.add(this.neutral);
     geometries.forEach((geometry) => geometry.dispose()); materials.forEach((material) => material.dispose()); this.matCache.clear();
     this.rtA?.dispose(); this.rtB?.dispose(); this.envRT?.dispose(); this.pmrem.dispose(); this.bloom.dispose(); this.sun.shadow.map?.dispose(); clearTexCache();

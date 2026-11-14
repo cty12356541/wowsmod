@@ -1,7 +1,7 @@
 /* wowsmod 预览接口客户端（API v1，见 API.md）
  * 实时更新：优先 SSE（/events），断开后退回 2 秒一次的 /state 轮询并持续尝试恢复 SSE；25 秒无消息判定假死。 */
 import { projectPrefix } from './scope';
-import type { LibrarySummary, LibraryStatus, LibraryThumbnailStatus, Manifest } from './types';
+import type { LibrarySummary, LibraryStatus, LibraryThumbnailStatus, Manifest, CompatibilityInfo, VerificationRequest, VerificationRecord, ScanPreview, ScanImportResult, ComparisonStatus, CheckpointList, Checkpoint, CheckpointDiff, CheckpointRestore } from './types';
 const ORIGIN = ((window as any).WM_API_BASE || '');
 const ROOT = ORIGIN + '/api/v1';
 const BASE = ORIGIN + projectPrefix(location.search);
@@ -138,10 +138,21 @@ async function libraryThumbnail(id: string, signal?: AbortSignal, refresh = fals
 }
 export const libraryApi = {
   list: () => libraryRequest('') as Promise<LibrarySummary>,
+  sourceRevision: (id: string, signal?: AbortSignal) => request<{ ok: boolean; project_id: string; revision: string }>('GET', `/library/projects/${enc(id)}/source-revision`, undefined, { root: true, signal, timeout: 120000 }),
+  compatibility: (id: string, signal?: AbortSignal) => request<CompatibilityInfo>('GET', `/library/projects/${enc(id)}/compatibility`, undefined, { root: true, signal, timeout: 120000 }),
+  recordVerification: (id: string, body: VerificationRequest, signal?: AbortSignal) => request<{ ok: boolean; record: VerificationRecord }>('POST', `/library/projects/${enc(id)}/verifications`, body, { root: true, signal, timeout: 120000 }),
   thumbnail: (id: string, signal?: AbortSignal) => libraryThumbnail(id, signal),
   refreshThumbnail: (id: string, signal?: AbortSignal) => libraryThumbnail(id, signal, true),
   add: (path: string) => libraryRequest('/add', { path }),
   scan: (root: string) => libraryRequest('/scan', { root }),
+  scanPreview: (root: string, signal?: AbortSignal) => request<ScanPreview>('POST', '/library/scan/preview', { root }, { root: true, signal, timeout: 120000 }),
+  scanImport: (scan_id: string, candidate_ids: string[], signal?: AbortSignal) => request<ScanImportResult>('POST', '/library/scan/import', { scan_id, candidate_ids }, { root: true, signal, timeout: 120000 }),
+  compareProjects: (left_id: string, right_id: string, refresh: boolean, signal?: AbortSignal) => request<ComparisonStatus>('POST', '/library/comparisons', { left_id, right_id, refresh }, { root: true, signal }),
+  comparison: (id: string, signal?: AbortSignal) => request<ComparisonStatus>('GET', `/library/comparisons/${enc(id)}`, undefined, { root: true, signal }),
+  checkpoints: (id: string, signal?: AbortSignal) => request<CheckpointList>('GET', `/library/projects/${enc(id)}/checkpoints`, undefined, { root: true, signal }),
+  createCheckpoint: (id: string, body: { label: string; expected_revision: string }, signal?: AbortSignal) => request<{ ok: boolean; checkpoint: Checkpoint }>('POST', `/library/projects/${enc(id)}/checkpoints`, body, { root: true, signal, timeout: 120000 }),
+  checkpointDiff: (id: string, checkpoint: string, signal?: AbortSignal) => request<CheckpointDiff>('GET', `/library/projects/${enc(id)}/checkpoints/${enc(checkpoint)}/diff`, undefined, { root: true, signal, timeout: 120000 }),
+  restoreCheckpoint: (id: string, checkpoint: string, body: { destination: string; expected_revision: string }, signal?: AbortSignal) => request<CheckpointRestore>('POST', `/library/projects/${enc(id)}/checkpoints/${enc(checkpoint)}/restore`, body, { root: true, signal, timeout: 120000 }),
   update: (id: string, patch: { display_name?: string; tags?: string[]; favorite?: boolean; status?: LibraryStatus }) => libraryRequest(`/projects/${enc(id)}/update`, patch),
   relocate: (id: string, path: string) => libraryRequest(`/projects/${enc(id)}/relocate`, { path }),
   remove: (id: string) => libraryRequest(`/projects/${enc(id)}/remove`, {}),

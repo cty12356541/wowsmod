@@ -37,7 +37,7 @@ export function StatusBar() {
       {s.texProg && <><span className="sep" /><span>{t('texLoading', { d: s.texProg.d, n: s.texProg.n })}</span></>}
       {s.project?.server.mock && <><span className="sep" /><Tip label={t('mockTip')} side="top"><span className="faint">{t('mockServer')}</span></Tip></>}
       <span className="grow" />
-      {st && <Tip label={st.gl} side="top"><span className="faint">{st.idle ? t('idle') : `${Math.round(st.fps)} FPS`} · {t('drawsN', { n: st.draws })} · {(st.tris / 1000).toFixed(0)}k △ · {st.gpuTexMB.toFixed(0)} MB</span></Tip>}
+      {st && <Tip label={st.gl} side="top"><span className="faint status-performance">{st.idle ? t('idle') : `${Math.round(st.fps)} FPS`} · {t('drawsN', { n: st.draws })} · {(st.tris / 1000).toFixed(0)}k △ · {st.gpuTexMB.toFixed(0)} MB</span></Tip>}
       <span className="sep" />
       <span className="faint">{t('quality')}</span>
       <Seg size="xs" value={s.quality} onChange={(q) => actions.setQuality(q)} ariaLabel={t('quality')}

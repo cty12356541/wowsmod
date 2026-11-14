@@ -36,6 +36,32 @@ test('sorting has deterministic identity tie break and recent opened first', () 
   assert.deepEqual(filterProjects([entry('b'), entry('a')], defaultFilters).map((p) => p.id), ['a', 'b']);
   assert.deepEqual(filterProjects([entry('a'), entry('b', { opened_unix: 200 })], defaultFilters).map((p) => p.id), ['b', 'a']);
 });
+test('recently modified order uses asset timestamps, puts unknown times last, and breaks ties by ID', () => {
+  const sort = { ...defaultFilters, sort: 'modified' };
+  const entries = [
+    entry('d', { modified_unix: 80 }),
+    entry('a', { opened_unix: 500, added_unix: 500 }),
+    entry('b', { modified_unix: null, available: false, project: null }),
+    entry('e', { modified_unix: 100 }),
+    entry('c', { modified_unix: 80 }),
+    entry('f', { modified_unix: 0 }),
+  ];
+  assert.deepEqual(filterProjects(entries, sort).map((p) => p.id), ['e', 'c', 'd', 'f', 'a', 'b']);
+  entries[0].modified_unix = 110;
+  assert.deepEqual(filterProjects(entries, sort).map((p) => p.id), ['d', 'e', 'c', 'f', 'a', 'b']);
+});
+test('modified sorting and timestamps are labeled in all library languages', () => {
+  globalThis.document = { documentElement: {} };
+  for (const [lang, sort, label] of [
+    ['zh', '最近修改', '最后修改'],
+    ['en', 'Recently modified', 'Last modified'],
+    ['ru', 'Недавно изменённые', 'Последнее изменение'],
+  ]) {
+    setLang(lang);
+    assert.equal(t('libSortModified'), sort);
+    assert.equal(t('libLastModified'), label);
+  }
+});
 test('same revision IDs from distinct project scopes never share material manifests', () => {
   const cache = new ProjectCache(); cache.set('A', 's1', { materials: 'red' });
   assert.equal(cache.get('B', 's1'), undefined);

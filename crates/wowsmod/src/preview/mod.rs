@@ -5,6 +5,9 @@ pub mod http;
 pub mod library;
 pub mod state;
 mod thumbnails;
+mod scan;
+pub mod checkpoints;
+mod comparison;
 pub mod warm;
 
 use std::path::PathBuf;

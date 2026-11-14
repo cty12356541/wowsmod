@@ -36,24 +36,25 @@ const { clearTexCache } = await import('./tex.ts');
 const { disableLive } = await import('./api.ts');
 const { boot, disposeWorkbench, resync, useStore } = await import('../store.ts');
 let target;
-async function reset(texture) {
+async function reset(texture, mode = 'single') {
   disposeWorkbench(); clearTexCache(); preview = false; generation = 1; delayedTexture = texture; releaseTexture = null; geometry.length = 0;
   // Skip only WebGL/scene construction: use real material construction,
   // applyManifest, mesh flags, change detection, getTex and texture GC.
   const mesh = new THREE.Mesh(); mesh.userData = { mfm: 'hull', part: 'hull' };
   target = Object.assign(Object.create(Viewer.prototype), {
     Q: { tex: 1 }, U: { uCamoCol: { value: new THREE.Color() } }, pal: { envI: 1 }, look: 'studio', channel: 0,
+    mode: 'single', compMat: { uniforms: { uMode: { value: 0 } } },
     matCache: new Map(), sets: { A: {}, B: {} }, meshes: [mesh], renderer: { shadowMap: {} },
     loadGeometry(bytes, options) { geometry.push({ version: new Uint8Array(bytes)[0], options }); }, setFx() {}, poke() {}, setPartVisible() {},
   });
-  await boot(() => target); disableLive(); preview = true;
+  useStore.setState({ mode }); await boot(() => target); disableLive(); preview = true;
 }
 async function waitForTexture() {
   for (let i = 0; i < 100 && !releaseTexture; i++) await new Promise((resolve) => setTimeout(resolve, 1));
   assert.equal(typeof releaseTexture, 'function', 'real getTex must reach the deferred PNG request');
   return releaseTexture;
 }
-test('late initial recovery texture cannot overwrite newer geometry and B/A materials', async () => {
+test('late initial recovery texture cannot overwrite newer geometry and full B materials', async () => {
   await reset('b1'); const old = resync(); const release = await waitForTexture();
   generation = 2; await resync();
   assert.equal(target.meshes[0].material.map.userData.hash, 'tex-b2');
@@ -61,11 +62,11 @@ test('late initial recovery texture cannot overwrite newer geometry and B/A mate
   assert.equal(useStore.getState().project.project.name, 'Source 2'); assert.equal(useStore.getState().phase, 'ready');
   assert.deepEqual(geometry, [{ version: 1, options: { preserveCamera: false } }, { version: 2, options: { preserveCamera: true } }]);
   assert.equal(target.meshes[0].material, target.sets.B.hull);
-  assert.equal(target.sets.B.hull.map.userData.hash, 'tex-b2'); assert.equal(target.sets.A.hull.map.userData.hash, 'tex-a2');
+  assert.equal(target.sets.B.hull.map.userData.hash, 'tex-b2'); assert.deepEqual(target.sets.A, {});
   assert.equal(target.U.uCamoCol.value.r, 0.2); assert.equal(useStore.getState().texProg, null);
 });
 test('late baseline texture cannot replace the newest comparison side A', async () => {
-  await reset('a1'); const old = resync(); const release = await waitForTexture();
+  await reset('a1', 'split'); const old = resync(); const release = await waitForTexture();
   generation = 2; await resync(); release(); await old;
   assert.equal(target.sets.A.hull.map.userData.hash, 'tex-a2'); assert.equal(target.sets.B.hull.map.userData.hash, 'tex-b2');
   assert.equal(target.meshes[0].material, target.sets.B.hull); assert.equal(useStore.getState().phase, 'ready');

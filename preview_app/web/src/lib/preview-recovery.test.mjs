@@ -52,7 +52,7 @@ async function waitForGeometry() {
 test('a repaired same-ID project creates its viewer, frames geometry and initializes effects/materials/simulation', async () => {
   await reset(); preview = true; await resync();
   assert.equal(created, 1); assert.deepEqual(loaded, [{ generation: 1, options: { preserveCamera: false } }]);
-  assert.deepEqual(effects.at(-1), { generation: 1 }); assert.deepEqual(materials, [['B', 'g1'], ['A', 'g1']]);
+  assert.deepEqual(effects.at(-1), { generation: 1 }); assert.deepEqual(materials, [['B', 'g1']]);
   assert.equal(useStore.getState().parts[0].id, 'hull'); assert.equal(simulations.at(-1).ship.code, 'PFSB110');
   assert.equal(useStore.getState().phase, 'ready'); assert.equal(useStore.getState().fatal, null);
   await resync(); assert.equal(created, 1); assert.equal(loaded.length, 1); assert.equal(simulations.length, 1);

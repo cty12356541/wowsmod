@@ -127,8 +127,71 @@ fn handle_service(service: &PreviewService, method: &Method, url: &str, req: &mu
 
 fn library_api(service: &PreviewService, method: &Method, path: &str, req: &mut Request, port: u16) -> Result<Response<std::io::Cursor<Vec<u8>>>, Error> {
     if method == &Method::Get && path == "/api/v1/library" { return Ok(json_ok(&service.listing().map_err(Error::from)?)); }
+    if path == "/api/v1/library/comparisons" && method == &Method::Post {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Compare { left_id: String, right_id: String, #[serde(default)] refresh: bool }
+        let body: Compare = serde_json::from_value(read_json(req)?)
+            .map_err(|e| Error::status(400, "invalid_request", &e.to_string()))?;
+        return Ok(json_ok(&service.comparisons.request(service, &body.left_id, &body.right_id, port, body.refresh).map_err(Error::workbench)?));
+    }
+    if let Some(rest) = path.strip_prefix("/api/v1/library/comparisons/") {
+        if method != &Method::Get { return Err(Error::status(405, "method_not_allowed", "对照状态和图片需要 GET")); }
+        let parts: Vec<_> = rest.split('/').collect();
+        match parts.as_slice() {
+            [id] => return Ok(json_ok(&service.comparisons.status(service, id).map_err(Error::workbench)?)),
+            [id, side, file] if file.ends_with(".png") => {
+                let hash = &file[..file.len()-4];
+                let bytes = service.comparisons.image(service, id, side, hash).map_err(Error::workbench)?;
+                return Ok(bytes_resp(200, bytes, "image/png", "private, no-cache"));
+            }
+            _ => return Err(Error::status(404, "not_found", "未知对照端点")),
+        }
+    }
     if let Some((id, action)) = path.strip_prefix("/api/v1/library/projects/").and_then(|rest| rest.split_once('/')) {
         let id = urlencoding_decode(id);
+        if action == "source-revision" && method == &Method::Get {
+            return Ok(json_ok(&service.source_revision(&id).map_err(Error::workbench)?));
+        }
+        if action == "checkpoints" {
+            if method == &Method::Get { return Ok(json_ok(&service.list_checkpoints(&id).map_err(Error::workbench)?)); }
+            if method == &Method::Post {
+                let body = serde_json::from_value(read_json(req)?).map_err(|e| Error::status(400, "invalid_request", &e.to_string()))?;
+                return Ok(json_ok(&service.create_checkpoint(&id, body).map_err(Error::workbench)?));
+            }
+            return Err(Error::status(405, "method_not_allowed", "保存点需要 GET/POST"));
+        }
+        if let Some(rest) = action.strip_prefix("checkpoints/") {
+            service.store().and_then(|s| s.entry(&id)).map_err(Error::workbench)?;
+            let (checkpoint, operation) = rest.split_once('/').ok_or_else(|| Error::status(404, "not_found", "缺少保存点操作"))?;
+            let checkpoint = urlencoding_decode(checkpoint);
+            if operation == "diff" && method == &Method::Get {
+                let root = service.source(&id).map_err(Error::workbench)?;
+                let diff = service.checkpoints.diff(&id, &checkpoint, &root).map_err(Error::workbench)?;
+                return Ok(json_ok(&serde_json::to_value(diff).map_err(|e| Error::from(e.into()))?));
+            }
+            if operation == "restore" && method == &Method::Post {
+                #[derive(serde::Deserialize)]
+                #[serde(deny_unknown_fields)]
+                struct Restore { destination: String, expected_revision: String }
+                let body: Restore = serde_json::from_value(read_json(req)?).map_err(|e| Error::status(400, "invalid_request", &e.to_string()))?;
+                return Ok(json_ok(&service.restore_checkpoint(&id, &checkpoint, Path::new(&body.destination), &body.expected_revision).map_err(Error::workbench)?));
+            }
+            if let Some(hash) = operation.strip_prefix("preview/").and_then(|v| v.strip_suffix(".png")) {
+                if method != &Method::Get { return Err(Error::status(405, "method_not_allowed", "保存点图片需要 GET")); }
+                let bytes = service.checkpoints.read_preview(&id, &checkpoint, hash).map_err(Error::workbench)?;
+                return Ok(bytes_resp(200, bytes, "image/png", "private, no-cache"));
+            }
+            return Err(Error::status(404, "not_found", "未知保存点端点"));
+        }
+        if action == "compatibility" && method == &Method::Get {
+            return Ok(json_ok(&service.compatibility(&id).map_err(Error::workbench)?));
+        }
+        if action == "verifications" && method == &Method::Post {
+            let request = serde_json::from_value(read_json(req)?)
+                .map_err(|e| Error::status(400, "invalid_request", &e.to_string()))?;
+            return Ok(json_ok(&service.record_verification(&id, request).map_err(Error::workbench)?));
+        }
         if action == "thumbnail" && method == &Method::Get {
             return Ok(json_ok(&service.thumbnails.request(service, &id, port, false).map_err(Error::from)?));
         }
@@ -151,6 +214,15 @@ fn library_api(service: &PreviewService, method: &Method, path: &str, req: &mut 
     let string = |key: &str| body[key].as_str().filter(|s| !s.trim().is_empty()).ok_or_else(|| Error::status(400, "invalid_request", &format!("{key} 必须是非空字符串")));
     let value = match path {
         "/api/v1/library/add" => json!({"ok": true, "entry": store.add(Path::new(string("path")?)).map_err(Error::catalog)?}),
+        "/api/v1/library/scan/preview" => {
+            let mut result = serde_json::to_value(service.scans.preview(&store, Path::new(string("root")?)).map_err(Error::workbench)?).map_err(|e| Error::from(e.into()))?;
+            result["ok"] = json!(true); result
+        }
+        "/api/v1/library/scan/import" => {
+            let ids: Vec<String> = serde_json::from_value(body["candidate_ids"].clone()).map_err(|e| Error::status(400, "invalid_request", &e.to_string()))?;
+            let mut result = serde_json::to_value(service.scans.import(&store, string("scan_id")?, &ids).map_err(Error::workbench)?).map_err(|e| Error::from(e.into()))?;
+            result["ok"] = json!(true); result
+        }
         "/api/v1/library/scan" => {
             let scan = store.scan(Path::new(string("root")?)).map_err(Error::catalog)?;
             json!({"ok": true, "entries": scan.entries, "warnings": scan.warnings, "visited_dirs": scan.visited_dirs, "truncated": scan.truncated})
@@ -158,7 +230,9 @@ fn library_api(service: &PreviewService, method: &Method, path: &str, req: &mut 
         _ => {
             let rest = path.strip_prefix("/api/v1/library/projects/").ok_or_else(|| Error::status(404, "not_found", "未知目录库端点"))?;
             let (id, action) = rest.split_once('/').ok_or_else(|| Error::status(404, "not_found", "缺少项目操作"))?;
-            if !store.list().map_err(Error::from)?.entries.iter().any(|e| e.entry.id == id) { return Err(Error::status(404, "not_found", "目录库中没有这个项目")); }
+            let decoded_id = urlencoding_decode(id);
+            let id = decoded_id.as_str();
+            store.entry(id).map_err(Error::workbench)?;
             match action {
                 "update" => {
                     let patch: crate::library::LibraryPatch = serde_json::from_value(body).map_err(|e| Error::status(400, "invalid_request", &e.to_string()))?;
@@ -465,6 +539,22 @@ struct Error {
     body: Value,
 }
 impl Error {
+    fn workbench(e: anyhow::Error) -> Self {
+        let message = format!("{e:#}");
+        if let Some(code) = crate::project_revision::error_code(&e) {
+            let status = match code {
+                "invalid_request" => 400,
+                "not_found" => 404,
+                "snapshot_limit" => 413,
+                "source_changed" | "unsafe_source" | "records_locked" | "scan_changed"
+                | "destination_exists" | "restore_conflict" | "unsafe_destination" | "checkpoint_busy" | "preview_busy" => 409,
+                _ => 500,
+            };
+            return Self::status(status, code, &message);
+        }
+        if message.starts_with("目录库中没有项目 ") { return Self::status(404, "not_found", &message); }
+        Self::from(e)
+    }
     fn status(status: u16, code: &str, message: &str) -> Self {
         Self { status, body: json!({"ok": false, "error": {"code": code, "message": message}}) }
     }
@@ -542,6 +632,102 @@ mod library_tests {
         }
     }
     impl Drop for Fixture { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.root); } }
+
+    #[test]
+    fn scan_preview_requires_selection_and_rejects_stale_batches_without_writes() {
+        let f = Fixture::new();
+        let root = f.root.join("scan");
+        let a = crate::modproj::Project::init(&root.join("a"), "same", "PASC001", "loose", "123").unwrap();
+        let b = crate::modproj::Project::init(&root.join("b"), "same", "PASC001", "loose", "123").unwrap();
+        let preview = "/api/v1/library/scan/preview";
+        let import = "/api/v1/library/scan/import";
+        let body = json!({"root":root}).to_string();
+        assert_eq!(f.request("POST", preview, &body, "application/json", Some("https://other.invalid")).0, 403);
+        assert_eq!(f.request("POST", preview, &body, "text/plain", None).0, 415);
+        let (status, scan) = f.json("POST", preview, &body);
+        assert_eq!(status, 200); assert_eq!(scan["candidates"].as_array().unwrap().len(), 2);
+        assert!(f.service.store().unwrap().entries().unwrap().is_empty());
+        let a_id = scan["candidates"].as_array().unwrap().iter().find(|v| super::super::library::same_path(Path::new(v["path"].as_str().unwrap()), &a.root)).unwrap()["candidate_id"].clone();
+        let b_id = scan["candidates"].as_array().unwrap().iter().find(|v| super::super::library::same_path(Path::new(v["path"].as_str().unwrap()), &b.root)).unwrap()["candidate_id"].clone();
+        let stale = json!({"scan_id":scan["scan_id"],"candidate_ids":[a_id,b_id]});
+        let original = std::fs::read(b.root.join("mod.toml")).unwrap();
+        std::fs::write(b.root.join("mod.toml"), [original.as_slice(), b"\n# changed"].concat()).unwrap();
+        let (status, error) = f.json("POST", import, &stale.to_string());
+        assert_eq!(status, 409); assert_eq!(error["error"]["code"], "scan_changed");
+        assert!(f.service.store().unwrap().entries().unwrap().is_empty());
+        let scan = f.json("POST", preview, &body).1;
+        let selected = scan["candidates"][0]["candidate_id"].clone();
+        let (status, imported) = f.json("POST", import, &json!({"scan_id":scan["scan_id"], "candidate_ids":[selected]}).to_string());
+        assert_eq!(status, 200); assert_eq!(imported["entries"].as_array().unwrap().len(), 1);
+        assert_eq!(f.service.store().unwrap().entries().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn checkpoints_restore_missing_source_as_new_registered_variant() {
+        let f = Fixture::new(); let id = f.project("checkpoint-source", &[]);
+        let source = f.root.join("checkpoint-source");
+        let route = format!("/api/v1/library/projects/{id}/checkpoints");
+        let revision_route = format!("/api/v1/library/projects/{id}/source-revision");
+        let (status, revision) = f.json("GET", &revision_route, "");
+        assert_eq!(status, 200);
+        let request = super::super::checkpoints::CreateCheckpoint { label: "before".into(), expected_revision: revision["revision"].as_str().unwrap().into() };
+        let saved = f.service.checkpoints.create_with_context(&id, &source, request, Some("unavailable-captured-client")).unwrap();
+        assert_eq!(f.json("GET", &route, "").1["checkpoints"][0]["id"], saved.id);
+        std::fs::write(source.join("new.txt"), b"new").unwrap();
+        let diff_route = format!("{route}/{}/diff", saved.id);
+        let diff = f.json("GET", &diff_route, "").1;
+        assert_eq!(diff["added"], json!(["new.txt"]));
+        let stale = json!({"label":"stale", "expected_revision": saved.revision}).to_string();
+        assert_eq!(f.json("POST", &route, &stale).0, 409);
+        assert_eq!(f.request("POST", &route, &stale, "application/json", Some("https://other.invalid")).0, 403);
+        assert_eq!(f.request("POST", &route, &stale, "text/plain", None).0, 415);
+        let restore_route = format!("{route}/{}/restore", saved.id);
+        let forbidden = json!({"destination":source.join("inside"),"expected_revision":saved.revision}).to_string();
+        assert_eq!(f.json("POST", &restore_route, &forbidden).0, 409);
+        let unavailable_image = format!("{route}/{}/preview/{}.png", saved.id, "a".repeat(64));
+        assert_eq!(f.json("GET", &unavailable_image, "").0, 404);
+        std::fs::remove_dir_all(&source).unwrap();
+        assert_eq!(f.json("GET", &route, "").1["checkpoints"].as_array().unwrap().len(), 1);
+        let destination = f.root.join("restored");
+        let body = json!({"destination":destination,"expected_revision":saved.revision}).to_string();
+        let (status, result) = f.json("POST", &restore_route, &body);
+        assert_eq!(status, 200, "{result}"); assert_eq!(result["revision"], saved.revision);
+        assert_ne!(result["entry"]["id"], id); assert!(result["url"].as_str().unwrap().starts_with("/?project="));
+        assert!(!destination.join("new.txt").exists()); assert!(!destination.join(".install").exists());
+        assert_eq!(crate::project_revision::read_source_manifest(&destination).unwrap().revision, saved.revision);
+        let (status, conflict) = f.json("POST", &restore_route, &body);
+        assert_eq!(status, 409, "existing destination is never overwritten");
+        assert_eq!(conflict["error"]["code"], "destination_exists");
+    }
+
+    #[test]
+    fn compatibility_records_are_revision_bound_and_do_not_open_preview_sessions() {
+        let f = Fixture::new(); let id = f.project("verification-source", &[]);
+        let route = format!("/api/v1/library/projects/{id}/compatibility");
+        let save = format!("/api/v1/library/projects/{id}/verifications");
+        let source = f.root.join("verification-source");
+        let (status, initial) = f.json("GET", &route, "");
+        assert_eq!(status, 200); assert!(initial["current_revision"].as_str().unwrap().starts_with("sha256:"));
+        assert_eq!(initial["records"], json!([])); assert!(initial["matching_record_id"].is_null());
+        let request = json!({"expected_revision": initial["current_revision"], "build": "123", "outcome": "passed", "scene": "port", "note": "user observation", "evidence": ["local screenshot.png"]});
+        assert_eq!(f.request("POST", &save, &request.to_string(), "text/plain", None).0, 415);
+        assert_eq!(f.request("POST", &save, &request.to_string(), "application/json", Some("https://other.invalid")).0, 403);
+        let (status, saved) = f.json("POST", &save, &request.to_string());
+        assert_eq!(status, 200); assert_eq!(saved["record"]["revision"], initial["current_revision"]);
+        assert_eq!(f.json("GET", &route, "").1["records"].as_array().unwrap().len(), 1);
+        assert!(!source.join(".wowsmod").exists(), "records must not assemble a model");
+        std::fs::write(source.join("assets/res_mods/paint.txt"), b"changed content").unwrap();
+        let (status, stale) = f.json("POST", &save, &request.to_string());
+        assert_eq!(status, 409); assert_eq!(stale["error"]["code"], "source_changed");
+        let after = f.json("GET", &route, "").1;
+        assert_ne!(after["current_revision"], initial["current_revision"]);
+        assert_eq!(after["records"].as_array().unwrap().len(), 1);
+        std::fs::remove_file(source.join("mod.toml")).unwrap();
+        let (status, missing) = f.json("GET", &route, "");
+        assert_eq!(status, 200); assert!(missing["current_revision"].is_null());
+        assert_eq!(missing["records"].as_array().unwrap().len(), 1);
+        assert_eq!(f.json("GET", "/api/v1/library/projects/absent/compatibility", "").0, 404);
+    }
 
     #[test]
     fn thumbnail_missing_sources_and_write_guards_are_independent_of_sessions() {

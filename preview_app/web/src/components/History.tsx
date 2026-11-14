@@ -4,8 +4,13 @@ import { useStore, actions, capabilityReason } from '../store';
 import { t, fmtTime, cmdName } from '../lib/i18n';
 import type { Step } from '../lib/types';
 import { IconBtn, Tip, Menu } from './ui';
+import { Checkpoints } from './Checkpoints';
 
 export function History() {
+  const id = new URLSearchParams(location.search).get('project');
+  return <><Checkpoints projectId={id} /><HistorySteps /></>;
+}
+function HistorySteps() {
   const steps = useStore((s) => s.steps); const head = useStore((s) => s.head); const viewRev = useStore((s) => s.viewRev); const phase = useStore((s) => s.phase);
   const [open, setOpen] = useState<string | null>(null);
   if (!steps.length) return phase === 'ready' ? <div className="empty"><div className="t">{t('noSteps')}</div><div>{t('noStepsDesc')}</div></div>

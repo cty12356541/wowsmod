@@ -508,3 +508,76 @@ html.render-mode #out { display: block; }
 .linkbtn:hover { text-decoration: underline; }
 .vlabel, .hud, .approx-tag, .vfoot, .reviewbar, .splitter, .loading, .fatal { z-index: 3; }
 .loading, .fatal { z-index: 5; }
+
+/* Workbench detail tools share the library's restrained chrome. */
+.workbench-dialog { top: 16px; width: min(680px, calc(100vw - 28px)); max-height: calc(100dvh - 32px); overflow-y: auto; }
+.compat-summary { margin: 8px 0; padding-top: 8px; border-top: 1px solid var(--g3); }
+.compat-summary p { margin: 4px 0; }
+.compat-summary.compact { margin: 0; padding: 0; border: 0; }
+.workbench-form { display: grid; gap: 10px; margin: 14px 0; }
+.workbench-form label { display: grid; gap: 5px; font-size: var(--fs-sm); }
+.workbench-form .input { width: 100%; min-width: 0; }
+.workbench-form textarea { resize: vertical; }
+.workbench-form > .btn { justify-self: start; }
+.workbench-revision { overflow-wrap: anywhere; white-space: normal; font-size: var(--fs-xs); }
+.workbench-prewrap { white-space: pre-wrap; overflow-wrap: anywhere; }
+.compat-result { padding: 8px; background: var(--g2); border-radius: 4px; }
+.compat-result.passed { color: var(--ok); }
+.compat-result.issues, .compat-result.failed { color: var(--warn); }
+.verification-list { padding-left: 20px; }
+.verification-list > li { padding: 8px 0; border-bottom: 1px solid var(--g3); }
+.compare-load-status { position: absolute; z-index: 4; left: 12px; bottom: 28px; right: 12px; width: fit-content; max-width: calc(100% - 24px); padding: 8px 12px; border: 1px solid var(--g3); border-radius: 4px; background: var(--g0, white); font-size: var(--fs-sm); }
+.compare-load-status .btn { margin-left: 8px; }
+.scan-path-controls { display: flex; flex-wrap: wrap; gap: 8px; }
+.scan-path-controls > input { flex: 1 1 260px; }
+.scan-import .scan-candidates { display: block; list-style: none; padding: 0; max-height: 360px; overflow: auto; }
+.scan-candidates > li { padding: 8px; margin: 4px 0; border: 1px solid var(--g3); border-radius: 4px; background: var(--g0, white); }
+.scan-candidates label { display: flex; align-items: start; gap: 8px; }
+.scan-candidates label > span { min-width: 0; }
+.scan-candidates .library-badge { margin-left: 8px; }
+.scan-path { display: block; margin-top: 3px; font-size: var(--fs-xs); overflow-wrap: anywhere; }
+.comparison-dialog { width: min(1100px, calc(100vw - 28px)); }
+.comparison-selectors, .comparison-images { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.comparison-selectors label { min-width: 0; display: grid; gap: 5px; }
+.comparison-selectors select { width: 100%; min-width: 0; }
+.comparison-images figure { margin: 0; min-width: 0; }
+.comparison-frame { position: relative; aspect-ratio: 16 / 9; margin: 8px 0; background: var(--g1); }
+.comparison-frame .library-thumbnail { width: 100%; height: 100%; }
+.comparison-frame > img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.comparison-frame > .comparison-pending-image { visibility: hidden; position: absolute; inset: 0; }
+.comparison-recipe { margin-top: 12px; font-size: var(--fs-xs); }
+.comparison-recipe pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.sim-note, .fire-blocked { font-size: var(--fs-xs); color: var(--g7); line-height: 1.5; margin: 6px 0; }
+.lod-parts { font-size: var(--fs-xs); margin-top: 6px; }
+.mount { grid-template-columns: max-content max-content max-content minmax(0, 1fr); }
+.mount .st { overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 700px) { .comparison-selectors, .comparison-images { grid-template-columns: 1fr; } }
+.checkpoints { padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.checkpoint-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.checkpoint-heading h3 { font-size: var(--fs-sm); margin: 0; }
+.checkpoint-create { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.checkpoint-create label { flex: 1 1 120px; min-width: 0; }
+.checkpoint-create .input { width: 100%; min-width: 0; }
+.checkpoint-scope { font-size: var(--fs-xs); color: var(--g7); margin-bottom: 8px; }
+.checkpoint-list { list-style: none; padding: 0; margin: 8px 0; }
+.checkpoint-open { display: grid; width: 100%; gap: 3px; padding: 8px; margin: 4px 0; border: 1px solid var(--line); border-radius: 4px; background: var(--g0); text-align: left; font-size: var(--fs-xs); }
+.checkpoint-open b { overflow-wrap: anywhere; }
+.checkpoint-preview { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: contain; }
+.checkpoint-diff { margin-top: 8px; font-size: var(--fs-sm); }
+.checkpoint-diff ul { max-height: 240px; overflow-y: auto; padding-left: 18px; }
+.library-feedback.checkpoint-restored { display: block; }
+.checkpoint-open { min-width: 0; overflow-wrap: anywhere; }
+.checkpoint-open > * { min-width: 0; }
+.main.compact > .rh { width: 100%; height: 6px; margin: -3px 0; }
+.main.compact .vbar { height: 40px; overflow-x: auto; overflow-y: hidden; }
+.main.compact .vbar > * { flex-shrink: 0; }
+@media (max-width: 700px) {
+  .app > .statusbar { gap: 4px; }
+  .app > .statusbar .dot { margin-right: 0; }
+  .app > .statusbar .status-performance { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .app > .statusbar .seg { flex-shrink: 0; }
+}
+@media (max-width: 980px) {
+  .app > .titlebar .tb-center { flex: 0 0 auto; margin-left: auto; }
+  .app > .titlebar .crumb { min-width: 0; }
+}

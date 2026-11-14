@@ -20,7 +20,7 @@ rust-embed = { version = "8", features = ["interpolate-folder-path"] }
 wowsmod-formats = { path = "../wowsmod-formats", default-features = false }
 clap = { version = "4", features = ["derive"] }
 serde.workspace = true
-serde_json.workspace = true
+serde_json = { workspace = true, features = ["float_roundtrip"] }
 anyhow = "1"
 rayon = "1"
 sha2 = "0.10"

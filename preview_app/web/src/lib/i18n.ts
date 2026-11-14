@@ -1,6 +1,8 @@
 /* 界面文案：中文 / English / Русский（三种语言完整，缺键会在开发时报警）。
  * 值是字符串（{name} 占位）或函数（复数/语序）。用户与 AI 写的步骤标题、说明按原文显示，不翻译。 */
 import type { Part } from './types';
+import { workbenchCopy } from './workbench-i18n.js';
+import { simulationCopy } from './simulation-i18n.js';
 
 export type Lang = 'zh' | 'en' | 'ru';
 type V = string | ((p: Record<string, any>) => string);
@@ -221,13 +223,13 @@ Object.assign(zh, {
   libWorking: '处理中…', libAdded: '项目已添加', libScanDone: '扫描完成', libScanTruncated: '扫描已达数量或深度上限；可选择更小目录继续扫描。', libSaved: '库信息已保存', libRemoved: '项目已从库移除，文件保留', libRelocated: '项目位置已更新，ID 保持不变',
   libWarnings: '{n} 条元数据或目录提示', libClient: '客户端', libBuild: '构建', libNoClient: '客户端不可用，仍可浏览和管理制作库', libCount: '{ships} 组舰船 · {n} 个方案',
   libFilters: '筛选制作项目', libSearch: '搜索舰船、方案、船代码或标签', libNation: '国家', libTier: '等级', libClass: '舰种', libProduction: '制作状态', libUnknown: '未识别',
-  libFavorites: '只看收藏', libFavorite: '收藏方案', libUnfavorite: '取消收藏', libSort: '排序', libSortOpened: '最近打开', libSortAdded: '最近登记', libSortName: '名称', libReset: '重置筛选', libClear: '清空', libNoValues: '暂无属性',
+  libFavorites: '只看收藏', libFavorite: '收藏方案', libUnfavorite: '取消收藏', libSort: '排序', libSortModified: '最近修改', libSortOpened: '最近打开', libSortAdded: '最近登记', libSortName: '名称', libReset: '重置筛选', libClear: '清空', libNoValues: '暂无属性',
   libFilterHint: '同一维度多选为“或”，不同维度为“且”。归档方案默认隐藏；选择“已归档”可查看。', libBreadcrumb: '制作库导航', libAllShips: '全部舰船', libShips: '舰船分组', libGlobal: '全局 / 未关联', libVariants: '舰船方案', libVariantsN: '{n} 个方案', libAppliedN: '{n} 个已应用记录',
   libLoading: '正在读取制作库…', libUnavailable: '暂时无法读取制作库', libEmpty: '从第一个制作项目开始', libEmptyHint: '添加现有项目，或扫描你指定的制作目录。同一条船可保存多个独立方案。', libNoResults: '没有符合条件的方案', libNoResultsHint: '试着清空筛选、取消收藏限定，或显示已归档方案。',
   libThumbGenerating: '正在生成封面…', libThumbUpdating: '正在更新封面…', libThumbPending: '封面仍在生成', libThumbFailed: '封面加载失败', libThumbMissing: '暂无封面', libThumbRetry: '重试封面',
   libStatus_working: '制作中', libStatus_review: '待验收', libStatus_complete: '已完成', libStatus_archived: '已归档',
   libInstall_not_installed: '未应用', libInstall_installed: '当前应用', libInstall_outdated: '应用内容已落后', libInstall_unknown: '安装状态未知',
-  libFolder: '项目目录', libLastOpened: '最近打开', libNeverOpened: '尚未打开', libLostPath: '目录失效或项目不可用，请重新定位', libOpen: '预览 / 继续制作', libEdit: '编辑库信息', libRelocate: '重新定位', libRemove: '从库移除', libSave: '保存',
+  libFolder: '项目目录', libLastModified: '最后修改', libModifiedUnknown: '时间未知', libLastOpened: '最近打开', libNeverOpened: '尚未打开', libLostPath: '目录失效或项目不可用，请重新定位', libOpen: '预览 / 继续制作', libEdit: '编辑库信息', libRelocate: '重新定位', libRemove: '从库移除', libSave: '保存',
   libRemoveHint: '仅取消登记这个方案，不删除项目文件，也不卸载已应用的内容。', libRelocateHint: '指定含 mod.toml 的新目录；保留这个方案的稳定 ID。', libEditHint: '这些字段只保存在制作库。制作状态由你维护，与安装状态和实机验收分开。', libDisplayName: '方案显示名称', libTags: '标签（用逗号分隔）',
   libFooter: '选择方案只打开工作台。应用到游戏需预览替换计划并再次确认。', libBack: '返回制作库', libSwitch: '同船方案', libApply: '应用到游戏', libApplyTitle: '确认应用方案', libApplyHint: '此操作将写入下列客户端。应用成功表示文件写入完成，实机视觉效果仍需验收。', libApplyCurrent: '当前应用', libApplySelected: '将要应用', libApplyTarget: '目标客户端', libApplyBuild: '目标构建', libApplyFiles: '文件数', libApplyConfirm: '确认应用', libApplyPlanning: '正在检查应用计划…', libApplyDone: '应用完成，等待实机验收', libNone: '无', libPreviewUnavailable: '此项目暂不支持 3D 预览', libCapabilityUnavailable: '后端未提供此能力',
 });
@@ -237,20 +239,22 @@ const libraryEnglish: Dict = {
   libWorking: 'Working…', libAdded: 'Project added', libScanDone: 'Scan complete', libScanTruncated: 'Scan limit reached. Choose a smaller folder to continue.', libSaved: 'Library details saved', libRemoved: 'Project unregistered; files kept', libRelocated: 'Location updated; project ID preserved',
   libWarnings: '{n} catalog or metadata notices', libClient: 'Client', libBuild: 'Build', libNoClient: 'Client unavailable. You can still browse and manage projects.', libCount: '{ships} ship groups · {n} variants',
   libFilters: 'Filter projects', libSearch: 'Search ships, variants, ship codes or tags', libNation: 'Nation', libTier: 'Tier', libClass: 'Class', libProduction: 'Production status', libUnknown: 'Unknown',
-  libFavorites: 'Favorites only', libFavorite: 'Favorite variant', libUnfavorite: 'Unfavorite variant', libSort: 'Sort', libSortOpened: 'Recently opened', libSortAdded: 'Recently registered', libSortName: 'Name', libReset: 'Reset filters', libClear: 'Clear', libNoValues: 'No metadata',
+  libFavorites: 'Favorites only', libFavorite: 'Favorite variant', libUnfavorite: 'Unfavorite variant', libSort: 'Sort', libSortModified: 'Recently modified', libSortOpened: 'Recently opened', libSortAdded: 'Recently registered', libSortName: 'Name', libReset: 'Reset filters', libClear: 'Clear', libNoValues: 'No metadata',
   libFilterHint: 'Selections within a facet use OR; different facets use AND. Archived variants are hidden until explicitly selected.', libBreadcrumb: 'Library navigation', libAllShips: 'All ships', libShips: 'Ship groups', libGlobal: 'Global / unlinked', libVariants: 'Ship variants', libVariantsN: ({ n }) => `${n} ${n === 1 ? 'variant' : 'variants'}`, libAppliedN: ({ n }) => `${n} applied ${n === 1 ? 'record' : 'records'}`,
   libLoading: 'Loading your library…', libUnavailable: 'Library is currently unavailable', libEmpty: 'Start with your first project', libEmptyHint: 'Add an existing project or scan your workshop folder. Keep multiple independent variants of the same ship.', libNoResults: 'No matching variants', libNoResultsHint: 'Clear filters, turn off favorites only, or include archived variants.',
   libThumbGenerating: 'Generating cover…', libThumbUpdating: 'Updating cover…', libThumbPending: 'Cover still generating', libThumbFailed: 'Cover failed to load', libThumbMissing: 'No cover available', libThumbRetry: 'Retry cover',
   libStatus_working: 'In progress', libStatus_review: 'For review', libStatus_complete: 'Complete', libStatus_archived: 'Archived', libInstall_not_installed: 'Not applied', libInstall_installed: 'Currently applied', libInstall_outdated: 'Applied content is older', libInstall_unknown: 'Install state unknown',
-  libFolder: 'Project folder', libLastOpened: 'Last opened', libNeverOpened: 'Never opened', libLostPath: 'Folder missing or project unavailable. Relocate to continue.', libOpen: 'Preview / continue', libEdit: 'Edit library details', libRelocate: 'Relocate', libRemove: 'Unregister', libSave: 'Save',
+  libFolder: 'Project folder', libLastModified: 'Last modified', libModifiedUnknown: 'Time unknown', libLastOpened: 'Last opened', libNeverOpened: 'Never opened', libLostPath: 'Folder missing or project unavailable. Relocate to continue.', libOpen: 'Preview / continue', libEdit: 'Edit library details', libRelocate: 'Relocate', libRemove: 'Unregister', libSave: 'Save',
   libRemoveHint: 'Unregister this variant only. Project files and applied game content are kept.', libRelocateHint: 'Choose a new folder containing mod.toml. The variant keeps its stable ID.', libEditHint: 'These fields belong to the catalog. Production status is user maintained and separate from installation and in-game validation.', libDisplayName: 'Variant display name', libTags: 'Tags (comma separated)',
   libFooter: 'Selecting a variant only opens the workbench. Applying requires a plan preview and a separate confirmation.', libBack: 'Back to library', libSwitch: 'Same-ship variants', libApply: 'Apply to game', libApplyTitle: 'Confirm variant application', libApplyHint: 'This writes to the client below. Successful application confirms file writes; in-game visuals still need validation.', libApplyCurrent: 'Currently applied', libApplySelected: 'Apply selected', libApplyTarget: 'Target client', libApplyBuild: 'Target build', libApplyFiles: 'Files', libApplyConfirm: 'Confirm application', libApplyPlanning: 'Checking application plan…', libApplyDone: 'Applied; in-game validation pending', libNone: 'None', libPreviewUnavailable: '3D preview is unavailable for this project', libCapabilityUnavailable: 'The backend does not support this action',
 };
 Object.assign(en, libraryEnglish);
 Object.assign(ru, libraryEnglish, {
+  libSortModified: 'Недавно изменённые', libLastModified: 'Последнее изменение', libModifiedUnknown: 'Время неизвестно',
   libTitle: 'Библиотека модов', libAdd: 'Добавить проект', libScan: 'Сканировать папку', libBack: 'В библиотеку', libApply: 'Применить в игре',
   libThumbGenerating: 'Создаётся обложка…', libThumbUpdating: 'Обложка обновляется…', libThumbPending: 'Обложка ещё создаётся', libThumbFailed: 'Не удалось загрузить обложку', libThumbMissing: 'Нет обложки', libThumbRetry: 'Повторить',
 });
+Object.assign(zh, workbenchCopy.zh, simulationCopy.zh); Object.assign(en, workbenchCopy.en, simulationCopy.en); Object.assign(ru, workbenchCopy.ru, simulationCopy.ru);
 const DICTS: Record<Lang, Dict> = { zh, en, ru };
 let cur: Lang = 'zh';
 export function setLang(l: Lang) { cur = DICTS[l] ? l : 'zh'; document.documentElement.lang = cur === 'zh' ? 'zh-CN' : cur; }

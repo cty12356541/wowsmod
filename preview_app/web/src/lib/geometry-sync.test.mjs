@@ -35,7 +35,7 @@ test('live current snapshot replaces changed geometry and keeps material/selecti
   assert.equal(useStore.getState().project.project.name, 'Source name 2');
   assert.match(document.title, /Source name 2/);
   assert.deepEqual(useStore.getState().steps, []); assert.equal(useStore.getState().head, 'current');
-  assert.deepEqual(materials.slice(-2), [['B', 2], ['A', 2]]);
+  assert.deepEqual(materials, [['B', 1], ['B', 2]]);
   assert(visibility.some(([id, visible]) => id === 'gun' && visible === false));
 });
 test('unchanged geometry across repeated resyncs is not downloaded or reloaded again', async () => {

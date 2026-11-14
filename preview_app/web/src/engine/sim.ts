@@ -188,11 +188,38 @@ export class Particles {
 // ---------------------------------------------------------------- 炮塔
 export interface Mount {
   id: string; spec: MountSpec; top: THREE.Object3D; yawN?: THREE.Object3D; pitchN?: THREE.Object3D; recoilN?: THREE.Object3D; muzzles: THREE.Object3D[];
-  rigged: boolean;
+  hasRig: boolean; rigged: boolean;
   yawQ0?: THREE.Quaternion; pitchQ0?: THREE.Quaternion; recoil0?: THREE.Vector3;
   yaw: number; pitch: number; wantYaw: number; wantPitch: number; inSector: boolean; aimed: boolean;
   reload: number; shotT: number; order: number;
 }
+
+export type FireBlockReason = 'simulation_off' | 'data_missing' | 'combat_off' | 'no_target' | 'outside_sector' | 'aiming' | 'reloading';
+export interface FireReadiness {
+  ready: boolean;
+  reasons: FireBlockReason[];
+  reload_s: number;
+  missingData: ('rig' | 'muzzle')[];
+}
+
+const isRealMuzzle = (o: THREE.Object3D) => Number.isInteger(o.userData.muzzle) && !o.userData.synthetic;
+
+export function mountReadiness(m: Mount, { simOn, combat, hasTarget }: { simOn: boolean; combat: boolean; hasTarget: boolean }): FireReadiness {
+  const reasons: FireBlockReason[] = [], missingData: FireReadiness['missingData'] = [];
+  if (!m.hasRig) missingData.push('rig');
+  if (!m.muzzles.length || !m.muzzles.every(isRealMuzzle) || (m.hasRig && !m.rigged)) missingData.push('muzzle');
+  if (!simOn) reasons.push('simulation_off');
+  if (missingData.length) reasons.push('data_missing');
+  if (!combat) reasons.push('combat_off');
+  if (!hasTarget) reasons.push('no_target');
+  if (combat && hasTarget && !missingData.length) {
+    if (!m.inSector) reasons.push('outside_sector');
+    else if (!m.aimed) reasons.push('aiming');
+  }
+  if (m.reload > 0) reasons.push('reloading');
+  return { ready: reasons.length === 0, reasons, reload_s: m.reload, missingData };
+}
+
 const D2R = Math.PI / 180;
 export function clampSector(az: number, sec?: [number, number] | null, dead?: [number, number][]) {
   let a = az, ok = true;
@@ -236,7 +263,7 @@ export function makeMount(id: string, spec: MountSpec, top: THREE.Object3D, orde
     return false;
   };
   top.traverse((o) => {
-    if (Number.isInteger(o.userData.muzzle) && !o.userData.synthetic) muzzles.push(o);
+    if (isRealMuzzle(o)) muzzles.push(o);
     const mesh = o as THREE.SkinnedMesh;
     if (mesh.isSkinnedMesh) for (const joint of weightedJoints(mesh.geometry)) {
       const bone = mesh.skeleton.bones[joint];
@@ -244,10 +271,10 @@ export function makeMount(id: string, spec: MountSpec, top: THREE.Object3D, orde
     }
   });
   muzzles.sort((a, b) => a.userData.muzzle - b.userData.muzzle);
-  const rigged = !!(yawN && pitchN && recoilN && isUnder(pitchN, yawN) && isUnder(recoilN, pitchN) &&
-    drivesGeometry.has(yawN) && drivesGeometry.has(pitchN) && drivesGeometry.has(recoilN) &&
-    muzzles.length && muzzles.every((m) => isUnder(m, recoilN)));
-  return { id, spec, top, yawN, pitchN, recoilN, muzzles, rigged, yawQ0: yawN?.quaternion.clone(), pitchQ0: pitchN?.quaternion.clone(), recoil0: recoilN?.position.clone(),
+  const hasRig = !!(yawN && pitchN && recoilN && isUnder(pitchN, yawN) && isUnder(recoilN, pitchN) &&
+    drivesGeometry.has(yawN) && drivesGeometry.has(pitchN) && drivesGeometry.has(recoilN));
+  const rigged = hasRig && muzzles.length > 0 && muzzles.every((m) => isUnder(m, recoilN!));
+  return { id, spec, top, yawN, pitchN, recoilN, muzzles, hasRig, rigged, yawQ0: yawN?.quaternion.clone(), pitchQ0: pitchN?.quaternion.clone(), recoil0: recoilN?.position.clone(),
     yaw: 0, pitch: 0, wantYaw: 0, wantPitch: 0, inSector: true, aimed: false, reload: 0, shotT: 99, order };
 }
 function findBone(o: THREE.Object3D, role: string): THREE.Object3D | undefined {

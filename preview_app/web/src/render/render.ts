@@ -11,11 +11,13 @@ import { setLang, t, type Lang } from '../lib/i18n';
 import type { Manifest, Project, SimData, Step } from '../lib/types';
 import type { Telegraph } from '../engine/sim';
 import { TEL_FRAC } from '../engine/sim';
+import { explicitCamera, applyExplicitCamera, renderCameraMeta, type ExactCamera } from './camera';
 
 export interface RenderParams {
   w?: number; h?: number; quality?: Quality; lang?: Lang;
   rev?: string; base?: string; compare?: 'single' | 'side' | 'split'; splitPos?: number;
   view?: string; az?: number; el?: number; dist?: number | string; focus?: string; fill?: number; fov?: number; tgt?: string;
+  pos?: string; near?: number; far?: number;
   channel?: string; env?: 'studio' | 'water' | 'dark'; water?: 'full' | 'cut' | 'off'; light?: 'day' | 'dusk' | 'night';
   /** 外观: game(默认, 港口对齐) / studio(影棚展台) / game-day / game-night(连同光照一起指定) */
   look?: string; /** 游戏外观参数临时覆盖(JSON, 拟合脚本用) */ gl?: string;
@@ -29,7 +31,7 @@ export interface RenderParams {
 }
 export interface RenderResult {
   ok: boolean; width: number; height: number; ms: number; dataURL?: string; error?: { code: string; message: string };
-  meta: { ship: string; rev: string; step: number | null; base: string | null; view: string; channel: string; env: string; light: string; look?: string; fx?: string | null; compare: string; lod?: Record<string, number>; sim?: unknown; cells?: { view: string; rev: string; x: number; y: number; w: number; h: number }[] };
+  meta: { camera?: ExactCamera; bounds?: {min:number[];max:number[]}; ship: string; rev: string; step: number | null; base: string | null; view: string; channel: string; env: string; light: string; look?: string; fx?: string | null; compare: string; lod?: Record<string, number>; sim?: unknown; cells?: { view: string; rev: string; x: number; y: number; w: number; h: number }[] };
 }
 
 const VIEW_ALIAS: Record<string, string> = { fq: 'bow', 'front-quarter': 'bow', front: 'bow', rq: 'stern', 'rear-quarter': 'stern', rear: 'stern', side: 'side', top: 'top', port: 'port', hero: 'hero', deck: 'deck', funnel: 'funnel', bow: 'bow', stern: 'stern', custom: 'custom' };
@@ -56,8 +58,12 @@ export function lookOf(P: RenderParams): { look: 'game' | 'studio'; light?: 'day
 /** URL 参数 → RenderParams（未给的不出现，好让默认值生效） */
 export function parseQuery(q: URLSearchParams): RenderParams {
   const p: any = {}; const num = (k: string) => { const v = q.get(k); if (v !== null && v !== '' && !isNaN(+v)) p[k] = +v; };
-  ['w', 'h', 'splitPos', 'az', 'el', 'fill', 'fov', 'glow', 'rudder', 'waves', 'warm', 'turret', 'aimKm', 'fireT', 't', 'emis', 'emisSpeed', 'lodBias', 'cellW', 'cellH'].forEach(num);
+  ['w', 'h', 'splitPos', 'az', 'el', 'fill', 'fov', 'near', 'far', 'glow', 'rudder', 'waves', 'warm', 'turret', 'aimKm', 'fireT', 't', 'emis', 'emisSpeed', 'lodBias', 'cellW', 'cellH'].forEach(num);
   ['quality', 'lang', 'rev', 'base', 'compare', 'view', 'focus', 'channel', 'env', 'water', 'light', 'look', 'gl', 'fx', 'tgt', 'fire', 'views', 'revs', 'title'].forEach((k) => { const v = q.get(k); if (v !== null) p[k] = v; });
+  if (q.has('pos')) {
+    p.pos = q.get('pos');
+    for (const key of ['fov', 'near', 'far']) if (q.has(key)) p[key] = q.get(key)?.trim() ? Number(q.get(key)) : NaN;
+  }
   ['hl', 'wm', 'waterline', 'camo', 'sim', 'lodTint', 'sheet', 'data'].forEach((k) => { if (q.has(k)) p[k] = bool(q.get(k)) || q.get(k) === ''; });
   const sp = q.get('speed'); if (sp !== null) p.speed = isNaN(+sp) ? sp : +sp;
   const d = q.get('dist'); if (d !== null) p.dist = isNaN(+d) ? d : +d;
@@ -112,11 +118,16 @@ const viewLabel = (v: string) => t('v_' + (VIEW_ALIAS[v] || v));
 /** 把一套参数施加到 viewer 上并画一帧（结果在 viewer 的画布里） */
 async function setup(P: Required<Pick<RenderParams, 'w' | 'h'>> & RenderParams, rev: string, base: string | null, view: string) {
   const v = viewer!;
+  const exactCamera = explicitCamera(P);
   v.setFixedSize(P.w, P.h);
   // 材质
   v.clearSide('A');
-  await v.applyManifest('B', await manifest(rev));
-  if (base && base !== rev && P.compare !== 'single') await v.applyManifest('A', await manifest(base));
+  const loadedB = await v.applyManifest('B', await manifest(rev));
+  if (loadedB.failed.length) throw Object.assign(new Error(`Textures unavailable: ${loadedB.failed.join(', ')}`), { code: 'texture_failed' });
+  if (base && base !== rev && P.compare !== 'single') {
+    const loadedA = await v.applyManifest('A', await manifest(base));
+    if (loadedA.failed.length) throw Object.assign(new Error(`Baseline textures unavailable: ${loadedA.failed.join(', ')}`), { code: 'texture_failed' });
+  }
   v.setMode(base && P.compare && P.compare !== 'single' ? P.compare : 'single');
   v.setSplit(P.splitPos ?? 0.5);
   // 外观
@@ -155,6 +166,9 @@ async function setup(P: Required<Pick<RenderParams, 'w' | 'h'>> & RenderParams, 
   }
   v.setTime(P.t ?? 0);
   // 相机（在模拟之后：船体姿态已定）
+  if (exactCamera) applyExplicitCamera(v, exactCamera);
+  else {
+  v.camera.near = .05; v.camera.far = 1600; v.camera.up.set(0, 1, 0);
   const vname = renderViewPreset(view);
   v.baseFov = P.fov && P.fov > 5 && P.fov < 120 ? P.fov : 34;
   let tgt: number[] | undefined;
@@ -169,6 +183,7 @@ async function setup(P: Required<Pick<RenderParams, 'w' | 'h'>> & RenderParams, 
   if (typeof P.dist === 'string' && DIST[P.dist]) v.setDistance(DIST[P.dist], true);
   else if (typeof P.dist === 'number' && P.az === undefined && P.el === undefined) v.setDistance(P.dist, true);
   v.controls.update();
+  }
   v.setLodBias(P.lodBias ?? 1); v.setLodTint(!!P.lodTint);
   v.setLodMode(P.lod ?? (P.dist !== undefined ? 'auto' : 0));
   v.frame();
@@ -217,7 +232,7 @@ async function renderOne(P: RenderParams & { w: number; h: number }): Promise<Re
   }
   return {
     ok: true, width: P.w, height: P.h, ms: 0,
-    meta: { ship: project!.ship.code, rev, step: stepOf(rev)?.index ?? null, base, view, channel: P.channel || 'final', env: P.env || 'studio', light: v.light, look: v.look === 'game' ? 'game-' + (v.light === 'night' ? 'night' : 'day') : 'studio', compare: base ? P.compare! : 'single', fx: v.fx ? (v.fx.name || 'custom') : null, lod: v.lodState(), sim: v.simOn ? v.simSnapshot() : undefined },
+    meta: { ...renderCameraMeta(v), ship: project!.ship.code, rev, step: stepOf(rev)?.index ?? null, base, view, channel: P.channel || 'final', env: P.env || 'studio', light: v.light, look: v.look === 'game' ? 'game-' + (v.light === 'night' ? 'night' : 'day') : 'studio', compare: base ? P.compare! : 'single', fx: v.fx ? (v.fx.name || 'custom') : null, lod: v.lodState(), sim: v.simOn ? v.simSnapshot() : undefined },
   };
 }
 

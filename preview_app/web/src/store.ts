@@ -20,6 +20,7 @@ export interface State {
   conn: ConnState; offlineSince: number | null;
   phase: 'boot' | 'loading' | 'ready' | 'fatal'; fatal: { code: string; message: string } | null;
   loadMsg: string; loadFrac: number | null; texProg: { d: number; n: number } | null;
+  compareStatus: 'idle' | 'loading' | 'ready' | 'error'; compareError: string; compareProg: { d: number; n: number } | null;
   project: Project | null; steps: Step[]; head: string | null; viewRev: string | null; baseSel: BaseSel;
   parts: Part[]; textures: TexInfo[]; sim: SimData | null;
   selected: string | null; hidden: Record<string, boolean>; onlyChanged: boolean; filter: string;
@@ -69,6 +70,7 @@ const savedLook: LookName = ((): LookName => {
 export const useStore = create<State>(() => ({
   lang: initialLang, workspace: 'review', conn: 'connecting', offlineSince: null,
   phase: 'boot', fatal: null, loadMsg: '', loadFrac: null, texProg: null,
+  compareStatus: 'idle', compareError: '', compareProg: null,
   project: null, steps: [], head: null, viewRev: null, baseSel: 'base', parts: [], textures: [], sim: null,
   selected: null, hidden: {}, onlyChanged: false, filter: '', selTex: null, texCh: 'rgb',
   leftTab: 'outline', rightTab: 'history',
@@ -123,9 +125,18 @@ function applySimulationSettings(target: Viewer, s = get()) {
   target.setTelegraph(s.tel); target.setRudder(s.rudder); target.setReloadReal(s.reloadReal);
   target.setAimDistKm(s.aimKm); target.aimFollowMouse = s.aimMouse;
   if (s.simOn) {
-    target.setCamMode(s.camMode); target.setLodMode(s.lodMode); target.setLodBias(s.lodBias); target.setLodTint(s.lodTint);
+    target.setCamMode(s.camMode);
+    const lodMode = target.setLodMode(s.lodMode) ?? s.lodMode;
+    target.setLodBias(s.lodBias); target.setLodTint(s.lodTint);
     target.setEmisOverride(s.emisMode, s.emisSpeed);
+    set({ lodMode });
   }
+}
+
+function syncGeometryLod(target: Viewer) {
+  const s = get();
+  const lodMode = target.resolveLodMode?.(s.lodMode) ?? s.lodMode;
+  if (lodMode !== s.lodMode) set({ lodMode });
 }
 
 async function loadSimulation(target: Viewer) {
@@ -145,12 +156,74 @@ async function loadSimulation(target: Viewer) {
 }
 
 let loadSeq = 0;
-/** 载入 viewRev（B）与对比基准（A）的材质 + 部件树 + 贴图列表 */
-export async function loadRevs() {
+interface RevisionLoad { seq: number; target: Viewer; base: Manifest; failedB: string[]; ready: boolean; pending?: Promise<void>; stopWaiting?: () => void }
+interface RevisionTask { result: Promise<void>; superseded: Promise<void>; supersede: () => void }
+let revisionTask: RevisionTask | null = null;
+let loadedRevision: RevisionLoad | null = null;
+const comparisonWanted = () => get().mode !== 'single' && get().workspace === 'review';
+const currentRevision = (load: RevisionLoad) => active && load.seq === loadSeq && load.target === viewer && loadedRevision === load;
+function displayMode(target: Viewer) {
+  const mode = comparisonWanted() && get().compareStatus === 'ready' ? get().mode : 'single';
+  target.setMode?.(mode);
+}
+function invalidateRevision() {
+  revisionTask?.supersede(); revisionTask = null;
+  loadSeq++; loadedRevision?.stopWaiting?.(); loadedRevision = null;
+  set({ compareStatus: comparisonWanted() ? 'loading' : 'idle', compareError: '', compareProg: null, texProg: null });
+  if (viewer) { displayMode(viewer); viewer.clearSide?.('A'); }
+}
+async function loadComparison(load = loadedRevision): Promise<void> {
+  if (!load || !currentRevision(load)) return;
+  if (load.failedB.length) {
+    set({ compareStatus: 'error', compareError: t('texFailTitle', { n: load.failedB.length }) + ': ' + load.failedB.slice(0, 4).join(', '), compareProg: null });
+    displayMode(load.target); return;
+  }
+  if (load.ready) { set({ compareStatus: 'ready' }); displayMode(load.target); return; }
+  if (load.pending) return load.pending;
+  const isCurrent = () => currentRevision(load);
+  set({ compareStatus: 'loading', compareError: '', compareProg: null });
+  load.pending = (async () => {
+    try {
+      const result = await load.target.applyManifest('A', load.base, (d, n) => {
+        if (isCurrent()) set({ compareProg: n && d < n ? { d, n } : null });
+      }, isCurrent);
+      if (!isCurrent()) return;
+      if (result.failed.length) throw new Error(t('texFailTitle', { n: result.failed.length }) + ': ' + result.failed.slice(0, 4).join(', '));
+      load.ready = true;
+      set({ compareStatus: 'ready', compareError: '', compareProg: null });
+      displayMode(load.target); load.target.gc();
+    } catch (error) {
+      if (!isCurrent()) return;
+      set({ compareStatus: 'error', compareError: displayError(error, t('opFailed')), compareProg: null });
+      displayMode(load.target);
+    } finally { load.pending = undefined; }
+  })();
+  return load.pending;
+}
+/** 完整载入 B；基准清单用于高亮，A 的贴图仅在实际请求对比时载入。 */
+export function loadRevs(): Promise<void> {
   // Even an unavailable snapshot supersedes an outstanding geometry download.
-  const seq = ++loadSeq;
+  invalidateRevision();
+  let supersede!: () => void;
+  const superseded = new Promise<void>((resolve) => { supersede = resolve; });
+  const task: RevisionTask = { result: loadRevision(loadSeq), superseded, supersede };
+  revisionTask = task;
+  return waitForLatestRevision(task);
+}
+async function waitForLatestRevision(task: RevisionTask): Promise<void> {
+  for (;;) {
+    try { await Promise.race([task.result, task.superseded]); }
+    catch (error) { if (task === revisionTask) throw error; }
+    // A replaced load is not a completed preview. Boot/recovery callers follow
+    // the latest task even when history, base or quality actions initiated it.
+    if (!active || !revisionTask || task === revisionTask) return;
+    task = revisionTask;
+  }
+}
+async function loadRevision(seq: number) {
   const s = get(); const rev = s.viewRev || s.head; if (!rev || !viewer || s.project?.capabilities?.preview === false) return;
   const target = viewer;
+  try {
   const base = baseRev();
   const [mB, mA, parts, tex] = await Promise.all([manifest(rev), manifest(base), api.parts(rev, base), api.textures(rev, base)]);
   if (seq !== loadSeq || target !== viewer || !active) return;
@@ -159,6 +232,7 @@ export async function loadRevs() {
     const geometry = await api.geometry(mB.geometry.url);
     if (seq !== loadSeq || target !== viewer || !active) return;
     target.loadGeometry(geometry, { preserveCamera: loadedGeometry?.target === target });
+    syncGeometryLod(target);
     loadedGeometry = { target, key };
     Object.entries(get().hidden).forEach(([id, hidden]) => target.setPartVisible(id, !hidden));
   }
@@ -166,26 +240,48 @@ export async function loadRevs() {
   set({ parts: parts.parts, textures: tex.textures, selected: current.selected && ids.has(current.selected) ? current.selected : null, hidden: Object.fromEntries(Object.entries(current.hidden).filter(([id]) => ids.has(id))) });
   const isCurrent = () => active && seq === loadSeq && target === viewer;
   const prog = (d: number, n: number) => { if (isCurrent()) set({ texProg: n && d < n ? { d, n } : null }); };
+  target.setBaselineManifest?.(mA);
   const rB = await target.applyManifest('B', mB, prog, isCurrent);
   if (!isCurrent()) return;
-  await target.applyManifest('A', mA, undefined, isCurrent);
-  if (!isCurrent()) return;
+  const load: RevisionLoad = { seq, target, base: mA, failedB: rB.failed, ready: false };
+  loadedRevision = load;
   set({ texProg: null });
   target.gc();
   const failed = rB.failed.length;
   if (failed) toast('error', t('texFailTitle', { n: failed }), rB.failed.slice(0, 4).join(', '));
+  if (comparisonWanted()) {
+    // Switching back to single can publish the already complete B immediately.
+    const noLongerNeeded = new Promise<void>((resolve) => { load.stopWaiting = resolve; });
+    await Promise.race([loadComparison(load), noLongerNeeded]);
+    load.stopWaiting = undefined;
+  }
+  } catch (error) {
+    if (!active || seq !== loadSeq || target !== viewer) return;
+    set({ texProg: null, compareStatus: 'error', compareError: displayError(error, t('opFailed')), compareProg: null });
+    throw error;
+  }
 }
 
 // ---------------------------------------------------------------- 启动
 let bootSeq = 0;
 let viewerFactory: (() => Viewer) | null = null;
 let previewRecoveryPending = false;
+function completePreview(target: Viewer) {
+  const load = loadedRevision;
+  if (!load || !currentRevision(load) || load.target !== target) return false;
+  if (load.failedB.length) throw new ApiError('texture_failed', t('texFailTitle', { n: load.failedB.length }) + ': ' + load.failedB.slice(0, 4).join(', '), 0);
+  previewRecoveryPending = false;
+  set({ phase: 'ready', fatal: null });
+  return true;
+}
 export async function boot(factory?: () => Viewer) {
   if (factory) viewerFactory = factory;
   active = true; previewRecoveryPending = false; const seq = ++bootSeq;
   set({ phase: 'loading', loadMsg: t('ldConnect'), fatal: null });
+  invalidateRevision(); clearManifests();
   try {
     await api.health();
+    if (!active || seq !== bootSeq) return;
     set({ loadMsg: t('ldProject') });
     const [project, steps] = await Promise.all([api.project(), api.steps()]);
     if (!active || seq !== bootSeq) return;
@@ -209,15 +305,17 @@ export async function boot(factory?: () => Viewer) {
     if (!active || seq !== bootSeq) return;
     const target = viewer!;
     target.loadGeometry(buf);
+    syncGeometryLod(target);
     loadedGeometry = { target, key: geometryKey(m) };
     target.setFx(project.fx?.preview ?? null);
     await loadRevs();
     if (!active || seq !== bootSeq || viewer !== target) return;
-    set({ phase: 'ready' });
+    if (!completePreview(target)) return;
     startLive();
     if (get().project?.capabilities?.simulation !== false) void loadSimulation(target);
   } catch (e: any) {
     if (!active || seq !== bootSeq) return;
+    previewRecoveryPending = true;
     const code = e && e.code ? e.code : 'internal';
     set({ phase: 'fatal', fatal: { code, message: e && e.message ? e.message : String(e) } });
     if (code === 'network' || code === 'timeout' || code === 'backend_unavailable') startLive();
@@ -225,6 +323,8 @@ export async function boot(factory?: () => Viewer) {
 }
 export function disposeWorkbench() {
   active = false; bootSeq++; loadSeq++; syncSeq++; viewerFactory = null; previewRecoveryPending = false; disposeRequests();
+  revisionTask?.supersede(); revisionTask = null;
+  loadedRevision?.stopWaiting?.(); loadedRevision = null;
   timers.forEach(clearTimeout); timers.clear(); clearManifests(); loadedGeometry = null; loadedSimulationKey = null; simulationEpoch++; attemptedSimulationEpoch = -1; setViewer(null);
 }
 
@@ -273,7 +373,8 @@ export async function resync(d?: any) {
     target?.setFx(project.fx?.preview ?? null);
     await loadRevs();
     if (!active || seq !== syncSeq || viewer !== target) return;
-    if (initializingPreview || project.capabilities?.preview === false) { previewRecoveryPending = false; set({ phase: 'ready', fatal: null }); }
+    if (project.capabilities?.preview === false) { previewRecoveryPending = false; set({ phase: 'ready', fatal: null }); }
+    else if (initializingPreview && target && !completePreview(target)) return;
     if (get().phase === 'ready' && project.capabilities?.simulation === true && target) {
       await loadSimulation(target);
       if (!active || seq !== syncSeq || viewer !== target) return;
@@ -325,7 +426,31 @@ export const actions = {
   setLang(l: Lang) { setLang(l); localStorage.setItem('wm.lang', l); set({ lang: l }); const p = get().project; if (p) document.title = t('docTitle', { p: p.project.name }); },
   async view(rev: string) { set({ viewRev: rev }); await loadRevs(); const st = get().steps.find((x) => x.id === rev); if (st && st.parts.length && st.parts.length <= 12) viewer?.flash(st.parts); },
   async setBase(b: BaseSel) { set({ baseSel: b }); await loadRevs(); },
-  setMode(m: Mode) { const r = viewer ? viewer.setMode(m) : m; const prev = get().mode; set({ mode: r }); if ((r === 'side') !== (prev === 'side')) viewer?.preset('hero'); },
+  async setMode(m: Mode) {
+    const mode = m === 'overlay' && viewer?.Q?.overlay === false ? 'split' : m;
+    const previous = get().mode;
+    set({ mode });
+    if (viewer) displayMode(viewer);
+    if ((mode === 'side') !== (previous === 'side')) viewer?.preset('hero');
+    if (comparisonWanted()) await loadComparison(); else loadedRevision?.stopWaiting?.();
+  },
+  async retryComparison() {
+    if (!comparisonWanted()) return;
+    if (!loadedRevision || loadedRevision.failedB.length) {
+      const recovering = previewRecoveryPending, target = viewer, boot = bootSeq;
+      if (recovering) set({ phase: 'loading', fatal: null, loadMsg: t('ldModel'), loadFrac: null });
+      try {
+        await loadRevs();
+        if (recovering && active && boot === bootSeq && target && viewer === target && completePreview(target)) {
+          startLive();
+          if (get().project?.capabilities?.simulation !== false) void loadSimulation(target);
+        }
+      } catch (error: any) {
+        if (recovering && active && boot === bootSeq && target === viewer) set({ phase: 'fatal', fatal: { code: error?.code || 'internal', message: displayError(error, t('libPreviewUnavailable')) } });
+        // loadRevs keeps the current comparison error visible for retry.
+      }
+    } else await loadComparison();
+  },
   setChannel(c: number) { viewer?.setChannel(c); set({ channel: c }); },
   setEnv(e: EnvName) { viewer?.setEnv(e); set({ env: e }); },
   setLight(l: LightName) { viewer?.setLight(l); set({ light: l }); },
@@ -336,7 +461,7 @@ export const actions = {
   setCamo(on: boolean) { viewer?.setCamo(on); set({ camo: on }); },
   setGlow(g: number) { viewer?.setGlowGain(g); set({ glow: g }); },
   setOverlay(x: number) { viewer?.setOverlay(x); set({ overlay: x }); },
-  setQuality(q: Quality) { if (viewer?.setQuality(q)) { localStorage.setItem('wm.quality', q); set({ quality: q, mode: viewer.mode }); loadRevs(); } },
+  setQuality(q: Quality) { if (viewer?.setQuality(q)) { localStorage.setItem('wm.quality', q); set({ quality: q, mode: get().mode === 'overlay' && !viewer.Q.overlay ? 'split' : get().mode }); loadRevs(); } },
   select(id: string | null, focus = false) { set({ selected: id, rightTab: id && get().workspace === 'review' ? 'inspect' : get().rightTab }); if (id && focus) viewer?.focus([id]); if (id) viewer?.flash([id]); },
   toggleHidden(id: string) { const h = { ...get().hidden, [id]: !get().hidden[id] }; set({ hidden: h }); viewer?.setPartVisible(id, !h[id]); },
   solo(id: string) {
@@ -389,23 +514,23 @@ export const actions = {
     viewer.simEnable(on);
     if (on) applySimulationSettings(viewer);
     else { viewer.setLodMode(0); viewer.setLodTint(false); viewer.setEmisOverride(-1); }
-    viewer.setMode(on ? 'single' : s.mode);
+    displayMode(viewer);
+    if (on) loadedRevision?.stopWaiting?.(); else if (comparisonWanted()) void loadComparison();
   },
   setTel(t2: Telegraph) { viewer?.setTelegraph(t2); set({ tel: t2 }); },
   setRudder(r: number) { viewer?.setRudder(r); set({ rudder: r }); },
   setCamMode(m: CamMode) { viewer?.setCamMode(m); set({ camMode: m }); },
-  setCombat(on: boolean) { viewer?.setCombat(on); if (on && viewer && viewer.aimBearing === null) viewer.aimAt(60); set({ combat: on }); },
+  setCombat(on: boolean) { viewer?.setCombat(on); set({ combat: on }); },
   setAimMouse(on: boolean) { if (viewer) viewer.aimFollowMouse = on; set({ aimMouse: on }); },
   setAimKm(km: number) { viewer?.setAimDistKm(km); set({ aimKm: km }); },
   setReloadReal(on: boolean) { viewer?.setReloadReal(on); set({ reloadReal: on }); },
   setWaves(w: number) { viewer?.setWaves(w); set({ waves: w }); },
   fire(group: 'main' | 'secondary', how: 'salvo' | 'single') {
-    if (!get().combat) actions.setCombat(true);
     const n = viewer ? viewer.fire(group, how) : 0;
     if (!n) toast('info', t('noReady'), undefined, 1800);
   },
   setEmis(mode: number, speed?: number) { const sp = speed ?? get().emisSpeed; viewer?.setEmisOverride(mode, sp); set({ emisMode: mode, emisSpeed: sp }); },
-  setLodMode(m: 'auto' | number) { viewer?.setLodMode(m); set({ lodMode: m }); },
+  setLodMode(m: 'auto' | number) { set({ lodMode: viewer?.setLodMode(m) ?? m }); },
   setLodBias(b: number) { viewer?.setLodBias(b); set({ lodBias: b }); },
   setLodTint(on: boolean) { viewer?.setLodTint(on); set({ lodTint: on }); },
   setDist(p: 'near' | 'mid' | 'far') { if (!viewer) return; if (p === 'near') viewer.preset('hero'); else viewer.setDistance(p === 'mid' ? 30 : 110); set({ distPreset: p }); },

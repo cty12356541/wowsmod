@@ -97,7 +97,7 @@ struct Geom {
     bytes: Vec<u8>,
     /// 缓存文件 (大小, mtime): 变了才重读
     stamp: Option<(u64, u128)>,
-    /// 模型编辑指纹(有 model 编辑时 = 项目内真实 .geometry 与全部 .visual 的路径+大小+mtime); 没有编辑为 None
+    /// 模型编辑内容指纹；没有真实几何或 model 编辑时为 None
     model_key: Option<String>,
 }
 
@@ -459,41 +459,27 @@ impl PreviewState {
         (None, true, None, None)
     }
 
-    /// 项目有 model 编辑(真实 .geometry 或 edits/ 里有 model 记录)时, 返回几何指纹; 否则 None(用原船种子几何)
-    fn model_key(&self) -> Option<String> {
-        let assets = self.project.assets();
-        let edited_record = std::fs::read_dir(self.project.root.join("edits")).map(|rd| rd.flatten().any(|e| e.file_name().to_string_lossy().contains("_model_"))).unwrap_or(false);
-        let mut items: Vec<String> = vec!["fallback-v3".into()]; // 后处理格式版本, 变了就重建
-        let mut real_geom = false;
-        let mut st = vec![assets];
-        while let Some(d) = st.pop() {
-            let Ok(rd) = std::fs::read_dir(&d) else { continue };
-            for e in rd.flatten() {
-                let p = e.path();
-                if p.is_dir() {
-                    st.push(p);
-                    continue;
-                }
-                let ext = p.extension().and_then(|x| x.to_str()).unwrap_or("").to_ascii_lowercase();
-                // .model/.seq/.ssm: 动画对象(model animate)也要触发重新装配
-                if !matches!(ext.as_str(), "geometry" | "visual" | "model" | "seq" | "ssm") {
-                    continue;
-                }
-                let Ok(m) = e.metadata() else { continue };
-                if ext == "geometry" {
-                    if m.len() < 4096 && std::fs::read(&p).map(|d| mfm::is_sdk_stub(&d)).unwrap_or(true) {
-                        continue;
-                    }
-                    real_geom = true;
-                }
-                items.push(format!("{}|{}|{}", p.display(), m.len(), mtime_ns(&m)));
-            }
+    /// Content identity prevents same-size edits with restored timestamps reusing stale geometry.
+    fn model_key(&self) -> Result<Option<String>> { geometry_source_key(&self.project.root) }
+
+    /// Rebind generated geometry to the comparison's external resources. User-authored caches
+    /// have no generator provenance and remain authoritative, with their bytes in the pair key.
+    pub(super) fn prepare_comparison_geometry(&self, context: &str) -> Result<()> {
+        let context = format!("{context}:{}", self.ship);
+        let cache = self.project.root.join(".wowsmod/cache");
+        let cached = cache.join("geometry.glb");
+        let context_file = cache.join("geometry.comparison_context");
+        if std::fs::read_to_string(&context_file).ok().as_deref() == Some(context.as_str()) { return Ok(()); }
+        let bytes = crate::project_revision::read_plain_file(&cached, 512 * 1024 * 1024)?;
+        let model_key = std::fs::read_to_string(cache.join("geometry.model_key")).ok();
+        let generator = std::fs::read_to_string(cache.join("geometry.generator_version")).ok();
+        if geometry_cache_provenance(&bytes, model_key.as_deref(), generator.as_deref()).0 {
+            self.build_geometry_fallback(&cached)?;
+            *self.geom.write().unwrap() = None;
+            self.ensure_geometry()?;
         }
-        if !real_geom && !edited_record {
-            return None;
-        }
-        items.sort();
-        Some(hash16(items.join("\n").as_bytes()))
+        crate::library::atomic_write(&context_file, context.as_bytes())?;
+        Ok(())
     }
 
     fn ensure_geometry(&self) -> Result<()> {
@@ -502,7 +488,7 @@ impl PreviewState {
         let key_file = cache.join("geometry.model_key");
         let generator_file = cache.join("geometry.generator_version");
         let can_rebuild = !self.ship.is_empty() && (self.game.is_some() || std::env::var_os("WOWSMOD_GP").is_some());
-        let key = self.model_key();
+        let key = self.model_key()?;
         let stamp_now = std::fs::metadata(&cached).ok().map(|m| (m.len(), mtime_ns(&m)));
         if let Some(g) = self.geom.read().unwrap().as_ref() {
             // 缓存文件没变(或本来就不是从缓存文件来的)且模型编辑没变就复用
@@ -1444,9 +1430,59 @@ fn postprocess_glb_materials(raw: &[u8]) -> Result<Vec<u8>> {
     Ok(out)
 }
 
+fn geometry_source_key(root: &Path) -> Result<Option<String>> {
+    let root = std::path::absolute(root)?;
+    let edited = std::fs::read_dir(root.join("edits")).map(|rd| rd.flatten().any(|e| e.file_name().to_string_lossy().contains("_model_"))).unwrap_or(false);
+    let config = crate::project_revision::read_plain_file(&root.join("mod.toml"), 4 * 1024 * 1024)?;
+    let mut items = vec!["geometry-source-content-v1".to_string(), crate::project_revision::sha256_hex(&config)];
+    let mut geometry_inputs = false;
+    for path in crate::library::source_asset_files(&root)? {
+        let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase();
+        if !matches!(ext.as_str(), "geometry" | "visual" | "model" | "seq" | "ssm") { continue; }
+        let bytes = crate::project_revision::read_plain_file(&path, 512 * 1024 * 1024)?;
+        if ext == "geometry" {
+            if bytes.len() < 4096 && mfm::is_sdk_stub(&bytes) { continue; }
+        }
+        geometry_inputs = true;
+        let relative = path.strip_prefix(&root)?.to_string_lossy().replace('\\', "/");
+        items.push(format!("{}|{}|{}", relative, bytes.len(), crate::project_revision::sha256_hex(&bytes)));
+    }
+    if !geometry_inputs && !edited { return Ok(None); }
+    items.sort();
+    Ok(Some(crate::project_revision::sha256_hex(items.join("\n").as_bytes())))
+}
+
 #[cfg(test)]
 mod library_tests {
     use super::*;
+
+    #[test]
+    fn visual_and_animation_only_edits_have_content_identity_without_model_records() {
+        for extension in ["visual", "model", "seq", "ssm"] {
+            let fixture = crate::project_revision::tests::Fixture::project();
+            let path = format!("assets/res_mods/hull.{extension}");
+            fixture.put(&path, b"version A");
+            let first = geometry_source_key(&fixture.0).unwrap();
+            assert!(first.is_some(), "{extension} is an assembly input without .geometry or edit records");
+            fixture.put(&path, b"version B");
+            assert_ne!(geometry_source_key(&fixture.0).unwrap(), first, "{extension} must invalidate generated geometry");
+        }
+    }
+
+    #[test]
+    fn model_identity_detects_same_size_same_time_source_edits() {
+        let fixture = crate::project_revision::tests::Fixture::project();
+        let path = fixture.0.join("assets/res_mods/hull.geometry");
+        fixture.put("assets/res_mods/hull.geometry", &vec![1; 4096]);
+        let original_time = std::fs::metadata(&path).unwrap().modified().unwrap();
+        let before = geometry_source_key(&fixture.0).unwrap();
+        std::fs::write(&path, vec![2; 4096]).unwrap();
+        std::fs::File::options().write(true).open(&path).unwrap().set_times(std::fs::FileTimes::new().set_modified(original_time)).unwrap();
+        assert_ne!(geometry_source_key(&fixture.0).unwrap(), before);
+        let moved = crate::project_revision::tests::Fixture::project();
+        moved.put("assets/res_mods/hull.geometry", &vec![2; 4096]);
+        assert_eq!(geometry_source_key(&fixture.0).unwrap(), geometry_source_key(&moved.0).unwrap(), "absolute paths do not change geometry content identity");
+    }
 
     #[test]
     fn generator_upgrade_failure_retains_only_unchanged_source_geometry() {

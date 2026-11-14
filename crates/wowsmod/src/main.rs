@@ -18,6 +18,8 @@ mod m4cmd;
 mod meshsrc;
 mod mcp;
 mod preview;
+mod project_revision;
+mod workbench_records;
 mod modproj;
 mod oodle_rt;
 mod registry;
