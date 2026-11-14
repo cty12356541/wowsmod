@@ -525,10 +525,13 @@ impl PreviewState {
             existing.unwrap()
         } else if derived_cache && !generator_current && can_rebuild {
             // Generator changes invalidate owned edited AND unedited caches.
-            // Keep the old file until assembly and validation have succeeded.
-            let b = self.build_geometry_fallback(&cached)?;
-            if let Some(k) = &key { std::fs::write(&key_file, k)?; }
-            else if key_file.exists() { std::fs::remove_file(&key_file)?; }
+            // An unavailable client/GP must not hide a usable static cache when
+            // its source key is unchanged. Actual source edits still propagate errors.
+            let (b, rebuilt) = upgrade_geometry_cache(existing.expect("derived cache has bytes"), key_on_disk.as_deref(), key.as_deref(), || self.build_geometry_fallback(&cached))?;
+            if rebuilt {
+                if let Some(k) = &key { std::fs::write(&key_file, k)?; }
+                else if key_file.exists() { std::fs::remove_file(&key_file)?; }
+            }
             b
         } else if let Some(k) = &key {
             // 有模型编辑: 由项目重新装配(新增/替换/缩放的网格才能在工作台看到)
@@ -1326,6 +1329,14 @@ fn diff_mats(a: &BTreeMap<String, Mat>, b: &BTreeMap<String, Mat>) -> (Vec<Strin
 
 const PREVIEW_GEOMETRY_GENERATOR: &str = "preview-rig-v1";
 
+fn upgrade_geometry_cache(existing: Vec<u8>, previous_key: Option<&str>, current_key: Option<&str>, rebuild: impl FnOnce() -> Result<Vec<u8>>) -> Result<(Vec<u8>, bool)> {
+    match rebuild() {
+        Ok(bytes) => Ok((bytes, true)),
+        Err(_) if previous_key == current_key => Ok((existing, false)),
+        Err(error) => Err(error),
+    }
+}
+
 /// Legacy model_key is the existing source-derived-cache contract. New generator
 /// records additionally bind provenance to payload bytes; replacing a cache without
 /// a model_key cannot inherit ownership from an unrelated stale sidecar.
@@ -1436,6 +1447,23 @@ fn postprocess_glb_materials(raw: &[u8]) -> Result<Vec<u8>> {
 #[cfg(test)]
 mod library_tests {
     use super::*;
+
+    #[test]
+    fn generator_upgrade_failure_retains_only_unchanged_source_geometry() {
+        let original = b"last usable geometry".to_vec();
+        for key in [None, Some("unchanged source")] {
+            let (bytes, rebuilt) = upgrade_geometry_cache(original.clone(), key, key, || bail!("source temporarily unavailable")).unwrap();
+            assert_eq!(bytes, original);
+            assert!(!rebuilt, "retained geometry must not update the generator/source stamp");
+        }
+        for (previous, current) in [(None, Some("new source")), (Some("old source"), Some("new source")), (Some("old source"), None)] {
+            let error = upgrade_geometry_cache(original.clone(), previous, current, || bail!("source temporarily unavailable")).unwrap_err();
+            assert!(error.to_string().contains("source temporarily unavailable"), "source edits/undo must never silently show stale geometry");
+        }
+        let (bytes, rebuilt) = upgrade_geometry_cache(original, None, None, || Ok(b"new rig geometry".to_vec())).unwrap();
+        assert_eq!(bytes, b"new rig geometry");
+        assert!(rebuilt);
+    }
 
     #[test]
     fn material_postprocess_preserves_rig_and_keeps_muzzles_inside_mount() {
