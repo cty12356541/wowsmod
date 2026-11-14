@@ -256,6 +256,19 @@ impl GeoEdit {
         Ok(MeshData { positions: u.positions, normals: u.normals, uvs: u.uvs, indices: idx })
     }
 
+    /// Read-only skin attributes for preview export; editing keeps raw bytes intact.
+    pub fn mesh_skin(&mut self, name: &str) -> Result<Option<crate::vertex::SkinData>> {
+        let (v, _) = self.maps(name)?;
+        let k = v.buffer_index as usize;
+        let stride = self.geo.vertex_buffers[k].stride as usize;
+        let fmt = parse_format(&self.geo.vertex_buffers[k].format());
+        let raw = self.vbuf(k)?;
+        let start = v.items_offset as usize * stride;
+        let end = start + v.items_count as usize * stride;
+        let data = raw.get(start..end).ok_or_else(|| Error::format("skin", "vertex mapping out of bounds"))?;
+        crate::vertex::unpack_skin(data, stride, &fmt)
+    }
+
     /// 就地把指定三角形改成退化三角形(三个索引都取该三角形第一个顶点): 顶点缓冲/计数/映射全不变, 只改索引缓冲。
     /// tris = 渲染集内三角形序号。返回实际改动数。
     pub fn degenerate_tris(&mut self, name: &str, tris: &[usize]) -> Result<usize> {

@@ -108,6 +108,36 @@ pub struct Unpacked {
     pub uvs: Option<Vec<[f32; 2]>>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct SkinData {
+    /// Indices into this renderSet's node palette (not the visual node array).
+    pub joints: Vec<[u16; 4]>,
+    pub weights: Vec<[f32; 4]>,
+}
+
+/// BigWorld PC layout: index3,index2,index1,pad,pad,weight2,weight1,pad.
+/// See VertexXYZNUVIIIWWPC/TBPC in BigWorld vertex_formats.hpp and
+/// SoftSkinVertex in software_skinner.hpp: indices are matrix-row offsets / 3.
+/// The third weight is implicit; never replace mixed weights by a dominant bone.
+pub fn unpack_skin(raw: &[u8], stride: usize, fmt: &VertexFormat) -> crate::Result<Option<SkinData>> {
+    use crate::Error;
+    let Some(attr) = fmt.find(Semantic::Skin) else { return Ok(None) };
+    if !fmt.code.ends_with("pc") || !fmt.code.contains("iiiww") || attr.size != 8 || stride == 0
+        || fmt.stride != stride || attr.offset + 8 > stride || raw.len() % stride != 0 {
+        return Err(Error::Unsupported(format!("unsupported skin layout {} / stride {stride}", fmt.code)));
+    }
+    let mut skin = SkinData::default();
+    for (i, vertex) in raw.chunks_exact(stride).enumerate() {
+        let b = &vertex[attr.offset..attr.offset + 8];
+        if b[..3].iter().any(|v| v % 3 != 0) || b[5] as u16 + b[6] as u16 > 255 {
+            return Err(Error::format("skin", format!("vertex {i}: invalid bone row index or weights")));
+        }
+        skin.joints.push([b[2] as u16 / 3, b[1] as u16 / 3, b[0] as u16 / 3, 0]);
+        skin.weights.push([b[6] as f32 / 255.0, b[5] as f32 / 255.0, (255 - b[6] as u16 - b[5] as u16) as f32 / 255.0, 0.0]);
+    }
+    Ok(Some(skin))
+}
+
 /// 解包一段顶点(引擎坐标系, 未做手性转换)。
 pub fn unpack(raw: &[u8], stride: usize, fmt: &VertexFormat) -> (Unpacked, Option<String>) {
     let n = if stride == 0 { 0 } else { raw.len() / stride };
@@ -146,5 +176,32 @@ mod tests {
         assert_eq!(parse_format("set3/xyznuviiiwwtpc").stride, 32);
         assert_eq!(parse_format("set3/xyznuvtbpc").stride, 28);
         assert_eq!(parse_format("set3/xyznuv2tbpc").stride, 32);
+    }
+
+    #[test]
+    fn skin_pc_uses_reversed_indices_and_implicit_third_weight() {
+        let fmt = parse_format("set3/xyznuviiiwwtpc");
+        let mut raw = vec![0u8; 32];
+        raw[20..28].copy_from_slice(&[0, 3, 6, 0, 0, 63, 192, 0]);
+        let skin = unpack_skin(&raw, 32, &fmt).unwrap().unwrap();
+        assert_eq!(skin.joints, vec![[2, 1, 0, 0]]);
+        assert_eq!(skin.weights, vec![[192.0 / 255.0, 63.0 / 255.0, 0.0, 0.0]]);
+        raw[25] = 62;
+        let skin = unpack_skin(&raw, 32, &fmt).unwrap().unwrap();
+        assert_eq!(skin.weights[0][2], 1.0 / 255.0);
+    }
+
+    #[test]
+    fn skin_pc_rejects_unknown_layout_and_invalid_values() {
+        let fmt = parse_format("set3/xyznuviiiwwtpc");
+        let mut raw = vec![0u8; 32];
+        raw[26] = 255;
+        assert!(unpack_skin(&raw, 28, &fmt).is_err());
+        assert!(unpack_skin(&raw[..31], 32, &fmt).is_err());
+        raw[20] = 1;
+        assert!(unpack_skin(&raw, 32, &fmt).is_err());
+        raw[20] = 0; raw[25] = 1;
+        assert!(unpack_skin(&raw, 32, &fmt).is_err());
+        assert!(unpack_skin(&[0; 24], 24, &parse_format("set3/xyznuvtpc")).unwrap().is_none());
     }
 }

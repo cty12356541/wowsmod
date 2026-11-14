@@ -46,6 +46,7 @@ pub mod murmur3;
 pub mod pairing;
 pub mod pickle;
 pub mod pkg;
+pub mod preview_rig;
 pub mod recolor;
 pub mod scene;
 pub mod texture;

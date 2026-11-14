@@ -128,6 +128,9 @@ pub struct AssembleArgs {
     /// 额外输出法线/UV/材质分组(Python 版只有 POSITION)
     #[arg(long)]
     pub full: bool,
+    /// Preserve source gun skeletons/weights for live preview (does not export game animations).
+    #[arg(long)]
+    pub preview_rig: bool,
 }
 
 pub(crate) fn resolve_ship_json(gp: &Value, q: &str) -> Result<(String, Value)> {
@@ -233,7 +236,7 @@ pub fn cmd_assemble(cli: &Cli, a: &AssembleArgs) -> Result<i32> {
         src.get(&format!("{stem}.geometry")).map_err(|e| wowsmod_formats::error::Error::NotFound(format!("{e:#}")))
     };
     let kinds: Vec<String> = a.kinds.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
-    let opts = AssembleOpts { hullsets: a.hullsets.clone(), kinds, full_attributes: a.full };
+    let opts = AssembleOpts { hullsets: a.hullsets.clone(), kinds, full_attributes: a.full, preview_rig: a.preview_rig };
     let (glb, mut table, warn) = assemble::assemble(&sdk, &ship_name, &ship, &geometry, &opts).map_err(|e| anyhow!("装配失败: {e}"))?;
     if let Some(d) = a.out.parent() {
         if !d.as_os_str().is_empty() {

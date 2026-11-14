@@ -500,6 +500,8 @@ impl PreviewState {
         let cache = self.project.root.join(".wowsmod/cache");
         let cached = cache.join("geometry.glb");
         let key_file = cache.join("geometry.model_key");
+        let generator_file = cache.join("geometry.generator_version");
+        let can_rebuild = !self.ship.is_empty() && (self.game.is_some() || std::env::var_os("WOWSMOD_GP").is_some());
         let key = self.model_key();
         let stamp_now = std::fs::metadata(&cached).ok().map(|m| (m.len(), mtime_ns(&m)));
         if let Some(g) = self.geom.read().unwrap().as_ref() {
@@ -514,7 +516,21 @@ impl PreviewState {
         }
         std::fs::create_dir_all(&cache)?;
         let key_on_disk = std::fs::read_to_string(&key_file).ok();
-        let bytes = if let Some(k) = &key {
+        let generator_record = std::fs::read_to_string(&generator_file).ok();
+        let existing = if cached.is_file() { Some(std::fs::read(&cached)?) } else { None };
+        let (derived_cache, generator_current) = existing.as_deref().map(|b| geometry_cache_provenance(b, key_on_disk.as_deref(), generator_record.as_deref())).unwrap_or((false, false));
+        let bytes = if existing.is_some() && !derived_cache {
+            // Unmarked caches may be user-authored preview geometry. A generator
+            // upgrade is not authorization to replace them with game/source geometry.
+            existing.unwrap()
+        } else if derived_cache && !generator_current && can_rebuild {
+            // Generator changes invalidate owned edited AND unedited caches.
+            // Keep the old file until assembly and validation have succeeded.
+            let b = self.build_geometry_fallback(&cached)?;
+            if let Some(k) = &key { std::fs::write(&key_file, k)?; }
+            else if key_file.exists() { std::fs::remove_file(&key_file)?; }
+            b
+        } else if let Some(k) = &key {
             // 有模型编辑: 由项目重新装配(新增/替换/缩放的网格才能在工作台看到)
             if cached.is_file() && key_on_disk.as_deref() == Some(k.as_str()) {
                 std::fs::read(&cached)?
@@ -524,15 +540,17 @@ impl PreviewState {
                 b
             }
         } else if key_on_disk.is_some() {
-            // 编辑已撤销: 丢掉按编辑装配的缓存, 回到原船几何
-            let _ = std::fs::remove_file(&key_file);
-            let _ = std::fs::remove_file(&cached);
-            if let Some(seed) = find_seed(&self.ship).filter(|s| s.join("geometry.glb").is_file()) {
+            // 编辑已撤销: 成功取得新几何后再取消旧 key，失败仍保留最后可用缓存。
+            let b = if can_rebuild {
+                self.build_geometry_fallback(&cached)?
+            } else if let Some(seed) = find_seed(&self.ship).filter(|s| s.join("geometry.glb").is_file()) {
                 std::fs::copy(seed.join("geometry.glb"), &cached)?;
                 std::fs::read(&cached)?
             } else {
                 self.build_geometry_fallback(&cached)?
-            }
+            };
+            std::fs::remove_file(&key_file)?;
+            b
         } else if cached.is_file() {
             std::fs::read(&cached)?
         } else if let Some(seed) = find_seed(&self.ship) {
@@ -563,7 +581,7 @@ impl PreviewState {
         let exe = std::env::current_exe()?;
         let out = dest.with_extension("raw.glb");
         let mut c = std::process::Command::new(&exe);
-        c.args(["--json", "assemble", &self.ship, "--project"]).arg(&self.project.root).args(["--full", "-o"]).arg(&out);
+        c.args(["--json", "assemble", &self.ship, "--project"]).arg(&self.project.root).args(["--full", "--preview-rig", "-o"]).arg(&out);
         // A deliberately nonexistent path is safer than omitting --game in offline GP mode.
         c.arg("--game").arg(self.selected_game.clone().unwrap_or_else(|| self.project.root.join(".wowsmod/no-client")));
         // 无完整客户端的环境(如 CI/盒子): WOWSMOD_GP = GameParams 船条目 JSON, WOWSMOD_GEOM_DIR = 原版 .geometry 目录(可多个, 用系统路径分隔符)
@@ -581,7 +599,10 @@ impl PreviewState {
         }
         let raw = std::fs::read(&out)?;
         let fixed = postprocess_glb_materials(&raw)?;
-        std::fs::write(dest, &fixed)?;
+        let staged = dest.with_extension("pending.glb");
+        std::fs::write(&staged, &fixed)?;
+        std::fs::rename(&staged, dest)?;
+        std::fs::write(dest.with_extension("generator_version"), format!("{}:{}", PREVIEW_GEOMETRY_GENERATOR, hash16(&fixed)))?;
         let _ = std::fs::remove_file(&out);
         Ok(fixed)
     }
@@ -1303,6 +1324,25 @@ fn diff_mats(a: &BTreeMap<String, Mat>, b: &BTreeMap<String, Mat>) -> (Vec<Strin
     (tx.into_iter().collect(), mt.into_iter().collect())
 }
 
+const PREVIEW_GEOMETRY_GENERATOR: &str = "preview-rig-v1";
+
+/// Legacy model_key is the existing source-derived-cache contract. New generator
+/// records additionally bind provenance to payload bytes; replacing a cache without
+/// a model_key cannot inherit ownership from an unrelated stale sidecar.
+fn geometry_cache_provenance(bytes: &[u8], model_key: Option<&str>, record: Option<&str>) -> (bool, bool) {
+    let stamp = record.and_then(|r| r.split_once(':')).filter(|(version, hash)| version.starts_with("preview-rig-v") && *hash == hash16(bytes));
+    let derived = model_key.is_some() || stamp.is_some();
+    let current = stamp.map(|(version, _)| version == PREVIEW_GEOMETRY_GENERATOR && has_preview_rig_schema(bytes)).unwrap_or(false);
+    (derived, current)
+}
+
+fn has_preview_rig_schema(bytes: &[u8]) -> bool {
+    if bytes.len() < 20 || &bytes[..4] != b"glTF" || &bytes[16..20] != b"JSON" { return false; }
+    let len = u32::from_le_bytes(bytes[12..16].try_into().unwrap()) as usize;
+    let Some(json) = bytes.get(20..20usize.saturating_add(len)) else { return false; };
+    serde_json::from_slice::<Value>(json).ok().map(|j| j["asset"]["extras"]["previewRigVersion"].as_u64() == Some(wowsmod_formats::preview_rig::VERSION as u64)).unwrap_or(false)
+}
+
 fn postprocess_glb_materials(raw: &[u8]) -> Result<Vec<u8>> {
     // 最小后处理: 为每个 primitive 按 extras.mfm 建 material 名; 给节点加 part
     use wowsmod_formats::glb;
@@ -1347,8 +1387,11 @@ fn postprocess_glb_materials(raw: &[u8]) -> Result<Vec<u8>> {
         }
     }
     j["materials"] = json!(materials);
+    let scene = j["scene"].as_u64().unwrap_or(0) as usize;
+    let roots: std::collections::BTreeSet<usize> = j["scenes"][scene]["nodes"].as_array().into_iter().flatten().filter_map(|n| n.as_u64().map(|i| i as usize)).collect();
     if let Some(nodes) = j["nodes"].as_array_mut() {
-        for n in nodes {
+        for (index, n) in nodes.iter_mut().enumerate() {
+            if !roots.contains(&index) { continue; }
             if let Some(sec) = n["extras"]["section"].as_str() {
                 n["extras"]["part"] = json!(format!("hull/{sec}"));
                 n["extras"]["lods"] = json!([{"lod": 0, "extent": 1e9}]);
@@ -1360,8 +1403,8 @@ fn postprocess_glb_materials(raw: &[u8]) -> Result<Vec<u8>> {
             }
             if name.starts_with("HP_") {
                 n["extras"]["part"] = json!(name);
-                n["extras"]["hp"] = json!(name);
-                n["extras"]["bones"] = json!([]);
+                if n["extras"].get("hp").is_none() { n["extras"]["hp"] = json!(name); }
+                if n["extras"].get("bones").is_none() { n["extras"]["bones"] = json!([]); }
                 n["extras"]["lods"] = json!([{"lod": 0, "extent": 1e9}]);
             }
         }
@@ -1393,6 +1436,56 @@ fn postprocess_glb_materials(raw: &[u8]) -> Result<Vec<u8>> {
 #[cfg(test)]
 mod library_tests {
     use super::*;
+
+    #[test]
+    fn material_postprocess_preserves_rig_and_keeps_muzzles_inside_mount() {
+        use wowsmod_formats::{scene::{SceneBuilder, ScenePrim}, vertex::SkinData, visual::IDENTITY};
+        let mut b = SceneBuilder::new();
+        let mesh = b.add_mesh_skinned("gun", &[ScenePrim { positions: vec![[0.0; 3]], extras: json!({"mfm": "gun/test.mfm"}), ..Default::default() }],
+            &[SkinData { joints: vec![[0; 4]], weights: vec![[1.0, 0.0, 0.0, 0.0]] }]).unwrap();
+        let mount = b.add_node("HP_test|gun", Some(mesh), None, json!({"hp": "HP_test", "bones": ["yaw"], "rig": {"version": 1, "status": "skinned"}}), None);
+        let bone = b.add_node("Rotate_Y", None, None, json!({"bone": "yaw"}), Some(mount));
+        let muzzle = b.add_node("HP_gunFire1", None, None, json!({"muzzle": 0}), Some(bone));
+        let skin = b.add_skin(&[bone], &[IDENTITY]); b.set_node_skin(mount, skin);
+        let raw = b.write("test");
+        let (before, _) = wowsmod_formats::glb::read_glb(&raw).unwrap();
+        let (after, _) = wowsmod_formats::glb::read_glb(&postprocess_glb_materials(&raw).unwrap()).unwrap();
+        assert_eq!(after["skins"], before["skins"]);
+        assert_eq!(after["nodes"][mount]["extras"]["bones"], json!(["yaw"]));
+        assert!(after["nodes"][muzzle]["extras"].get("part").is_none());
+        assert_eq!(after["nodes"][muzzle]["extras"]["muzzle"], 0);
+    }
+
+    #[test]
+    fn preview_cache_schema_does_not_trust_legacy_or_unrelated_generator_metadata() {
+        use wowsmod_formats::scene::SceneBuilder;
+        let mut old = SceneBuilder::new();
+        old.asset_extras = json!({"ship": "test"});
+        assert!(!has_preview_rig_schema(&old.write("preview-rig-v1")));
+        let mut current = SceneBuilder::new();
+        current.asset_extras = json!({"previewRigVersion": wowsmod_formats::preview_rig::VERSION});
+        let current = current.write("test");
+        assert!(has_preview_rig_schema(&current));
+        assert!(!has_preview_rig_schema(&current[..24]));
+        let mut future = SceneBuilder::new();
+        future.asset_extras = json!({"previewRigVersion": wowsmod_formats::preview_rig::VERSION + 1});
+        assert!(!has_preview_rig_schema(&future.write("test")));
+    }
+
+    #[test]
+    fn cache_upgrade_requires_source_provenance_and_current_payload_hash() {
+        use wowsmod_formats::scene::SceneBuilder;
+        let mut current = SceneBuilder::new();
+        current.asset_extras = json!({"previewRigVersion": wowsmod_formats::preview_rig::VERSION});
+        let bytes = current.write("test");
+        let record = format!("{PREVIEW_GEOMETRY_GENERATOR}:{}", hash16(&bytes));
+        assert_eq!(geometry_cache_provenance(&bytes, None, None), (false, false), "unmarked user cache is not rebuildable just because the game is present");
+        assert_eq!(geometry_cache_provenance(&bytes, None, Some(&record)), (true, true), "unedited generated caches retain provenance without model_key");
+        assert_eq!(geometry_cache_provenance(b"user replacement", None, Some(&record)), (false, false), "stale sidecar cannot claim replacement bytes");
+        assert_eq!(geometry_cache_provenance(b"legacy source cache", Some("source fingerprint"), None), (true, false));
+        let old_record = format!("preview-rig-v0:{}", hash16(&bytes));
+        assert_eq!(geometry_cache_provenance(&bytes, None, Some(&old_record)), (true, false), "old owned generators are upgraded even without model_key");
+    }
 
     #[test]
     fn game_dds_names_match_unique_basenames_with_ascii_case_folding() {

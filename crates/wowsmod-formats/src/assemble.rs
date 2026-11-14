@@ -27,11 +27,13 @@ pub struct AssembleOpts {
     pub kinds: Vec<String>,
     /// 输出 NORMAL / TEXCOORD_0 与材质分组(Python 版只有 POSITION)
     pub full_attributes: bool,
+    /// Preserve source gun skins and pivots for the live preview only.
+    pub preview_rig: bool,
 }
 
 impl Default for AssembleOpts {
     fn default() -> Self {
-        AssembleOpts { hullsets: "intact".into(), kinds: vec!["Artillery".into(), "ATBA".into()], full_attributes: false }
+        AssembleOpts { hullsets: "intact".into(), kinds: vec!["Artillery".into(), "ATBA".into()], full_attributes: false, preview_rig: false }
     }
 }
 
@@ -301,6 +303,8 @@ pub fn assemble(sdk: &Path, ship_name: &str, ship: &Value, geometry: &dyn Fn(&st
         }
     }
     let mut gunmesh: BTreeMap<String, usize> = BTreeMap::new();
+    let mut gunrig: BTreeMap<String, crate::preview_rig::PreviewRig> = BTreeMap::new();
+    let mut rig_metadata: BTreeMap<String, Value> = BTreeMap::new();
     let mut mounts = Vec::new();
     for mt in mounts_from_gp(ship, &opts.kinds) {
         let Some((sec, w)) = hps.get(&mt.hp).cloned() else {
@@ -322,11 +326,31 @@ pub fn assemble(sdk: &Path, ship_name: &str, ship: &Value, geometry: &dyn Fn(&st
                 }
             };
             let prims = mesh_prims(&mut ge, &vis, &|_| true, &mut warn)?;
-            gunmesh.insert(model.clone(), sb.add_mesh(&model, &prims));
+            let rig = if opts.preview_rig {
+                match crate::preview_rig::PreviewRig::prepare(&vis, &mut ge, &prims) {
+                    Ok(rig) => Some(rig),
+                    Err(e) => {
+                        let reason = format!("{e}");
+                        warn.push(format!("{model}: static preview, {reason}"));
+                        rig_metadata.insert(model.clone(), json!({"version": crate::preview_rig::VERSION, "status": "static", "bones": [], "muzzles": 0, "reason": reason}));
+                        None
+                    }
+                }
+            } else { None };
+            let mesh = if let Some(rig) = rig {
+                let mesh = sb.add_mesh_skinned(&model, &prims, &rig.skins)?;
+                rig_metadata.insert(model.clone(), rig.metadata());
+                gunrig.insert(model.clone(), rig);
+                mesh
+            } else { sb.add_mesh(&model, &prims) };
+            gunmesh.insert(model.clone(), mesh);
         }
         let n = game_to_gltf(&w);
         let yaw = n[0][2].atan2(n[2][2]).to_degrees();
-        sb.add_node(&format!("{}|{}", mt.hp, model), Some(gunmesh[&model]), Some(&n), json!({"hp": mt.hp, "model": mt.model, "module": mt.module, "section": sec}), None);
+        let mut extras = json!({"hp": mt.hp, "model": mt.model, "module": mt.module, "section": sec});
+        if let Some(rig) = rig_metadata.get(&model) { extras["rig"] = rig.clone(); extras["bones"] = rig["bones"].clone(); }
+        let mount_node = sb.add_node(&format!("{}|{}", mt.hp, model), Some(gunmesh[&model]), Some(&n), extras, None);
+        if let Some(rig) = gunrig.get(&model) { rig.add_instance(&mut sb, mount_node); }
         mounts.push(json!({
             "hp": mt.hp, "module": mt.module, "kind": mt.kind, "model": mt.model, "section": sec, "numBarrels": mt.num_barrels,
             "game_world_matrix": w.iter().map(|r| r.iter().map(|x| r5(*x)).collect::<Vec<_>>()).collect::<Vec<_>>(),
@@ -343,6 +367,7 @@ pub fn assemble(sdk: &Path, ship_name: &str, ship: &Value, geometry: &dyn Fn(&st
         fx_hps.push(json!({"hp": name, "section": sec, "gltf_pos": [r4(n[0][3]), r4(n[1][3]), r4(n[2][3])]}));
     }
     sb.asset_extras = json!({"ship": ship_name, "hullModel": master});
+    if opts.preview_rig { sb.asset_extras["previewRigVersion"] = json!(crate::preview_rig::VERSION); }
     let table = json!({
         "ship": ship_name, "hullModel": master, "sections": table_sections, "mounts": mounts,
         "hardpoints_total": hps.len(),

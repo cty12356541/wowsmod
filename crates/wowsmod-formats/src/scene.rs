@@ -42,6 +42,7 @@ pub struct SceneBuilder {
     nodes: Vec<Value>,
     roots: Vec<usize>,
     materials: Vec<Value>,
+    skins: Vec<Value>,
     mat_index: std::collections::HashMap<String, usize>,
     pub asset_extras: Value,
 }
@@ -56,7 +57,9 @@ impl SceneBuilder {
         }
         let off = self.bin.len();
         self.bin.extend_from_slice(data);
-        self.views.push(json!({"buffer": 0, "byteOffset": off, "byteLength": data.len(), "target": target}));
+        let mut view = json!({"buffer": 0, "byteOffset": off, "byteLength": data.len()});
+        if target != 0 { view["target"] = json!(target); }
+        self.views.push(view);
         self.views.len() - 1
     }
     fn accessor_f32(&mut self, data: &[f32], comps: usize, minmax: bool) -> usize {
@@ -84,8 +87,17 @@ impl SceneBuilder {
         self.accessors.len() - 1
     }
     pub fn add_mesh(&mut self, name: &str, prims: &[ScenePrim]) -> usize {
+        self.add_mesh_inner(name, prims, &[])
+    }
+    pub fn add_mesh_skinned(&mut self, name: &str, prims: &[ScenePrim], skins: &[crate::vertex::SkinData]) -> Result<usize> {
+        if skins.len() != prims.len() || prims.iter().zip(skins).any(|(p, s)| s.joints.len() != p.positions.len() || s.weights.len() != p.positions.len()) {
+            return Err(Error::format("skin", "skin/primitive vertex counts differ"));
+        }
+        Ok(self.add_mesh_inner(name, prims, skins))
+    }
+    fn add_mesh_inner(&mut self, name: &str, prims: &[ScenePrim], skins: &[crate::vertex::SkinData]) -> usize {
         let mut ps = Vec::new();
-        for p in prims {
+        for (pi, p) in prims.iter().enumerate() {
             let pos: Vec<f32> = p.positions.iter().flatten().copied().collect();
             let mut attrs = serde_json::Map::new();
             attrs.insert("POSITION".into(), json!(self.accessor_f32(&pos, 3, true)));
@@ -96,6 +108,14 @@ impl SceneBuilder {
             if let Some(u) = &p.uvs {
                 let d: Vec<f32> = u.iter().flatten().copied().collect();
                 attrs.insert("TEXCOORD_0".into(), json!(self.accessor_f32(&d, 2, false)));
+            }
+            if let Some(s) = skins.get(pi) {
+                let raw: Vec<u8> = s.joints.iter().flatten().flat_map(|x| x.to_le_bytes()).collect();
+                let v = self.view(&raw, 34962);
+                self.accessors.push(json!({"bufferView": v, "componentType": 5123, "count": s.joints.len(), "type": "VEC4"}));
+                attrs.insert("JOINTS_0".into(), json!(self.accessors.len() - 1));
+                let weights: Vec<f32> = s.weights.iter().flatten().copied().collect();
+                attrs.insert("WEIGHTS_0".into(), json!(self.accessor_f32(&weights, 4, false)));
             }
             let raw: Vec<u8> = p.indices.iter().flat_map(|x| x.to_le_bytes()).collect();
             let iv = self.view(&raw, 34963);
@@ -119,6 +139,18 @@ impl SceneBuilder {
         }
         self.meshes.push(json!({"name": name, "primitives": ps}));
         self.meshes.len() - 1
+    }
+    /// Matrices use the same glTF column-vector convention as add_node.
+    pub fn add_skin(&mut self, joints: &[usize], inverse_binds: &[M4]) -> usize {
+        assert_eq!(joints.len(), inverse_binds.len());
+        let data: Vec<u8> = inverse_binds.iter().flat_map(|m| (0..4).flat_map(move |c| (0..4).flat_map(move |r| (m[r][c] as f32).to_le_bytes()))).collect();
+        let v = self.view(&data, 0);
+        self.accessors.push(json!({"bufferView": v, "componentType": 5126, "count": joints.len(), "type": "MAT4"}));
+        self.skins.push(json!({"joints": joints, "inverseBindMatrices": self.accessors.len() - 1}));
+        self.skins.len() - 1
+    }
+    pub fn set_node_skin(&mut self, node: usize, skin: usize) {
+        self.nodes[node]["skin"] = json!(skin);
     }
     /// `matrix_gltf`: 列向量约定的 4×4(行主序给出); None = 单位阵
     pub fn add_node(&mut self, name: &str, mesh: Option<usize>, matrix_gltf: Option<&M4>, extras: Value, parent: Option<usize>) -> usize {
@@ -161,6 +193,7 @@ impl SceneBuilder {
         if !self.materials.is_empty() {
             j["materials"] = json!(self.materials);
         }
+        if !self.skins.is_empty() { j["skins"] = json!(self.skins); }
         if !self.asset_extras.is_null() {
             j["asset"]["extras"] = self.asset_extras.clone();
         }
@@ -340,5 +373,31 @@ mod tests {
         assert_eq!(s.nodes[1].world[0][3], 10.0);
         assert_eq!(s.meshes[0].prims[0].extras["renderSet"], "X");
         assert_eq!(s.meshes[0].prims[0].material.as_deref(), Some("A"));
+    }
+
+    #[test]
+    fn skinned_mesh_has_standard_attributes_and_independent_skins() {
+        let mut b = SceneBuilder::new();
+        let p = ScenePrim { positions: vec![[0.0; 3]; 3], indices: vec![0, 1, 2], ..Default::default() };
+        let skin = crate::vertex::SkinData { joints: vec![[0, 1, 0, 0]; 3], weights: vec![[0.75, 0.25, 0.0, 0.0]; 3] };
+        let mesh = b.add_mesh_skinned("shared", &[p], &[skin]).unwrap();
+        for i in 0..2 {
+            let root = b.add_node(&format!("mount{i}"), Some(mesh), None, Value::Null, None);
+            let a = b.add_node("yaw", None, None, Value::Null, Some(root));
+            let c = b.add_node("pitch", None, None, Value::Null, Some(a));
+            let sk = b.add_skin(&[a, c], &[IDENTITY, IDENTITY]);
+            b.set_node_skin(root, sk);
+        }
+        let (j, _) = crate::glb::read_glb(&b.write("test")).unwrap();
+        assert_eq!(j["meshes"].as_array().unwrap().len(), 1);
+        assert_eq!(j["skins"].as_array().unwrap().len(), 2);
+        assert_ne!(j["skins"][0]["joints"], j["skins"][1]["joints"]);
+        let attrs = &j["meshes"][0]["primitives"][0]["attributes"];
+        let ja = attrs["JOINTS_0"].as_u64().unwrap() as usize;
+        let wa = attrs["WEIGHTS_0"].as_u64().unwrap() as usize;
+        assert_eq!(j["accessors"][ja]["componentType"], 5123);
+        assert_eq!(j["accessors"][wa]["type"], "VEC4");
+        let ib = j["skins"][0]["inverseBindMatrices"].as_u64().unwrap() as usize;
+        assert_eq!(j["accessors"][ib]["type"], "MAT4");
     }
 }
