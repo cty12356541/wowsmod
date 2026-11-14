@@ -74,6 +74,12 @@ source changes are checked so one variant cannot inherit another one's cover.
 Missing browser/model data or rendering errors leave a usable placeholder and
 an explicit retry action.
 
+For configured external geometry inputs, changing the source without rebuilding
+the preview geometry must not promote an old model image to a fresh cover. The
+server retains the previous image and reports that the model needs rebuilding.
+An in-place client upgrade requires restarting the preview service before new
+covers are generated. These checks do not install or modify game resources.
+
 ## Workbench capabilities and application
 
 The existing `project` view adds `capabilities` with boolean `library`, `preview`,
