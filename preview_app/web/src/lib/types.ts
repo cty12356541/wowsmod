@@ -31,6 +31,15 @@ export interface LibrarySummary {
   ok: boolean; projects: LibraryEntry[]; ships: unknown[]; facets: unknown; warnings: string[];
   game: { available: boolean; path: string | null; build: string | null; version: string | null; running: boolean };
 }
+export interface LibraryThumbnailStatus {
+  ok: true;
+  state: 'queued' | 'rendering' | 'ready' | 'failed' | 'missing';
+  url: string | null;
+  stale: boolean;
+  reason: string | null;
+  width: number;
+  height: number;
+}
 export interface ApplyPlan {
   previous: AppliedProject[]; selected: AppliedProject; target_client?: string; build?: string | number; target_build?: string | number;
   res_mods?: string; files?: number | unknown[]; warnings?: string[]; dry_run?: boolean;

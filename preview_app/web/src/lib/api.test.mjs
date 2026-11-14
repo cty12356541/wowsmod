@@ -29,6 +29,30 @@ test('blob and legacy resource URLs remain within the selected project', () => {
   assert.equal(api.blobUrl('abc'), '/api/v1/projects/variant-B/blob/abc.png');
   assert.equal(api.resourceUrl('/api/v1/geometry/abc.glb'), '/api/v1/projects/variant-B/geometry/abc.glb');
 });
+test('thumbnail status and refresh address the encoded library project, independent of the workbench scope', async () => {
+  globalThis.fetch = async (url, options) => {
+    requests.push({ url, options });
+    return Response.json({ ok: true, state: 'ready', url: '/api/v1/library/projects/a%2Fb/thumbnail/test.png', width: 640, height: 360, stale: false, reason: null });
+  };
+  const expected = '/api/v1/library/projects/a%2Fb/thumbnail';
+  const status = await libraryApi.thumbnail('a/b');
+  assert.equal(requests.at(-1).url, expected);
+  assert.equal(requests.at(-1).options.method, 'GET');
+  assert.equal(status.url, expected + '/test.png');
+  await libraryApi.refreshThumbnail('a/b');
+  assert.equal(requests.at(-1).url, expected + '/refresh');
+  assert.equal(requests.at(-1).options.method, 'POST');
+  assert.deepEqual(JSON.parse(requests.at(-1).options.body), {});
+});
+test('unobserving a thumbnail aborts its request without changing the workbench connection', async () => {
+  globalThis.fetch = (_url, options) => new Promise((_resolve, reject) => options.signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError'))));
+  const before = api.conn();
+  const controller = new AbortController();
+  const pending = libraryApi.thumbnail('a', controller.signal);
+  controller.abort();
+  await assert.rejects(pending, { name: 'AbortError' });
+  assert.equal(api.conn(), before);
+});
 test('disposing workbench cancels outstanding geometry requests', async () => {
   globalThis.fetch = (_url, options) => new Promise((_resolve, reject) => options?.signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))));
   const pending = api.geometry('/api/v1/geometry/test.glb').then(() => 'resolved', () => 'cancelled');

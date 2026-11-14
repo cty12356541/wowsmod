@@ -1,7 +1,7 @@
 /* wowsmod 预览接口客户端（API v1，见 API.md）
  * 实时更新：优先 SSE（/events），断开后退回 2 秒一次的 /state 轮询并持续尝试恢复 SSE；25 秒无消息判定假死。 */
 import { projectPrefix } from './scope';
-import type { LibrarySummary, LibraryStatus, Manifest } from './types';
+import type { LibrarySummary, LibraryStatus, LibraryThumbnailStatus, Manifest } from './types';
 const ORIGIN = ((window as any).WM_API_BASE || '');
 const ROOT = ORIGIN + '/api/v1';
 const BASE = ORIGIN + projectPrefix(location.search);
@@ -24,17 +24,20 @@ let liveEnabled = false;
 let watchdog: ReturnType<typeof setInterval> | null = null;
 const requests = new Set<AbortController>();
 
-async function request<T = any>(method: string, path: string, body?: unknown, opt: { timeout?: number; root?: boolean } = {}): Promise<T> {
+async function request<T = any>(method: string, path: string, body?: unknown, opt: { timeout?: number; root?: boolean; signal?: AbortSignal } = {}): Promise<T> {
+  opt.signal?.throwIfAborted();
   const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), opt.timeout || 20000);
+  const signal = opt.signal ? AbortSignal.any([ctl.signal, opt.signal]) : ctl.signal;
   requests.add(ctl);
   let r: Response;
   try {
-    r = await fetch((opt.root ? ROOT : BASE) + path, { method, signal: ctl.signal, cache: 'no-store', headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined, body: body !== undefined ? JSON.stringify(body) : undefined });
-  } catch (e: any) { noteFailure(); throw new ApiError(e.name === 'AbortError' ? 'timeout' : 'network', e.message, 0); }
+    r = await fetch((opt.root ? ROOT : BASE) + path, { method, signal, cache: 'no-store', headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined, body: body !== undefined ? JSON.stringify(body) : undefined });
+  } catch (e: any) { opt.signal?.throwIfAborted(); noteFailure(); throw new ApiError(e.name === 'AbortError' ? 'timeout' : 'network', e.message, 0); }
   finally { clearTimeout(to); requests.delete(ctl); }
   if (r.status === 503) noteFailure(); else noteOk();
   let data: any = null;
   if ((r.headers.get('content-type') || '').includes('json')) { try { data = await r.json(); } catch { data = null; } }
+  opt.signal?.throwIfAborted();
   if (!r.ok || (data && data.ok === false)) { const e = (data && data.error) || {}; throw new ApiError(e.code || 'http_' + r.status, e.message || 'HTTP ' + r.status, r.status, e.detail); }
   return data as T;
 }
@@ -124,8 +127,19 @@ export const api = {
 };
 
 const libraryRequest = (path: string, body?: unknown) => request(body === undefined ? 'GET' : 'POST', '/library' + path, body, { root: true, timeout: path === '/scan' ? 120000 : 20000 });
+async function libraryThumbnail(id: string, signal?: AbortSignal, refresh = false): Promise<LibraryThumbnailStatus> {
+  const path = `/library/projects/${enc(id)}/thumbnail`;
+  const status = await request<LibraryThumbnailStatus>(refresh ? 'POST' : 'GET', path + (refresh ? '/refresh' : ''), refresh ? {} : undefined, { root: true, timeout: 5000, signal });
+  if (!status?.ok || !['queued', 'rendering', 'ready', 'failed', 'missing'].includes(status.state)) {
+    throw new ApiError('invalid_thumbnail', 'Invalid library thumbnail status', 0);
+  }
+  // Library images are root-level resources, including on a project-scoped page.
+  return { ...status, url: status.url?.startsWith('/') ? ORIGIN + status.url : status.url };
+}
 export const libraryApi = {
   list: () => libraryRequest('') as Promise<LibrarySummary>,
+  thumbnail: (id: string, signal?: AbortSignal) => libraryThumbnail(id, signal),
+  refreshThumbnail: (id: string, signal?: AbortSignal) => libraryThumbnail(id, signal, true),
   add: (path: string) => libraryRequest('/add', { path }),
   scan: (root: string) => libraryRequest('/scan', { root }),
   update: (id: string, patch: { display_name?: string; tags?: string[]; favorite?: boolean; status?: LibraryStatus }) => libraryRequest(`/projects/${enc(id)}/update`, patch),

@@ -32,7 +32,8 @@ export interface RenderResult {
   meta: { ship: string; rev: string; step: number | null; base: string | null; view: string; channel: string; env: string; light: string; look?: string; fx?: string | null; compare: string; lod?: Record<string, number>; sim?: unknown; cells?: { view: string; rev: string; x: number; y: number; w: number; h: number }[] };
 }
 
-const VIEW_ALIAS: Record<string, string> = { fq: 'bow', 'front-quarter': 'bow', front: 'bow', rq: 'stern', 'rear-quarter': 'stern', rear: 'stern', side: 'side', top: 'top', port: 'port', hero: 'hero', funnel: 'funnel', bow: 'bow', stern: 'stern', custom: 'custom' };
+const VIEW_ALIAS: Record<string, string> = { fq: 'bow', 'front-quarter': 'bow', front: 'bow', rq: 'stern', 'rear-quarter': 'stern', rear: 'stern', side: 'side', top: 'top', port: 'port', hero: 'hero', deck: 'deck', funnel: 'funnel', bow: 'bow', stern: 'stern', custom: 'custom' };
+export function renderViewPreset(view: string): string { return Object.prototype.hasOwnProperty.call(VIEW_ALIAS, view) ? VIEW_ALIAS[view] : 'hero'; }
 const DIST: Record<string, number> = { mid: 30, far: 110 };
 const bool = (v: string | null) => v !== null && v !== '0' && v !== 'false' && v !== 'no';
 /** fx 参数 → 特效主题 */
@@ -154,7 +155,7 @@ async function setup(P: Required<Pick<RenderParams, 'w' | 'h'>> & RenderParams, 
   }
   v.setTime(P.t ?? 0);
   // 相机（在模拟之后：船体姿态已定）
-  const vname = VIEW_ALIAS[view] || 'hero';
+  const vname = renderViewPreset(view);
   v.baseFov = P.fov && P.fov > 5 && P.fov < 120 ? P.fov : 34;
   let tgt: number[] | undefined;
   if (P.tgt) { tgt = P.tgt.split(',').map(Number); if (tgt.length !== 3 || tgt.some((x) => !isFinite(x))) throw Object.assign(new Error('tgt= must be x,y,z'), { code: 'bad_param' }); }
