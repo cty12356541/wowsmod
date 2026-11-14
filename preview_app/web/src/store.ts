@@ -113,6 +113,25 @@ const simulationKey = (project: Project) => JSON.stringify([project.ship.param |
 let loadedSimulationKey: string | null = null;
 let simulationEpoch = 0, attemptedSimulationEpoch = -1;
 
+function clearSimulation() {
+  viewer?.setSimData(null);
+  set({ sim: null, simOn: false, workspace: 'review', rightTab: 'history', snap: null, tel: 'stop', rudder: 0, combat: false });
+}
+
+async function loadSimulation(target: Viewer) {
+  const epoch = simulationEpoch, boot = bootSeq;
+  if (!active || viewer !== target || attemptedSimulationEpoch === epoch) return;
+  // Stamp only an actual request, so an overlapping refresh can still take
+  // ownership if the first refresh was superseded while loading materials.
+  attemptedSimulationEpoch = epoch;
+  try {
+    const sim: SimData = await api.sim();
+    if (!active || epoch !== simulationEpoch || boot !== bootSeq || viewer !== target) return;
+    target.setSimData(sim);
+    set({ sim });
+  } catch { /* Missing simulation is represented as unavailable. */ }
+}
+
 let loadSeq = 0;
 /** 载入 viewRev（B）与对比基准（A）的材质 + 部件树 + 贴图列表 */
 export async function loadRevs() {
@@ -158,9 +177,12 @@ export async function boot(factory?: () => Viewer) {
     set({ loadMsg: t('ldProject') });
     const [project, steps] = await Promise.all([api.project(), api.steps()]);
     if (!active || seq !== bootSeq) return;
-    set({ project, steps: steps.steps, head: steps.head, viewRev: steps.head });
-    loadedSimulationKey = simulationKey(project);
+    const s = get();
+    const nextSimulationKey = simulationKey(project);
+    if ((loadedSimulationKey !== nextSimulationKey || project.capabilities?.simulation === false) && (s.sim || s.simOn || s.workspace === 'sim')) clearSimulation();
+    loadedSimulationKey = nextSimulationKey;
     simulationEpoch++;
+    set({ project, steps: steps.steps, head: steps.head, viewRev: steps.head });
     document.title = t('docTitle', { p: project.project.name });
     if (project.capabilities?.preview === false) { set({ phase: 'ready' }); startLive(); return; }
     if (!steps.head) throw new ApiError('no_model', '', 404);
@@ -173,14 +195,15 @@ export async function boot(factory?: () => Viewer) {
     set({ loadMsg: t('ldParse'), loadFrac: null });
     await new Promise((r) => setTimeout(r, 0));
     if (!active || seq !== bootSeq) return;
-    viewer!.loadGeometry(buf);
-    loadedGeometry = { target: viewer!, key: geometryKey(m) };
-    viewer!.setFx(project.fx?.preview ?? null);
-    if (project.capabilities?.simulation !== false) try { const epoch = simulationEpoch; attemptedSimulationEpoch = epoch; const sim = await api.sim(); if (!active || seq !== bootSeq || epoch !== simulationEpoch) return; set({ sim }); viewer!.setSimData(sim); } catch { /* Missing simulation is represented as unavailable. */ }
+    const target = viewer!;
+    target.loadGeometry(buf);
+    loadedGeometry = { target, key: geometryKey(m) };
+    target.setFx(project.fx?.preview ?? null);
     await loadRevs();
-    if (!active || seq !== bootSeq) return;
+    if (!active || seq !== bootSeq || viewer !== target) return;
     set({ phase: 'ready' });
     startLive();
+    if (get().project?.capabilities?.simulation !== false) void loadSimulation(target);
   } catch (e: any) {
     if (!active || seq !== bootSeq) return;
     const code = e && e.code ? e.code : 'internal';
@@ -220,10 +243,7 @@ export async function resync(d?: any) {
     const refreshSimulation = loadedSimulationKey !== nextSimulationKey;
     loadedSimulationKey = nextSimulationKey;
     if (refreshSimulation) simulationEpoch++;
-    if (refreshSimulation || (project.capabilities?.simulation === false && (s.sim || s.simOn || s.workspace === 'sim'))) {
-      viewer?.setSimData(null);
-      set({ sim: null, simOn: false, workspace: 'review', rightTab: 'history', snap: null, tel: 'stop', rudder: 0, combat: false });
-    }
+    if (refreshSimulation || (project.capabilities?.simulation === false && (s.sim || s.simOn || s.workspace === 'sim'))) clearSimulation();
     clearManifests();
     set({ project, steps: steps.steps, head: steps.head, viewRev: wasAtHead || !exists ? steps.head : s.viewRev });
     document.title = t('docTitle', { p: project.project.name });
@@ -242,12 +262,9 @@ export async function resync(d?: any) {
     await loadRevs();
     if (!active || seq !== syncSeq || viewer !== target) return;
     if (initializingPreview || project.capabilities?.preview === false) { previewRecoveryPending = false; set({ phase: 'ready', fatal: null }); }
-    if (attemptedSimulationEpoch !== simulationEpoch && project.capabilities?.simulation === true && target) {
-      // Geometry may have superseded the identity's first resync before /sim began.
-      // Stamp only an actual attempt so a later same-identity resync can own it.
-      const epoch = simulationEpoch; attemptedSimulationEpoch = epoch;
-      try { const sim = await api.sim(); if (!active || epoch !== simulationEpoch || viewer !== target) return; set({ sim }); target.setSimData(sim); }
-      catch { /* Changed or unsupported simulation stays unavailable after a failed fetch. */ }
+    if (get().phase === 'ready' && project.capabilities?.simulation === true && target) {
+      await loadSimulation(target);
+      if (!active || seq !== syncSeq || viewer !== target) return;
     }
     if (d && d.reason === 'new_step' && wasAtHead) {
       const st = steps.steps.find((x: Step) => x.id === steps.head);

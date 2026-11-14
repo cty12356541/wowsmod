@@ -23,8 +23,13 @@ globalThis.fetch = async (url) => {
 };
 const { boot, disposeWorkbench, resync, useStore } = await import('../store.ts');
 const fakeViewer = { loadGeometry() {}, setFx() {}, applyManifest: async () => ({ failed: [] }), gc() {}, setSimData(value) { viewerSimulation.push(value); } };
+async function waitFor(predicate) {
+  for (let i = 0; i < 100 && !predicate(); i++) await new Promise((resolve) => setTimeout(resolve, 1));
+  assert.ok(predicate(), 'expected workbench transition did not occur');
+}
 test('ordinary material/source refresh does not repeatedly fetch unchanged ship simulation', async () => {
   await boot(() => fakeViewer); assert.equal(simRequests, 1);
+  await waitFor(() => useStore.getState().sim?.ship.code === 'A');
   await resync(); await resync(); assert.equal(simRequests, 1);
   assert.equal(useStore.getState().sim.ship.code, 'A');
 });
@@ -81,5 +86,76 @@ test('unmount rejects a late same-identity simulation result', async () => {
   assert.equal(typeof pendingSim, 'function'); const release = pendingSim; const count = viewerSimulation.length;
   disposeWorkbench(); release(); await first;
   assert.equal(viewerSimulation.length, count); assert.equal(useStore.getState().sim, null);
+});
+
+test('boot finishes both material sides before starting optional simulation', async () => {
+  disposeWorkbench(); ship = 'F'; simulation = true; pendingSim = true;
+  const before = simRequests;
+  const B = Promise.withResolvers(), A = Promise.withResolvers();
+  const started = [], committed = [];
+  const target = { ...fakeViewer, async applyManifest(side) {
+    started.push(side);
+    await (side === 'B' ? B.promise : A.promise);
+    committed.push(side);
+    return { failed: [] };
+  } };
+  const ready = [];
+  const unsubscribe = useStore.subscribe((state) => {
+    if (state.phase === 'ready' && !state.texProg) ready.push(committed.slice());
+  });
+  let bootFinished = false;
+  const loading = boot(() => target).then(() => { bootFinished = true; });
+  try {
+    await waitFor(() => started.length || simRequests > before);
+    assert.equal(simRequests, before, 'simulation must not start ahead of B materials');
+    assert.deepEqual(started, ['B']); assert.deepEqual(ready, []);
+    B.resolve(); await waitFor(() => started.includes('A'));
+    assert.equal(simRequests, before, 'simulation must not start ahead of A materials');
+    assert.deepEqual(committed, ['B']); assert.deepEqual(ready, []);
+    A.resolve(); await waitFor(() => bootFinished && typeof pendingSim === 'function');
+    assert.deepEqual(ready.at(-1), ['B', 'A']);
+    assert.equal(useStore.getState().sim, null);
+    await Promise.all([resync(), resync()]);
+    assert.equal(simRequests, before + 1);
+    pendingSim(); await waitFor(() => useStore.getState().sim?.ship.code === 'F');
+    assert.equal(viewerSimulation.at(-1).ship.code, 'F');
+  } finally {
+    unsubscribe(); B.resolve(); A.resolve();
+    if (typeof pendingSim === 'function') pendingSim();
+    disposeWorkbench(); await loading;
+  }
+});
+
+test('a supported ship refresh supersedes a held startup simulation request', async () => {
+  disposeWorkbench(); ship = 'G'; simulation = true; pendingSim = true;
+  const loading = boot(() => fakeViewer);
+  await waitFor(() => typeof pendingSim === 'function');
+  const release = pendingSim;
+  try {
+    ship = 'H'; pendingSim = null; await resync();
+    assert.equal(useStore.getState().sim?.ship.code, 'H');
+    release(); await loading; await new Promise(setImmediate);
+    assert.equal(useStore.getState().sim?.ship.code, 'H');
+    assert.equal(viewerSimulation.at(-1).ship.code, 'H');
+  } finally { release(); disposeWorkbench(); }
+});
+
+test('unmount prevents a held startup simulation from reaching the viewer', async () => {
+  disposeWorkbench(); ship = 'I'; simulation = true; pendingSim = true;
+  const loading = boot(() => fakeViewer);
+  await waitFor(() => typeof pendingSim === 'function');
+  const release = pendingSim;
+  const count = viewerSimulation.length;
+  disposeWorkbench(); release(); await loading; await new Promise(setImmediate);
+  assert.equal(viewerSimulation.length, count);
+  assert.notEqual(useStore.getState().sim?.ship.code, 'I');
+});
+
+test('startup probes a legacy project with no simulation capability field', async () => {
+  disposeWorkbench(); ship = 'J'; simulation = undefined; pendingSim = null;
+  const before = simRequests;
+  await boot(() => fakeViewer);
+  await waitFor(() => useStore.getState().sim?.ship.code === 'J');
+  await resync(); assert.equal(simRequests, before + 1);
 });
 test.after(() => disposeWorkbench());

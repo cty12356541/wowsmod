@@ -241,7 +241,7 @@ export class Viewer {
     this.blob.visible = !isWater && !this.simOn; (this.blob.material as any).uniforms.uA.value = e.shadow;
     this.wlSheet.visible = this.wlOn && !wActive && !this.simOn; (this.wlSheet.material as any).uniforms.uCol.value = lin(e.sheet); (this.wlSheet.material as any).uniforms.uA.value = dark ? 0.09 : 0.07;
     this.U.uWLLine.value = this.wlOn && !(wActive && this.waterMode === 'full') ? 1 : 0; this.U.uWLCol.value = lin(e.wl);
-    this.foamMat.uniforms.uFoam.value = fxTint(lin(e.foam), this.fx?.wake); this.foamMat.uniforms.uK.value = isWater ? 1 : 0.85;
+    this.updateWakeTint(); this.foamMat.uniforms.uK.value = isWater ? 1 : 0.85;
     this.panels.forEach((p) => { (p.material as THREE.MeshBasicMaterial).color.setScalar(e.panel); p.visible = !g; });
     if (this.envRT) this.envRT.dispose();
     this.envRT = this.pmrem.fromScene(this.envScene, 0.02, 0.1, 100); this.scene.environment = this.envRT.texture;
@@ -798,7 +798,8 @@ export class Viewer {
     }
   }
   /** 设特效主题(null = 原版) */
-  setFx(t: FxTheme | null) { this.fx = t; this.applyEnv(); this.poke(); }
+  setFx(t: FxTheme | null) { this.fx = t; this.updateWakeTint(); this.poke(); }
+  private updateWakeTint() { this.foamMat.uniforms.uFoam.value = fxTint(lin(this.pal.foam), this.fx?.wake); }
   /** 推进模拟 dt 秒（确定性） */
   stepSim(dt: number) {
     const mo = this.motion; if (!mo || !this.simOn) return;
