@@ -35,7 +35,11 @@ export interface GameLook {
   gain: [number, number, number]; toe: [number, number, number]; tmP: number; sat: number; /** 曲线肩部放大(>1 时亮部提前到顶, 金色因 R 先饱和而偏黄) */ tmS?: number;
   /** 拟合用: >0 时船体直接输出 辐亮度×raw(不做色调映射) */
   raw?: number;
-  fogCol: string; fogDen: number; emisK: number; bloomT: number; bloomS: number; mgSwap: number;
+  fogCol: string; fogDen: number; emisK: number; bloomT: number; bloomS: number;
+  /** Diagnostic only: 0 = verified R gloss / G metal source; 1 swaps them before decoding. */
+  mgSwap: number;
+  /** Legacy MG gamma assumption; reflected default 1, actual runtime value unknown. */
+  mgGamma?: number;
   deep: string; shallow: string; tint: string; shadow: number;
   /** 近似 AO(0..1): 朝下/掠射压暗, 补港口 SSAO/檐下(外带件平涂). 白天 ~0.55 */
   contactAO?: number;

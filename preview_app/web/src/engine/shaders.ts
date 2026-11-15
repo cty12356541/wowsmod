@@ -146,7 +146,10 @@ uniform vec3 uCamoCol, uHiColor, uWTint, uWLCol, uWire, uLodCol;
 uniform float uCamoOn, uEmisK, uEmisPower, uGlowGain, uChannel, uWL, uHi, uTime, uWLLine, uWater, uCut, uAO, uLodMix;
 uniform float uAnimMode, uAnimPower, uAnimSpeed, uAnimOverride, uAnimOvSpeed;
 uniform vec2 uCutDir;
-uniform float uGameOn, uGameRaw, uSat, uFogDen, uMgSwap, uTmP, uTmS, uAoAmt, uAoFloor, uGoldShift, uPeriShift; uniform vec3 uGain, uToe, uFogCol;
+uniform float uGameOn, uGameRaw, uSat, uFogDen, uMgSwap, uMgGamma, uTmP, uTmS, uAoAmt, uAoFloor, uGoldShift, uPeriShift; uniform vec3 uGain, uToe, uFogCol;
+#ifdef LEGACY_SHIP_MG
+  uniform float uLegacyGlossRemap, uLegacySpecularMul, uLegacySpecularPow, uLegacyAlbedoMul, uLegacyAlbedoToSpecular;
+#endif
 #ifdef HAS_AO
   uniform sampler2D tAO;
 #endif
@@ -189,12 +192,33 @@ export const FRAG = {
   rough: `
   float roughnessFactor = roughness;
   #ifdef HAS_MG
-    roughnessFactor = clamp( 1.0 - mix( wmMG.r, wmMG.g, uMgSwap ), 0.07, 1.0 );
+    float wmGloss = mix( wmMG.r, wmMG.g, uMgSwap );
+    #ifdef LEGACY_SHIP_MG
+      wmGloss = pow( wmGloss, uLegacyGlossRemap );
+    #endif
+    #ifdef SHIP_MG
+      roughnessFactor = max( 1.0 - wmGloss, 0.005 );
+    #else
+      roughnessFactor = clamp( 1.0 - wmGloss, 0.07, 1.0 );
+    #endif
   #endif`,
   metal: `
   float metalnessFactor = metalness;
   #ifdef HAS_MG
     metalnessFactor = mix( wmMG.g, wmMG.r, uMgSwap );
+    #ifdef LEGACY_SHIP_MG
+      metalnessFactor = min( pow( pow( metalnessFactor, uMgGamma ) * uLegacySpecularMul, uLegacySpecularPow ), 1.0 );
+    #endif
+  #endif`,
+  physical: `
+  #ifdef LEGACY_SHIP_MG
+    // A is already linear in this preview. Preserve that color-space assumption;
+    // game runtime gamma and texture SRGB binding have not been captured.
+    float wmLum = max( dot( wmAlbRaw, vec3( 0.2125, 0.7154, 0.0721 ) ), 0.001 );
+    vec3 wmSpecBase = vec3( 0.549585, 0.556114, 0.554256 );
+    vec3 wmSpecTint = clamp( wmSpecBase + uLegacyAlbedoToSpecular * ( wmAlbRaw / wmLum - wmSpecBase ), 0.0, 1.0 );
+    material.specularColor = mix( vec3( 0.04 ), wmSpecTint, metalnessFactor );
+    material.diffuseColor = clamp( wmAlbRaw * ( 1.0 - metalnessFactor ) * uLegacyAlbedoMul, 0.0, 1.0 );
   #endif`,
   normal: `
   #ifdef USE_NORMALMAP

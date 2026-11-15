@@ -19,7 +19,7 @@ test('changing and resetting wake tint keeps the environment render target', () 
     scene: new THREE.Scene(), envScene: new THREE.Scene(), shipFrame: new THREE.Group(), panels: [],
     BOX: new THREE.Box3(new THREE.Vector3(-1, -1, -5), new THREE.Vector3(1, 1, 5)), WL: 0,
     Q: QUALITY.low, env: 'studio', light: 'day', look: 'studio', wlOn: true, waterMode: 'full', channel: 0,
-    U: uniforms('uTime uCut uCutDir uWaterOpa uWL uWater uWTint uWLLine uWLCol uGameOn uMgSwap uEmisK uAoAmt uGoldShift uPeriShift'), WU: {},
+    U: uniforms('uTime uCut uCutDir uWaterOpa uWL uWater uWTint uWLLine uWLCol uGameOn uMgSwap uMgGamma uEmisK uAoAmt uGoldShift uPeriShift'), WU: {},
     compMat: new THREE.ShaderMaterial({ uniforms: uniforms('uExposure uVig uRaw') }), bloom: {},
     matCache: new Map(), renderer: { shadowMap: {} },
     pmrem: { fromScene() { generated++; return new THREE.WebGLRenderTarget(1, 1); } },

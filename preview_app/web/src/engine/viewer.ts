@@ -118,7 +118,7 @@ export class Viewer {
       uHiColor: { value: lin('#d9822b') }, uWire: { value: lin('#1f6f8b') }, uHi: { value: 0 }, uLodCol: { value: new T.Color() }, uLodMix: { value: 0 },
       uAnimOverride: { value: -1 }, uAnimOvSpeed: { value: 1 },
       uGameOn: { value: 0 }, uGain: { value: new T.Vector3(1, 1, 1) }, uToe: { value: new T.Vector3(0, 0, 0) }, uSat: { value: 1 },
-      uFogCol: { value: new T.Color() }, uFogDen: { value: 0 }, uMgSwap: { value: 0 }, uTmP: { value: 1 }, uTmS: { value: 1 }, uGameRaw: { value: 0 },
+      uFogCol: { value: new T.Color() }, uFogDen: { value: 0 }, uMgSwap: { value: 0 }, uMgGamma: { value: 1 }, uTmP: { value: 1 }, uTmS: { value: 1 }, uGameRaw: { value: 0 },
       uAoAmt: { value: 0 }, uAoFloor: { value: 0.52 }, uGoldShift: { value: 0 }, uPeriShift: { value: 0 }, uWaterOpa: { value: 1 },
     };
     this.WU = { uShipP: { value: new T.Vector2() }, uShipPsi: { value: 0 } };
@@ -261,6 +261,9 @@ export class Viewer {
     this.matCache.forEach((m) => { m.envMapIntensity = envI * (m.userData.envMul || 1); });
     // 船体响应(仅船体材质; 背景不受影响)
     const U = this.U; U.uGameOn.value = g ? 1 : 0;
+    // Current shader reflection defaults gamma.x to 1; the runtime value is unknown.
+    // This diagnostic override affects legacy MG only, never re-decodes linear albedo.
+    U.uMgGamma.value = Number.isFinite(g?.mgGamma) ? g!.mgGamma! : 1;
     if (g) {
       U.uGain.value.set(...g.gain); U.uToe.value.set(...g.toe); U.uTmP.value = g.tmP; U.uTmS.value = g.tmS ?? 1; U.uSat.value = g.sat;
       U.uFogCol.value = lin(g.fogCol); U.uFogDen.value = g.fogDen; U.uMgSwap.value = g.mgSwap; U.uEmisK.value = g.emisK; U.uGameRaw.value = g.raw || 0;
@@ -428,6 +431,11 @@ export class Viewer {
   // ---------------------------------------------------------------- 材质
   private buildMaterial(def: MaterialDef, tex: Record<string, THREE.Texture>, sig: string) {
     const fam = def.family || 'pbs', p = def.params || {};
+    const fx = (def.fx || '').split(/[\\/]/).pop()!.toLowerCase();
+    // Exact effects verified against Lesta 8871067 DXBC; family alone is not a
+    // material contract (modern and legacy effects can both be "emissive").
+    const legacy = fx === 'pbs_ship_emissive.fx' || fx === 'pbs_ship_emissive_skinned.fx';
+    const shipMG = legacy || ['ship_material.fx', 'ship_material_skinned.fx', 'ship_emissive_material_skinned.fx'].includes(fx);
     const m = new T.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6, metalness: 0.0, side: T.FrontSide });
     m.map = tex.a || FALLBACK.a;
     if (tex.n) { m.normalMap = tex.n; m.normalScale = new T.Vector2(1, 1); }
@@ -435,6 +443,7 @@ export class Viewer {
     const defines: Record<string, string> = {};
     if (fam === 'pbs') defines.FAM_PBS = ''; if (fam === 'emissive') defines.FAM_EMISSIVE = '';
     if (hasMG) defines.HAS_MG = ''; if (tex.ao) defines.HAS_AO = '';
+    if (shipMG) defines.SHIP_MG = ''; if (legacy) defines.LEGACY_SHIP_MG = '';
     (m as any).defines = defines;
     m.userData = { family: fam, sig, envMul: 1, aoTex: tex.ao || null };
     if (fam === 'wire') { m.alphaTest = 0.5; m.side = T.DoubleSide; }
@@ -448,7 +457,13 @@ export class Viewer {
     if (p.doubleSided) m.side = T.DoubleSide;
     if (p.alphaTestEnable) m.alphaTest = Math.max(1, p.alphaReference != null ? +p.alphaReference : 128) / 255;
     // 发光参数（.mfm）：emissivePower（默认 2.0）、emissionAnimationMode、animEmissionPower；动画速度 animSpeed 未确认，缺省 1 Hz（近似）
+    const legacyParam = (name: string, fallback: number) => Number.isFinite(p[name]) ? p[name] : fallback;
     const loc = {
+      uLegacyGlossRemap: { value: legacyParam('g_legacyGlossRemap', 0.75) },
+      uLegacySpecularMul: { value: legacyParam('g_legacySpecularMul', 3) },
+      uLegacySpecularPow: { value: legacyParam('g_legacySpecularPow', 4) },
+      uLegacyAlbedoMul: { value: legacyParam('g_legacyAlbedoMul', 1.5) },
+      uLegacyAlbedoToSpecular: { value: legacyParam('g_legacyAlbedoToSpecular', 0.9) },
       uEmisPower: { value: p.emissivePower != null ? +p.emissivePower : 2.0 },
       uAnimMode: { value: p.emissionAnimationMode != null ? +p.emissionAnimationMode : 0 },
       uAnimPower: { value: p.animEmissionPower != null ? +p.animEmissionPower : (p.emissivePower != null ? +p.emissivePower : 1.0) },
@@ -462,15 +477,16 @@ export class Viewer {
       sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\n' + S.SHIP_COMMON)
         .replace('#include <map_fragment>', S.FRAG.map).replace('#include <roughnessmap_fragment>', S.FRAG.rough).replace('#include <metalnessmap_fragment>', S.FRAG.metal)
         .replace('#include <normal_fragment_maps>', S.FRAG.normal).replace('#include <emissivemap_fragment>', S.FRAG.emis).replace('#include <aomap_fragment>', S.FRAG.ao)
+        .replace('#include <lights_physical_fragment>', '#include <lights_physical_fragment>\n' + S.FRAG.physical)
         .replace('#include <dithering_fragment>', '#include <dithering_fragment>\n' + S.FRAG.post);
     };
-    m.customProgramCacheKey = () => 'wm2|' + fam + '|' + Object.keys(defines).join(',') + '|' + (m.normalMap ? 'n' : '') + (m.map ? 'a' : '');
+    m.customProgramCacheKey = () => 'wm3|' + fam + '|' + Object.keys(defines).join(',') + '|' + (m.normalMap ? 'n' : '') + (m.map ? 'a' : '');
     const gp = this.gameParams(); m.envMapIntensity = (gp ? gp.envI : this.pal.envI) * m.userData.envMul;
     m.wireframe = this.channel === 4;
     return m;
   }
   private static SLOTS: [string, boolean][] = [['a', true], ['n', false], ['mg', false], ['ao', false]];
-  private sigOf(def: MaterialDef) { const t: any = def.textures || {}; return [def.family, JSON.stringify(def.params || {}), ...Viewer.SLOTS.map(([s]) => t[s] ? `${t[s].url}|${t[s].hash}` : '-')].join('|'); }
+  private sigOf(def: MaterialDef) { const t: any = def.textures || {}; return [def.family, def.fx || '', JSON.stringify(def.params || {}), ...Viewer.SLOTS.map(([s]) => t[s] ? `${t[s].url}|${t[s].hash}` : '-')].join('|'); }
   /** Change highlighting only needs signatures, not an invisible baseline's PNGs. */
   setBaselineManifest(manifest: Manifest) {
     this.baselineSignatures = Object.fromEntries(Object.entries(manifest.materials || {}).map(([mfm, def]) => [mfm, this.sigOf(def) + '|' + this.Q.tex]));
@@ -1018,7 +1034,7 @@ export class Viewer {
     this.drawCalls += this.renderer.info.render.calls; this.tris += this.renderer.info.render.triangles;
   }
   private fullVP(rt: THREE.WebGLRenderTarget) { rt.viewport.set(0, 0, rt.width, rt.height); rt.scissor.set(0, 0, rt.width, rt.height); rt.scissorTest = false; }
-  private bloomOn() { return this.Q.bloom && (this.light === 'night' || this.channel === 3 || this.hasEmissive() || (this.simOn && this.flashLight.intensity > 0.5) || this.particles.n > 0); }
+  private bloomOn() { return this.Q.bloom && (this.channel === 0 || this.channel === 3) && (this.light === 'night' || this.channel === 3 || this.hasEmissive() || (this.simOn && this.flashLight.intensity > 0.5) || this.particles.n > 0); }
 
   private loop(now: number) {
     if (this.lost || this.paused) return;
